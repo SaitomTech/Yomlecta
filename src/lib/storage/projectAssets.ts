@@ -2,7 +2,6 @@ import { appLocalDataDir, join } from '@tauri-apps/api/path'
 import {
   appLocalPathExists,
   ensureAppLocalDirectory,
-  readAppLocalDirectory,
   removeAppLocalPath,
 } from '../tauri/filesystem'
 
@@ -106,26 +105,6 @@ export async function removeProjectVideoRangeThumbnail(
   ).catch(() => undefined)
 }
 
-export async function prepareArticleInputDirectory(projectId: string, articleId: string) {
-  return prepareRelativeDirectory(articleAssetDirectory(projectId, articleId, 'input'))
-}
-
-export async function getArticleInputPath(
-  projectId: string,
-  articleId: string,
-  kind: 'original' | 'prepared',
-  extension = 'mp4',
-) {
-  assertFilePart(extension, '拡張子')
-  const directory = await prepareArticleInputDirectory(projectId, articleId)
-  return join(directory, `${kind}.${extension}`)
-}
-
-export async function getArticleInputThumbnailPath(projectId: string, articleId: string) {
-  const directory = await prepareArticleInputDirectory(projectId, articleId)
-  return join(directory, 'thumbnail.jpg')
-}
-
 export async function prepareSlideAssetDirectory(projectId: string, articleId: string) {
   return prepareArticleAssetDirectory(projectId, articleId, 'runs/current/slides')
 }
@@ -152,29 +131,6 @@ export async function removeCropDetectionDirectory(projectId: string) {
 
 export async function removeProjectSourceAssetDirectory(projectId: string) {
   await removeAppLocalPath(projectAssetDirectory(projectId, 'source')).catch(() => undefined)
-}
-
-export async function removeProjectSourceAsset(projectId: string, fileName: string) {
-  assertId(projectId, 'プロジェクトID')
-  if (!fileName || fileName === '.' || fileName === '..')
-    throw new Error('不正なsource asset名です。')
-  if (fileName !== fileName.split(/[\\/]/).pop()) throw new Error('不正なsource asset名です。')
-  await removeAppLocalPath(`${projectAssetDirectory(projectId, 'source')}/${fileName}`).catch(
-    () => undefined,
-  )
-}
-
-export async function listProjectSourceAssets(projectId: string) {
-  const relativeDirectory = projectAssetDirectory(projectId, 'source')
-  await ensureAppLocalDirectory(relativeDirectory)
-  const appDataDirectory = await appLocalDataDir()
-  const [directory, entries] = await Promise.all([
-    join(appDataDirectory, relativeDirectory),
-    readAppLocalDirectory(relativeDirectory),
-  ])
-  return Promise.all(
-    entries.filter((entry) => entry.isFile).map((entry) => join(directory, entry.name)),
-  )
 }
 
 export async function getSlideAssetPath(projectId: string, articleId: string, slideIndex: number) {

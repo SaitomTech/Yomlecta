@@ -10,8 +10,6 @@ const OCR_INSTRUCTION_TOKENS = 160
 const OCR_OUTPUT_TOKENS = 200
 const ARTICLE_INSTRUCTION_TOKENS = 3_000
 const ARTICLE_OUTPUT_MIN_TOKENS = 120
-const ALIGNMENT_INPUT_TOKENS_PER_CONTEXT = 1_800
-const ALIGNMENT_OUTPUT_TOKENS_PER_CONTEXT = 450
 const SUMMARY_INSTRUCTION_TOKENS = 500
 const SUMMARY_OUTPUT_TOKENS = 450
 const SECTIONS_INSTRUCTION_TOKENS = 700
@@ -89,14 +87,6 @@ export function estimateOpenAiArticleCost({
     0,
   )
   return costForTokens(inputTokens, outputTokens)
-}
-
-export function estimateOpenAiAlignmentCost(contextCount: number): OpenAiCostEstimate {
-  const count = Math.max(0, contextCount)
-  return costForTokens(
-    count * ALIGNMENT_INPUT_TOKENS_PER_CONTEXT,
-    count * ALIGNMENT_OUTPUT_TOKENS_PER_CONTEXT,
-  )
 }
 
 export function estimateOpenAiSummaryCost(articleCharacters: number): OpenAiCostEstimate {

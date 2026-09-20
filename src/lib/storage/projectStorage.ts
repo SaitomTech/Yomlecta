@@ -1,258 +1,72 @@
-import { z } from 'zod'
 import { parseMediaProject } from '../../schemas/project'
-import { syncActiveArticle, toPersistedProject } from '../project/project'
-import { buildProjectSummary } from '../project/projectProgress'
-import {
-  PROJECT_VERSION,
-  type MediaProject,
-  type ProjectListEntry,
-  type ProjectSummary,
+import type {
+  Article,
+  ArticleData,
+  MediaProject,
+  ProjectVideo,
+  SlideData,
+  SlideDetectionResult,
+  SlideOcrResult,
+  TranscriptionResult,
+  ProjectListEntry,
 } from '../../types/project'
 import {
-  appLocalFileExists,
   appLocalPathExists,
   ensureAppLocalDirectory,
   fileExists,
-  readAppLocalDirectory,
-  readAppLocalTextFile,
-  removeAppLocalPath,
   renameAppLocalPath,
   writeAppLocalTextFile,
 } from '../tauri/filesystem'
+import {
+  PROJECT_TRASH_DIRECTORY,
+  beginAssetTrashTransaction,
+  finishAssetTrashTransaction,
+  projectDirectory,
+  recoverAssetTrash,
+  recoverProjectTrash,
+  removeIfPresent,
+  restoreAssetTrashTransaction,
+} from './projectAssetTransactions'
+import { invokeDb } from '../tauri/db'
 
-// Project JSON version and directory layout version are independent markers.
-const STORAGE_LAYOUT_VERSION = 1
-const STORAGE_VERSION = `${PROJECT_VERSION}:${STORAGE_LAYOUT_VERSION}`
-const PROJECT_TRASH_DIRECTORY = 'project-trash'
-type AssetCollection = 'articles' | 'videos'
-type AssetTrashTransaction = {
-  operationRoot: string
-  sourcePath: string
-  trashPath: string
-  moved: boolean
-}
-type AssetTrashJournal = {
-  operationId: string
-  collection: AssetCollection
-  assetId: string
-  state: 'pending' | 'moved'
-}
-
-const ProjectSummarySchema = z.strictObject({
-  projectVersion: z.literal(PROJECT_VERSION),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  sourceName: z.string(),
-  sourcePath: z.string(),
-  extension: z.enum(['mp4', 'webm', 'mov', 'mkv', 'm4v']),
-  durationMs: z.number().nonnegative(),
-  slideCount: z.number().int().nonnegative(),
-  ocrCompleted: z.number().int().nonnegative(),
-  articleCompleted: z.number().int().nonnegative(),
-  articleTarget: z.number().int().nonnegative(),
-  videoCount: z.number().int().nonnegative(),
-  articleCount: z.number().int().nonnegative(),
-  thumbnailPath: z.string().min(1).optional(),
-  resumeStep: z.enum(['crop', 'detect-slides', 'generate-notes', 'article-review', 'export']),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-  lastOpenedAt: z.iso.datetime(),
-  health: z.enum(['ready', 'source-missing', 'needs-repair']),
-})
+const invoke = invokeDb
 
 let storageInitialization: Promise<void> | null = null
-const saveQueues = new Map<string, Promise<MediaProject>>()
-const projectMutationQueues = new Map<string, Promise<unknown>>()
+const projectRevisions = new Map<string, number>()
+const articleRevisions = new Map<string, number>()
+const documentRevisions = new Map<string, number>()
+const slideRevisions = new Map<string, number>()
+const ocrRevisions = new Map<string, number>()
 
-function enqueueProjectMutation<T>(projectId: string, operation: () => Promise<T>) {
-  const previous = projectMutationQueues.get(projectId) ?? Promise.resolve()
-  const next = previous.catch(() => undefined).then(operation)
-  projectMutationQueues.set(projectId, next)
-  return next.finally(() => {
-    if (projectMutationQueues.get(projectId) === next) projectMutationQueues.delete(projectId)
-  })
+type RevisionMap = Record<string, number>
+type LoadedProjectPayload = {
+  project: unknown
+  revision: number
+  articleRevisions?: RevisionMap
+  documentRevisions?: RevisionMap
+  slideRevisions?: RevisionMap
+  ocrRevisions?: RevisionMap
 }
 
-function assertProjectId(projectId: string) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) throw new Error('不正なプロジェクトIDです。')
-}
-
-function assertAssetId(assetId: string) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(assetId)) throw new Error('不正なアセットIDです。')
-}
-
-function projectDirectory(projectId: string) {
-  assertProjectId(projectId)
-  return `projects/${projectId}`
-}
-
-function projectPath(projectId: string) {
-  return `${projectDirectory(projectId)}/project.json`
-}
-
-function projectSummaryPath(projectId: string) {
-  return `${projectDirectory(projectId)}/project.summary.json`
-}
-
-function assetPath(projectId: string, collection: AssetCollection, assetId: string) {
-  assertAssetId(assetId)
-  return `${projectDirectory(projectId)}/${collection}/${assetId}`
-}
-
-async function removeIfPresent(path: string) {
-  if (!isSafeStoragePath(path)) throw new Error('不正なストレージパスです。')
-  if (await appLocalPathExists(path)) await removeAppLocalPath(path)
-}
-
-function isSafeStoragePath(path: string) {
-  return (
-    path === 'projects' ||
-    path === PROJECT_TRASH_DIRECTORY ||
-    path.startsWith('projects/') ||
-    path.startsWith(`${PROJECT_TRASH_DIRECTORY}/`)
-  )
-}
-
-async function recoverAtomicFile(path: string) {
-  const backupPath = `${path}.bak`
-  const temporaryPath = `${path}.tmp`
-  const [primaryExists, backupExists] = await Promise.all([
-    appLocalPathExists(path),
-    appLocalPathExists(backupPath),
-  ])
-  if (!primaryExists && backupExists) {
-    await renameAppLocalPath(backupPath, path)
+function applyRevisionSnapshot(projectId: string, loaded: LoadedProjectPayload) {
+  projectRevisions.set(projectId, loaded.revision)
+  for (const [key, map] of [
+    [articleRevisions, loaded.articleRevisions],
+    [documentRevisions, loaded.documentRevisions],
+    [slideRevisions, loaded.slideRevisions],
+    [ocrRevisions, loaded.ocrRevisions],
+  ] as const) {
+    for (const [id, revision] of Object.entries(map ?? {})) key.set(id, revision)
   }
-  if (await appLocalPathExists(temporaryPath)) await removeAppLocalPath(temporaryPath)
-}
-
-async function readProjectFile(path: string, projectId: string) {
-  const project = parseMediaProject(JSON.parse(await readAppLocalTextFile(path)))
-  if (project.id !== projectId) throw new Error('プロジェクトIDが一致しません。')
-  return project
-}
-
-async function readProjectWithBackup(projectId: string) {
-  const primaryPath = projectPath(projectId)
-  try {
-    return await readProjectFile(primaryPath, projectId)
-  } catch (primaryError) {
-    try {
-      const recovered = await readProjectFile(`${primaryPath}.bak`, projectId)
-      try {
-        if (await appLocalPathExists(primaryPath)) await removeAppLocalPath(primaryPath)
-        await renameAppLocalPath(`${primaryPath}.bak`, primaryPath)
-      } catch (recoveryError) {
-        console.warn('プロジェクトのバックアップを本体へ復旧できませんでした。', recoveryError)
-      }
-      return recovered
-    } catch {
-      throw primaryError
-    }
-  }
-}
-
-async function recoverAssetTrash(projectId: string) {
-  const trashRoot = `${projectDirectory(projectId)}/.trash`
-  if (!(await appLocalPathExists(trashRoot))) return
-  const operations = await readAppLocalDirectory(trashRoot)
-  for (const operation of operations.filter((entry) => entry.isDirectory)) {
-    try {
-      assertAssetId(operation.name)
-    } catch (error) {
-      console.warn('不正な削除トランザクションを復旧できません。', error)
-      continue
-    }
-    const operationRoot = `${trashRoot}/${operation.name}`
-    const journalPath = `${operationRoot}/operation.json`
-    let journal: AssetTrashJournal
-    try {
-      const parsed: unknown = JSON.parse(await readAppLocalTextFile(journalPath))
-      if (!parsed || typeof parsed !== 'object') throw new Error('journal is not an object')
-      const candidate = parsed as Partial<AssetTrashJournal>
-      if (
-        typeof candidate.operationId !== 'string' ||
-        (candidate.collection !== 'articles' && candidate.collection !== 'videos') ||
-        typeof candidate.assetId !== 'string' ||
-        (candidate.state !== 'pending' && candidate.state !== 'moved')
-      ) {
-        throw new Error('journal fields are invalid')
-      }
-      assertAssetId(candidate.assetId)
-      if (candidate.operationId !== operation.name) throw new Error('journal operation id mismatch')
-      journal = candidate as AssetTrashJournal
-    } catch (error) {
-      console.warn('不正な削除トランザクションを削除できませんでした。', error)
-      continue
-    }
-
-    const sourcePath = assetPath(projectId, journal.collection, journal.assetId)
-    const trashPath = `${operationRoot}/${journal.collection}/${journal.assetId}`
-    let project: MediaProject
-    try {
-      project = await readProjectWithBackup(projectId)
-    } catch (error) {
-      console.warn('削除トランザクションの復旧を保留しました。', error)
-      continue
-    }
-    const stillReferenced =
-      journal.collection === 'articles'
-        ? project.articles.some((article) => article.id === journal.assetId)
-        : project.videos.some((video) => video.id === journal.assetId)
-
-    if (
-      stillReferenced &&
-      (await appLocalPathExists(trashPath)) &&
-      !(await appLocalPathExists(sourcePath))
-    ) {
-      await ensureAppLocalDirectory(`${projectDirectory(projectId)}/${journal.collection}`)
-      await renameAppLocalPath(trashPath, sourcePath)
-    }
-    await removeIfPresent(operationRoot)
-  }
-}
-
-async function recoverStorageArtifacts() {
-  const projectEntries = await readAppLocalDirectory('projects')
-  const projectDirectories = projectEntries.filter((entry) => {
-    if (!entry.isDirectory || entry.name === '.trash') return false
-    try {
-      assertProjectId(entry.name)
-      return true
-    } catch (error) {
-      console.warn('不正なプロジェクトディレクトリを復旧対象から除外しました。', error)
-      return false
-    }
-  })
-  await Promise.all(
-    projectDirectories.map(async (entry) => {
-      await Promise.all([
-        recoverAtomicFile(projectPath(entry.name)),
-        recoverAtomicFile(projectSummaryPath(entry.name)),
-      ])
-      await recoverAssetTrash(entry.name)
-    }),
-  )
-  await removeIfPresent(PROJECT_TRASH_DIRECTORY)
 }
 
 async function initializeProjectStorage() {
   if (storageInitialization) return storageInitialization
+  // The Rust setup hook opens SQLite and applies migrations before this webview is interactive.
   const initialization = (async () => {
     await ensureAppLocalDirectory('projects')
-    const markerPath = 'projects/.storage-version'
-    const marker = (await appLocalFileExists(markerPath))
-      ? (await readAppLocalTextFile(markerPath)).trim()
-      : ''
-    const hasProjectData = (await readAppLocalDirectory('projects')).some(
-      (entry) => entry.name !== '.storage-version',
-    )
-    if (marker !== STORAGE_VERSION) {
-      if (marker || hasProjectData) await removeAppLocalPath('projects')
-      await ensureAppLocalDirectory('projects')
-      await writeAppLocalTextFile(markerPath, `${STORAGE_VERSION}\n`)
-    }
-    await recoverStorageArtifacts()
+    await recoverProjectTrash()
+    await recoverAssetTrash()
   })()
   storageInitialization = initialization.catch((error) => {
     storageInitialization = null
@@ -261,142 +75,427 @@ async function initializeProjectStorage() {
   return storageInitialization
 }
 
-async function atomicWrite(path: string, contents: string) {
-  const temporaryPath = `${path}.tmp`
-  const backupPath = `${path}.bak`
-  const hadOriginal = await appLocalPathExists(path)
-  await writeAppLocalTextFile(temporaryPath, contents)
-  try {
-    if (hadOriginal) {
-      if (await appLocalPathExists(backupPath)) await removeAppLocalPath(backupPath)
-      await renameAppLocalPath(path, backupPath)
-    }
-    await renameAppLocalPath(temporaryPath, path)
-  } catch (error) {
-    await removeIfPresent(temporaryPath).catch(() => undefined)
-    if (
-      hadOriginal &&
-      !(await appLocalPathExists(path)) &&
-      (await appLocalPathExists(backupPath))
-    ) {
-      await renameAppLocalPath(backupPath, path).catch(() => undefined)
-    }
-    throw error
-  }
-  await removeIfPresent(backupPath).catch((error) => {
-    console.warn('古いプロジェクトバックアップを削除できませんでした。', error)
-  })
-}
-
-async function writeProjectSummary(project: MediaProject) {
-  await atomicWrite(
-    projectSummaryPath(project.id),
-    `${JSON.stringify(buildProjectSummary(project), null, 2)}\n`,
-  )
-}
-
-async function saveProjectNow(project: MediaProject): Promise<MediaProject> {
+export async function createProject(project: MediaProject) {
   await initializeProjectStorage()
-  const synced = syncActiveArticle(project)
-  await ensureAppLocalDirectory(projectDirectory(project.id))
-  await atomicWrite(
-    projectPath(project.id),
-    `${JSON.stringify(toPersistedProject(synced), null, 2)}\n`,
-  )
-  await writeProjectSummary(synced).catch((error) =>
-    console.warn('プロジェクト一覧情報を更新できませんでした。', error),
-  )
-  return synced
+  await invoke('db_create_project', {
+    projectId: project.id,
+    title: project.title,
+    version: project.version,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  })
+  projectRevisions.set(project.id, 0)
+  return project
 }
 
-export async function saveProject(project: MediaProject): Promise<MediaProject> {
-  const previous = saveQueues.get(project.id) ?? Promise.resolve(project)
-  const next = previous.catch(() => project).then(() => saveProjectNow(project))
-  saveQueues.set(project.id, next)
-  try {
-    return await next
-  } finally {
-    if (saveQueues.get(project.id) === next) saveQueues.delete(project.id)
-  }
+export async function updateProject(project: MediaProject) {
+  await initializeProjectStorage()
+  const result = await invoke<{ revision: number }>('db_update_project', {
+    projectId: project.id,
+    title: project.title,
+    activeArticleId: project.activeArticleId ?? null,
+    updatedAt: project.updatedAt,
+    expectedRevision: projectRevisions.get(project.id),
+  })
+  projectRevisions.set(project.id, result.revision)
+  return project
 }
 
-export async function saveProjectWithCreatedAssets(
+export async function updateArticleTitle(project: MediaProject, article: Article) {
+  await initializeProjectStorage()
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    documentRevision: number
+  }>('db_update_article_title', {
+    projectId: project.id,
+    articleId: article.id,
+    title: article.title,
+    updatedAt: article.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(article.id),
+    expectedDocumentRevision: documentRevisions.get(article.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(article.id, result.articleRevision)
+  documentRevisions.set(article.id, result.documentRevision)
+  return result
+}
+
+export async function updateArticleWorkflow(project: MediaProject, article: Article) {
+  await initializeProjectStorage()
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+  }>('db_update_article_workflow', {
+    projectId: project.id,
+    articleId: article.id,
+    activeArticleId: project.activeArticleId ?? null,
+    workflow: article.workflow,
+    updatedAt: article.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(article.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(article.id, result.articleRevision)
+  return result
+}
+
+export async function updateArticleContent(
   project: MediaProject,
-  assets: Array<{ collection: AssetCollection; assetId: string }>,
+  article: Article,
+  slides: SlideData[],
 ) {
-  try {
-    return await saveProject(project)
-  } catch (error) {
-    const cleanupErrors: unknown[] = []
-    await Promise.all(
-      assets.map(async ({ collection, assetId }) => {
-        try {
-          await removeIfPresent(assetPath(project.id, collection, assetId))
-        } catch (cleanupError) {
-          cleanupErrors.push(cleanupError)
-        }
-      }),
-    )
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        [error, ...cleanupErrors],
-        '保存に失敗したアセットの回収にも失敗しました。',
-      )
-    }
-    throw error
+  await initializeProjectStorage()
+  const expectedSlideRevisions = Object.fromEntries(
+    slides.map((slide) => [slide.id, slideRevisions.get(slide.id) ?? 0]),
+  )
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    documentRevision: number
+    slideRevisions: Array<{ id: string; revision: number }>
+  }>('db_update_article_content', {
+    projectId: project.id,
+    projectUpdatedAt: project.updatedAt,
+    article,
+    slides,
+    expectedSlideRevisions,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(article.id),
+    expectedDocumentRevision: documentRevisions.get(article.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(article.id, result.articleRevision)
+  documentRevisions.set(article.id, result.documentRevision)
+  for (const revision of result.slideRevisions) slideRevisions.set(revision.id, revision.revision)
+  return result
+}
+
+export async function createVideoAndUpdateProject(project: MediaProject, video: ProjectVideo) {
+  await initializeProjectStorage()
+  const result = await invoke<{ projectRevision: number }>('db_create_video_and_update_project', {
+    projectId: project.id,
+    video,
+    updatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  return result
+}
+
+export async function createProjectBundle(
+  project: MediaProject,
+  video: ProjectVideo,
+  article: Article,
+) {
+  await initializeProjectStorage()
+  await invoke('db_create_project_bundle', { project, video, article })
+  projectRevisions.set(project.id, 0)
+  articleRevisions.set(article.id, 0)
+  documentRevisions.set(article.id, 0)
+}
+
+export async function createArticles(project: MediaProject, articles: Article[]) {
+  await initializeProjectStorage()
+  const result = await invoke<{ projectRevision: number }>('db_create_articles', {
+    projectId: project.id,
+    articles,
+    updatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  for (const article of articles) {
+    articleRevisions.set(article.id, 0)
+    documentRevisions.set(article.id, 0)
   }
+  return result
+}
+
+export async function updateArticleSource(
+  project: MediaProject,
+  article: Article,
+  options: { expectedDocumentRevision?: number } = {},
+) {
+  await initializeProjectStorage()
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    documentRevision: number
+    removedSlideIds: string[]
+  }>('db_update_article_source', {
+    projectId: project.id,
+    articleId: article.id,
+    sourceRange: article.sourceRange,
+    crop: article.crop ?? null,
+    perspectiveCrop: article.perspectiveCrop ?? null,
+    workflow: article.workflow,
+    updatedAt: article.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(article.id),
+    expectedDocumentRevision: options.expectedDocumentRevision ?? documentRevisions.get(article.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(article.id, result.articleRevision)
+  documentRevisions.set(article.id, result.documentRevision)
+  for (const slideId of result.removedSlideIds) {
+    slideRevisions.delete(slideId)
+    ocrRevisions.delete(slideId)
+  }
+  return result
+}
+
+function runId() {
+  return crypto.randomUUID()
+}
+
+export async function commitSlideDetection(
+  project: MediaProject,
+  detectionResult: SlideDetectionResult,
+  slides: SlideData[],
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideRevisions?: Array<{ id: string; revision: number }>
+  }>('db_commit_slide_detection', {
+    articleId,
+    runId: runId(),
+    result: detectionResult,
+    slides,
+    article,
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedRevision: articleRevisions.get(articleId),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(articleId, result.articleRevision)
+  for (const revision of result.slideRevisions ?? [])
+    slideRevisions.set(revision.id, revision.revision)
+  return result
+}
+
+export async function commitTranscription(
+  project: MediaProject,
+  transcription: TranscriptionResult,
+  slides: SlideData[],
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideRevisions?: Array<{ id: string; revision: number }>
+  }>('db_commit_transcription', {
+    articleId,
+    runId: runId(),
+    transcription,
+    slides,
+    article,
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedRevision: articleRevisions.get(articleId),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(articleId, result.articleRevision)
+  for (const revision of result.slideRevisions ?? [])
+    slideRevisions.set(revision.id, revision.revision)
+  return result
+}
+
+export async function commitOcr(
+  project: MediaProject,
+  slideId: string,
+  ocr: SlideOcrResult,
+  transcript: NonNullable<SlideData['transcript']> | undefined,
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideId: string
+    slideRevision: number
+    ocrId: string
+    ocrRevision: number
+  }>('db_commit_ocr', {
+    articleId,
+    slideId,
+    runId: runId(),
+    ocrResultId: runId(),
+    ocr,
+    transcript: transcript ?? null,
+    article,
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedRevision: articleRevisions.get(articleId),
+    expectedSlideRevision: slideRevisions.get(slideId),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(articleId, result.articleRevision)
+  slideRevisions.set(result.slideId, result.slideRevision)
+  ocrRevisions.set(result.slideId, result.ocrRevision)
+  return result
+}
+
+export async function commitSlideContent(
+  project: MediaProject,
+  slideId: string,
+  contentResult: unknown,
+  transcript: NonNullable<SlideData['transcript']>,
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideId: string
+    revision: number
+  }>('db_commit_slide_content', {
+    articleId,
+    slideId,
+    runId: runId(),
+    result: contentResult,
+    transcript,
+    article,
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(articleId),
+    expectedRevision: slideRevisions.get(slideId),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(articleId, result.articleRevision)
+  slideRevisions.set(result.slideId, result.revision)
+  return result
+}
+
+export async function updateSlideResults(
+  project: MediaProject,
+  slideId: string,
+  transcript: NonNullable<SlideData['transcript']> | undefined,
+  ocr: SlideOcrResult | undefined,
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideId: string
+    slideRevision: number
+    ocr?: { ocrId: string; revision: number }
+  }>('db_update_slide_results', {
+    articleId,
+    slideId,
+    transcript: transcript ?? null,
+    ocrText: ocr?.rawText ?? null,
+    article,
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(articleId),
+    expectedSlideRevision: slideRevisions.get(slideId),
+    expectedOcrRevision: ocr ? ocrRevisions.get(slideId) : null,
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(articleId, result.articleRevision)
+  slideRevisions.set(result.slideId, result.slideRevision)
+  if (result.ocr) ocrRevisions.set(result.slideId, result.ocr.revision)
+  return result
+}
+
+export async function updateDocumentAndArticle(
+  project: MediaProject,
+  article: Article,
+  articleData: ArticleData | undefined,
+  options: { runKind?: 'summary_generation' | 'chapter_generation' } = {},
+) {
+  await initializeProjectStorage()
+  const result = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    documentRevision: number
+  }>('db_update_document_and_article', {
+    projectId: project.id,
+    projectUpdatedAt: project.updatedAt,
+    article,
+    articleData: articleData ?? null,
+    ...(options.runKind ? { runId: runId(), runKind: options.runKind } : {}),
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(article.id),
+    expectedDocumentRevision: documentRevisions.get(article.id),
+  })
+  projectRevisions.set(project.id, result.projectRevision)
+  articleRevisions.set(article.id, result.articleRevision)
+  documentRevisions.set(article.id, result.documentRevision)
+  return result
+}
+
+export async function checkStorageReference(
+  referenceType: 'project' | 'article' | 'video',
+  projectId: string,
+  assetId?: string,
+) {
+  return invoke<{ referenced: boolean }>('db_check_storage_reference', {
+    referenceType,
+    projectId,
+    assetId: assetId ?? null,
+  })
 }
 
 export async function loadProject(projectId: string) {
   await initializeProjectStorage()
-  return readProjectWithBackup(projectId)
-}
-
-function parseSummary(value: unknown, projectId: string): ProjectSummary {
-  const summary = ProjectSummarySchema.parse(value)
-  if (summary.id !== projectId) throw new Error('プロジェクトIDが一致しません。')
-  return summary
-}
-
-async function projectEntries() {
-  await initializeProjectStorage()
-  await ensureAppLocalDirectory('projects')
-  return (await readAppLocalDirectory('projects')).filter(
-    (entry) =>
-      entry.isDirectory && entry.name !== PROJECT_TRASH_DIRECTORY && entry.name !== '.trash',
-  )
-}
-
-async function readProjectEntry(projectId: string): Promise<ProjectListEntry> {
-  try {
-    const summaryFile = projectSummaryPath(projectId)
-    let summary: ProjectSummary
-    if (await appLocalFileExists(summaryFile)) {
-      try {
-        summary = parseSummary(JSON.parse(await readAppLocalTextFile(summaryFile)), projectId)
-      } catch {
-        summary = buildProjectSummary(await loadProject(projectId))
-      }
-    } else {
-      summary = buildProjectSummary(await loadProject(projectId))
-    }
-    const sourceExists = summary.sourcePath ? await fileExists(summary.sourcePath) : true
-    return {
-      kind: 'project',
-      summary: { ...summary, health: sourceExists ? summary.health : 'needs-repair' },
-    }
-  } catch (error) {
-    return {
-      kind: 'invalid',
-      id: projectId,
-      error: error instanceof Error ? error.message : 'プロジェクトを読み込めませんでした。',
-    }
-  }
+  const loaded = await invoke<LoadedProjectPayload>('db_load_project', {
+    projectId,
+  })
+  const project = parseMediaProject(loaded.project)
+  applyRevisionSnapshot(projectId, loaded)
+  return project
 }
 
 export async function listProjects() {
-  const entries = await projectEntries()
-  const projects = await Promise.all(entries.map((entry) => readProjectEntry(entry.name)))
+  await initializeProjectStorage()
+  const persistedProjects = await invoke<ProjectListEntry[]>('db_list_projects')
+  const projects = await Promise.all(
+    persistedProjects.map(async (entry): Promise<ProjectListEntry> => {
+      if (entry.kind === 'invalid') return entry
+      const sourceExists = entry.summary.sourcePath
+        ? await fileExists(entry.summary.sourcePath)
+        : true
+      return {
+        ...entry,
+        summary: {
+          ...entry.summary,
+          health: sourceExists ? entry.summary.health : 'needs-repair',
+        },
+      }
+    }),
+  )
   return projects.sort((first, second) => {
     const a = first.kind === 'project' ? first.summary.lastOpenedAt : ''
     const b = second.kind === 'project' ? second.summary.lastOpenedAt : ''
@@ -404,146 +503,87 @@ export async function listProjects() {
   })
 }
 
-async function beginAssetTrashTransaction(
-  projectId: string,
-  collection: AssetCollection,
-  assetId: string,
-): Promise<AssetTrashTransaction> {
+export async function deleteProjectArticle(project: MediaProject, articleId: string) {
   await initializeProjectStorage()
-  assertAssetId(assetId)
-  const operationId = crypto.randomUUID()
-  const operationRoot = `${projectDirectory(projectId)}/.trash/${operationId}`
-  const sourcePath = assetPath(projectId, collection, assetId)
-  const trashPath = `${operationRoot}/${collection}/${assetId}`
-  const transaction = { operationRoot, sourcePath, trashPath, moved: false }
+  const transaction = await beginAssetTrashTransaction(project.id, 'articles', articleId)
   try {
-    await ensureAppLocalDirectory(operationRoot)
-    await writeAppLocalTextFile(
-      `${operationRoot}/operation.json`,
-      `${JSON.stringify({ operationId, collection, assetId, state: 'pending' } satisfies AssetTrashJournal)}\n`,
-    )
-    transaction.moved = await appLocalPathExists(sourcePath)
-    if (transaction.moved) {
-      await ensureAppLocalDirectory(`${operationRoot}/${collection}`)
-      await renameAppLocalPath(sourcePath, trashPath)
-      await writeAppLocalTextFile(
-        `${operationRoot}/operation.json`,
-        `${JSON.stringify({ operationId, collection, assetId, state: 'moved' } satisfies AssetTrashJournal)}\n`,
-      )
-    }
-    return transaction
-  } catch (error) {
-    try {
-      await restoreAssetTrashTransaction(transaction)
-    } catch (restoreError) {
-      throw new AggregateError([error, restoreError], 'アセット退避の復旧に失敗しました。')
-    } finally {
-      await finishAssetTrashTransaction(transaction)
-    }
-    throw error
-  }
-}
-
-async function restoreAssetTrashTransaction(transaction: AssetTrashTransaction) {
-  if (!transaction.moved || !(await appLocalPathExists(transaction.trashPath))) return
-  if (await appLocalPathExists(transaction.sourcePath)) {
-    await removeAppLocalPath(transaction.trashPath)
-    return
-  }
-  const parent = transaction.sourcePath.slice(0, transaction.sourcePath.lastIndexOf('/'))
-  await ensureAppLocalDirectory(parent)
-  await renameAppLocalPath(transaction.trashPath, transaction.sourcePath)
-}
-
-async function finishAssetTrashTransaction(transaction: AssetTrashTransaction) {
-  await removeIfPresent(transaction.operationRoot).catch((error) => {
-    console.warn('削除済みアセットの一時退避領域を削除できませんでした。', error)
-  })
-}
-
-async function deleteProjectAssetNow(
-  project: MediaProject,
-  collection: AssetCollection,
-  assetId: string,
-  update: (current: MediaProject) => MediaProject,
-) {
-  assertAssetId(assetId)
-  const current = await loadProject(project.id)
-  const exists =
-    collection === 'articles'
-      ? current.articles.some((article) => article.id === assetId)
-      : current.videos.some((video) => video.id === assetId)
-  if (!exists) return current
-  const transaction = await beginAssetTrashTransaction(current.id, collection, assetId)
-  try {
-    const next = await saveProject(update(current))
+    await invoke('db_delete_article', { projectId: project.id, articleId })
     await finishAssetTrashTransaction(transaction)
-    return next
+    return loadProject(project.id)
   } catch (error) {
-    try {
-      await restoreAssetTrashTransaction(transaction)
+    const reference = await checkStorageReference('article', project.id, articleId).catch(
+      () => null,
+    )
+    if (reference?.referenced === true) {
+      await restoreAssetTrashTransaction(transaction).catch((restoreError) => {
+        throw new AggregateError([error, restoreError], '記事削除のロールバックに失敗しました。')
+      })
       await finishAssetTrashTransaction(transaction)
-    } catch (restoreError) {
-      throw new AggregateError([error, restoreError], 'アセット削除のロールバックに失敗しました。')
+    } else if (reference?.referenced === false) {
+      await finishAssetTrashTransaction(transaction)
     }
     throw error
   }
 }
 
-export function deleteProjectArticle(project: MediaProject, articleId: string) {
-  return enqueueProjectMutation(project.id, () =>
-    deleteProjectAssetNow(project, 'articles', articleId, (current) => {
-      const articles = current.articles.filter((article) => article.id !== articleId)
-      const activeArticleId =
-        current.activeArticleId === articleId ? articles[0]?.id : current.activeArticleId
-      const next = { ...current, articles, activeArticleId, updatedAt: new Date().toISOString() }
-      if (activeArticleId && activeArticleId !== current.activeArticleId) {
-        const activeArticle = articles.find((article) => article.id === activeArticleId)
-        if (activeArticle) {
-          return {
-            ...next,
-            activeArticleId,
-            source: activeArticle.inputMedia,
-            sourceRange: activeArticle.sourceRange,
-            crop: activeArticle.crop,
-            perspectiveCrop: activeArticle.perspectiveCrop,
-            settings: activeArticle.settings,
-            slides: activeArticle.slides,
-            slideDetection: activeArticle.slideDetection,
-            transcription: activeArticle.transcription,
-            article: activeArticle.article,
-            workflow: activeArticle.workflow,
-          }
-        }
-      }
-      return next
-    }),
-  )
-}
-
-export function deleteProjectVideo(project: MediaProject, videoId: string) {
-  return enqueueProjectMutation(project.id, () =>
-    deleteProjectAssetNow(project, 'videos', videoId, (current) => ({
-      ...current,
-      videos: current.videos.filter((video) => video.id !== videoId),
-      articles: current.articles.map((article) =>
-        article.sourceVideoId === videoId ? { ...article, sourceVideoId: undefined } : article,
-      ),
-      updatedAt: new Date().toISOString(),
-    })),
-  )
+export async function deleteProjectVideo(project: MediaProject, videoId: string) {
+  await initializeProjectStorage()
+  const transaction = await beginAssetTrashTransaction(project.id, 'videos', videoId)
+  try {
+    await invoke('db_delete_video', { projectId: project.id, videoId })
+    await finishAssetTrashTransaction(transaction)
+    return loadProject(project.id)
+  } catch (error) {
+    const reference = await checkStorageReference('video', project.id, videoId).catch(() => null)
+    if (reference?.referenced === true) {
+      await restoreAssetTrashTransaction(transaction).catch((restoreError) => {
+        throw new AggregateError([error, restoreError], '動画削除のロールバックに失敗しました。')
+      })
+      await finishAssetTrashTransaction(transaction)
+    } else if (reference?.referenced === false) {
+      await finishAssetTrashTransaction(transaction)
+    }
+    throw error
+  }
 }
 
 export async function deleteProject(projectId: string) {
-  await enqueueProjectMutation(projectId, async () => {
-    await initializeProjectStorage()
-    const sourcePath = projectDirectory(projectId)
-    if (!(await appLocalPathExists(sourcePath))) return
-    const trashPath = `${PROJECT_TRASH_DIRECTORY}/${projectId}-${crypto.randomUUID()}`
-    await ensureAppLocalDirectory(PROJECT_TRASH_DIRECTORY)
-    await renameAppLocalPath(sourcePath, trashPath)
-    await removeIfPresent(trashPath).catch((error) => {
-      console.warn('削除済みプロジェクトの一時退避領域を削除できませんでした。', error)
-    })
-  })
+  await initializeProjectStorage()
+  const sourcePath = projectDirectory(projectId)
+  const hasAssets = await appLocalPathExists(sourcePath)
+  const trashPath = `${PROJECT_TRASH_DIRECTORY}/${projectId}`
+  try {
+    if (hasAssets) {
+      await ensureAppLocalDirectory(PROJECT_TRASH_DIRECTORY)
+      await renameAppLocalPath(sourcePath, trashPath)
+      await writeAppLocalTextFile(
+        `${trashPath}/operation.json`,
+        `${JSON.stringify({ projectId, state: 'moved' })}\n`,
+      )
+    }
+    await invoke('db_delete_project', { projectId })
+  } catch (error) {
+    const reference = await checkStorageReference('project', projectId).catch(() => null)
+    if (hasAssets && reference?.referenced === true) {
+      await ensureAppLocalDirectory('projects')
+      await renameAppLocalPath(trashPath, sourcePath).catch((restoreError) => {
+        throw new AggregateError(
+          [error, restoreError],
+          'プロジェクト削除のロールバックに失敗しました。',
+        )
+      })
+      await removeIfPresent(`${sourcePath}/operation.json`).catch(() => undefined)
+    } else if (hasAssets && reference?.referenced === false) {
+      await removeIfPresent(trashPath)
+    }
+    throw error
+  }
+  if (hasAssets) {
+    try {
+      await removeIfPresent(trashPath)
+    } catch (error) {
+      console.warn('削除済みプロジェクトのasset領域を削除できませんでした。', error)
+    }
+  }
+  projectRevisions.delete(projectId)
 }

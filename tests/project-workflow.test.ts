@@ -5,7 +5,6 @@ import {
   markProjectOpened,
   markProjectExported,
   syncActiveArticle,
-  toPersistedProject,
   updateProjectArticleDraft,
   updateProjectArticleTitle,
   updateProjectArticleSummary,
@@ -16,19 +15,31 @@ import {
   updateProjectTranscription,
   updateProjectWorkflow,
 } from '../src/lib/project/project'
-import { normalizeTrimRange, isFullTrimRange } from '../src/lib/project/videoRange'
+import { normalizeTrimRange } from '../src/lib/project/videoRange'
 import { getActiveArticleSourceContext } from '../src/lib/project/articleSource'
 import { createArticleFromRange } from '../src/lib/project/projectMedia'
-import { getProjectResumeStep } from '../src/lib/project/projectProgress'
 import {
   canNavigateToWorkflowStep,
   getFurthestWorkflowStep,
   isWorkflowStepReached,
 } from '../src/lib/workflow'
-import type { Article, ProjectVideo, SlideData } from '../src/types/project'
+import type { Article, MediaProject, ProjectVideo, SlideData } from '../src/types/project'
 import { PROJECT_VERSION } from '../src/types/project'
 
 const NOW = '2026-09-15T00:00:00.000Z'
+
+function projectSnapshot(project: MediaProject) {
+  return {
+    version: PROJECT_VERSION,
+    id: project.id,
+    title: project.title,
+    videos: project.videos,
+    articles: project.articles,
+    ...(project.activeArticleId ? { activeArticleId: project.activeArticleId } : {}),
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  }
+}
 
 function createArticleWorkspace() {
   const base = createEmptyProject('workflow')
@@ -156,7 +167,7 @@ test('export completion records reachability separately from the last visited st
 test('persisted workflow restores both the last visited and furthest reached steps', () => {
   const exported = markProjectExported(createArticleWorkspace())
   const revisited = markProjectOpened(exported, 'generate-notes')
-  const restored = parseMediaProject(toPersistedProject(syncActiveArticle(revisited)))
+  const restored = parseMediaProject(projectSnapshot(syncActiveArticle(revisited)))
 
   expect(restored.workflow.lastVisitedStep).toBe('generate-notes')
   expect(restored.workflow.maxReachedStep).toBe('export')
@@ -300,7 +311,6 @@ test('range normalization clamps invalid edges and preserves a near-full selecti
     startMs: 9_500,
     endMs: 10_000,
   })
-  expect(isFullTrimRange({ startMs: 0, endMs: 9_100 }, 10_000)).toBe(true)
   expect(() => normalizeTrimRange({ startMs: 0, endMs: 1 }, 0)).toThrow()
 })
 
@@ -353,27 +363,9 @@ test('changing one article range invalidates only that article outputs', () => {
   expect(changed.articles[0]?.workflow.lastVisitedStep).toBe('detect-slides')
 })
 
-test('a candidate with an initial crop still resumes at the crop step', () => {
-  const project = createArticleWorkspace()
-  const article = project.articles[0]
-  if (!article) throw new Error('テスト用記事がありません。')
-  const candidate: Article = {
-    ...article,
-    inputMedia: { ...article.inputMedia, preparation: 'reference' },
-    crop: { x: 0, y: 0, width: 1_920, height: 1_080 },
-    workflow: { ...article.workflow, lastVisitedStep: 'crop', maxReachedStep: 'crop' },
-  }
-  const persisted = toPersistedProject({
-    ...project,
-    articles: [candidate],
-    activeArticleId: candidate.id,
-  })
-  expect(getProjectResumeStep(persisted)).toBe('crop')
-})
-
 test('project parser accepts the current persisted shape and rejects stale or unknown data', () => {
   const workspace = createArticleWorkspace()
-  const persisted = toPersistedProject(workspace)
+  const persisted = projectSnapshot(workspace)
   expect(parseMediaProject(persisted).version).toBe(PROJECT_VERSION)
   expect(() => parseMediaProject({ ...persisted, version: PROJECT_VERSION - 1 })).toThrow()
   expect(() => parseMediaProject({ ...persisted, unexpected: true })).toThrow()

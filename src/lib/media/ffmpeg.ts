@@ -3,11 +3,6 @@ import type { CropRegion, MediaMetadata, PerspectiveCrop } from '../../types/pro
 import type { VideoFormatAdjustment } from '../../types/media'
 import { computeAverageLuma, computeDHash } from './dhash'
 
-/** Runs the bundled ffmpeg with an argument array; callers never build a shell command string. */
-export function runFfmpeg(args: string[]) {
-  return executeSidecar('binaries/ffmpeg', args)
-}
-
 export async function extractVideoThumbnail(path: string, outputPath: string, timestampMs = 0) {
   const seekArgs = timestampMs > 0 ? ['-ss', String(timestampMs / 1000)] : []
   const output = await executeSidecar('binaries/ffmpeg', [
@@ -80,17 +75,6 @@ type ExtractAudioChunkInput = {
   outputPath: string
   startMs: number
   durationMs: number
-  signal?: AbortSignal
-}
-
-type TrimVideoInput = {
-  path: string
-  outputPath: string
-  startMs: number
-  endMs: number
-  crop?: CropRegion
-  perspectiveCrop?: PerspectiveCrop
-  metadata?: Pick<MediaMetadata, 'width' | 'height'>
   signal?: AbortSignal
 }
 
@@ -410,75 +394,6 @@ export async function convertVideoForWebView({
   return outputPath
 }
 
-/** Creates a frame-accurate, browser-friendly MP4 copy for the selected time range. */
-export async function trimVideo({
-  path,
-  outputPath,
-  startMs,
-  endMs,
-  crop,
-  perspectiveCrop,
-  metadata,
-  signal,
-}: TrimVideoInput) {
-  const startSeconds = Math.max(0, startMs / 1000)
-  const durationSeconds = Math.max(0.001, (endMs - startMs) / 1000)
-  if (!Number.isFinite(startSeconds) || !Number.isFinite(durationSeconds) || endMs <= startMs) {
-    throw new Error('動画のトリミング範囲が不正です')
-  }
-
-  const videoFilter =
-    crop && metadata
-      ? `${buildCropVideoFilter({ crop, perspectiveCrop, metadata })}${perspectiveCrop ? '' : ',scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1'}`
-      : undefined
-
-  const output = await executeSidecar(
-    'binaries/ffmpeg',
-    [
-      '-hide_banner',
-      '-v',
-      'error',
-      '-i',
-      path,
-      '-ss',
-      String(startSeconds),
-      '-t',
-      String(durationSeconds),
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a:0?',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '18',
-      ...(videoFilter ? ['-vf', videoFilter] : []),
-      '-c:a',
-      'aac',
-      '-b:a',
-      '160k',
-      '-sn',
-      '-dn',
-      '-avoid_negative_ts',
-      'make_zero',
-      '-movflags',
-      '+faststart',
-      '-y',
-      outputPath,
-    ],
-    { signal },
-  )
-
-  if (output.code !== 0) {
-    const detail = output.stderr.trim()
-    throw new Error(detail || `動画のトリミングに失敗しました (code ${output.code})`)
-  }
-
-  return outputPath
-}
-
 /** Creates a compact upload copy while preserving the local WAV used by whisper.cpp. */
 export async function extractAudioChunkForOpenAi({
   path,
@@ -519,48 +434,6 @@ export async function extractAudioChunkForOpenAi({
   if (output.code !== 0) {
     const detail = output.stderr.trim()
     throw new Error(detail || `OpenAI送信用音声の準備に失敗しました (code ${output.code})`)
-  }
-
-  return outputPath
-}
-
-export async function extractAudioChunkForLocalTranscription({
-  path,
-  outputPath,
-  startMs,
-  durationMs,
-  signal,
-}: ExtractAudioChunkInput) {
-  const output = await executeSidecar(
-    'binaries/ffmpeg',
-    [
-      '-hide_banner',
-      '-v',
-      'error',
-      '-ss',
-      String(Math.max(0, startMs / 1000)),
-      '-i',
-      path,
-      '-t',
-      String(Math.max(0.001, durationMs / 1000)),
-      '-vn',
-      '-sn',
-      '-dn',
-      '-ac',
-      '1',
-      '-ar',
-      '16000',
-      '-c:a',
-      'pcm_s16le',
-      '-y',
-      outputPath,
-    ],
-    { signal },
-  )
-
-  if (output.code !== 0) {
-    const detail = output.stderr.trim()
-    throw new Error(detail || `ローカル文字起こし用音声の準備に失敗しました (code ${output.code})`)
   }
 
   return outputPath

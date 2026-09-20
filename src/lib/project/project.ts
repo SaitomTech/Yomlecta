@@ -136,19 +136,6 @@ export function syncActiveArticle(project: MediaProject): MediaProject {
   }
 }
 
-export function toPersistedProject(project: MediaProject) {
-  return {
-    version: PROJECT_VERSION,
-    id: project.id,
-    title: project.title,
-    videos: project.videos,
-    articles: project.articles,
-    ...(project.activeArticleId ? { activeArticleId: project.activeArticleId } : {}),
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-  }
-}
-
 export function createEmptyProject(title: string, projectId = crypto.randomUUID()): MediaProject {
   const now = new Date().toISOString()
   const placeholder: MediaSource = {

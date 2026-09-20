@@ -59,9 +59,8 @@ export type VideoTrimRange = { startMs: number; endMs: number }
 /**
  * The media a generated article reads from.
  *
- * New articles reference the project-owned original video directly.  The
- * optional preparation fields remain for backwards compatibility with
- * projects created before the reference-based workflow was introduced.
+ * New articles reference the project-owned original video directly and keep
+ * the preparation metadata used by the current processing pipeline.
  */
 export type ArticleInputMedia = ManagedMedia & {
   preparedFromVideoId?: string
@@ -240,7 +239,7 @@ export type ProjectSummary = {
 export type ProjectListEntry =
   | { kind: 'project'; summary: ProjectSummary }
   | { kind: 'invalid'; id: string; error: string }
-/** Fields written to project.json. Workspace-only fields are intentionally excluded. */
+/** Stable project fields retained by the SQLite-backed project DTO. */
 export type PersistedProject = {
   version: number
   id: string

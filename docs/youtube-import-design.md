@@ -2,6 +2,8 @@
 
 設計・2026-09-09。旧案を置き換える。実装済みの方針を記録する。
 
+プロジェクトメタデータの正本は現在`project.json`ではなく`AppLocalData/library/library.sqlite`です。動画assetの配置とインポート処理はこの文書の説明を使い、保存commandとDB台帳は[SQLite永続化設計](./sqlite-detailed-design.md)を参照してください。
+
 ## 1. 達成する目的
 
 公開済みの単一YouTube動画について、映像と音声を含むローカル動画を1本取得し、
@@ -117,9 +119,9 @@ yt-dlp
 ## 6. 保存物と結果の扱い
 
 ```text
+AppLocalData/
+  library/library.sqlite
 projects/<projectId>/
-  project.json
-  project.summary.json
   source/
     source.mp4 または source.<yt-dlpが選んだ拡張子>
 ```

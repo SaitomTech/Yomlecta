@@ -46,9 +46,6 @@
           "path": "$APPLOCALDATA/projects/*/.trash/**/*"
         },
         {
-          "path": "$APPLOCALDATA/projects/.storage-version"
-        },
-        {
           "path": "$APPLOCALDATA/project-trash"
         },
         {
@@ -182,7 +179,6 @@
       "identifier": "fs:allow-read-text-file",
       "allow": [
         { "path": "$APPLOCALDATA/projects" },
-        { "path": "$APPLOCALDATA/projects/.storage-version" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
@@ -194,7 +190,6 @@
       "identifier": "fs:allow-write-text-file",
       "allow": [
         { "path": "$APPLOCALDATA/projects" },
-        { "path": "$APPLOCALDATA/projects/.storage-version" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
@@ -209,7 +204,6 @@
       "identifier": "fs:allow-read-file",
       "allow": [
         { "path": "$APPLOCALDATA/projects" },
-        { "path": "$APPLOCALDATA/projects/.storage-version" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
         { "path": "$APPLOCALDATA/models/**/*" }
@@ -219,7 +213,6 @@
       "identifier": "fs:allow-copy-file",
       "allow": [
         { "path": "$APPLOCALDATA/projects" },
-        { "path": "$APPLOCALDATA/projects/.storage-version" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
         { "path": "$HOME" },

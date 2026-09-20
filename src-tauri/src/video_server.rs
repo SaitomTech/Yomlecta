@@ -152,12 +152,7 @@ fn handle_connection(mut stream: TcpStream, secret: u128) -> io::Result<()> {
                 return Ok(());
             }
         },
-        None => (
-            "200 OK",
-            0,
-            length.saturating_sub(1),
-            false,
-        ),
+        None => ("200 OK", 0, length.saturating_sub(1), false),
     };
     let (status, start, end, is_partial) = response;
     let content_length = if length == 0 { 0 } else { end - start + 1 };
@@ -284,14 +279,14 @@ mod tests {
 
     #[test]
     fn serves_a_requested_byte_range() {
-        let path = std::env::temp_dir().join(format!(
-            "yomlecta-video-server-{}.mp4",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("yomlecta-video-server-{}.mp4", std::process::id()));
         fs::write(&path, b"0123456789").expect("create test video");
 
         let state = start().expect("start video server");
-        let url = state.url_for(path.to_str().expect("test path is valid UTF-8")).unwrap();
+        let url = state
+            .url_for(path.to_str().expect("test path is valid UTF-8"))
+            .unwrap();
         let server_url = url.strip_prefix("http://").unwrap();
         let (address, request_path) = server_url.split_once('/').unwrap();
         let mut stream = TcpStream::connect(address).expect("connect to video server");
