@@ -9,6 +9,7 @@ import type {
   SlideOcrResult,
   TranscriptionResult,
   ProjectListEntry,
+  ArticleListItem,
 } from '../../types/project'
 import {
   appLocalPathExists,
@@ -501,6 +502,11 @@ export async function listProjects() {
     const b = second.kind === 'project' ? second.summary.lastOpenedAt : ''
     return b.localeCompare(a)
   })
+}
+
+export async function listArticles() {
+  await initializeProjectStorage()
+  return invoke<ArticleListItem[]>('db_list_articles')
 }
 
 export async function deleteProjectArticle(project: MediaProject, articleId: string) {

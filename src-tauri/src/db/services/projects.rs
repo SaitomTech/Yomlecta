@@ -810,6 +810,37 @@ pub async fn db_list_projects(state: State<'_, DbState>) -> Result<Vec<Value>, S
 }
 
 #[tauri::command]
+pub async fn db_list_articles(state: State<'_, DbState>) -> Result<Vec<Value>, String> {
+    let rows = sqlx::query(
+        "SELECT a.id, a.project_id, a.title, a.created_at, a.updated_at,
+                p.title AS project_title,
+                COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') AS last_visited_step,
+                COALESCE(json_extract(a.workflow_json, '$.maxReachedStep'), 'crop') AS max_reached_step
+         FROM articles a
+         JOIN projects p ON p.id = a.project_id
+         ORDER BY a.created_at DESC, a.id DESC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| format!("記事一覧を読めませんでした: {error}"))?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(json!({
+                "articleId": row.try_get::<String, _>("id").map_err(|error| error.to_string())?,
+                "projectId": row.try_get::<String, _>("project_id").map_err(|error| error.to_string())?,
+                "title": row.try_get::<String, _>("title").map_err(|error| error.to_string())?,
+                "projectTitle": row.try_get::<String, _>("project_title").map_err(|error| error.to_string())?,
+                "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
+                "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?,
+                "lastVisitedStep": row.try_get::<String, _>("last_visited_step").map_err(|error| error.to_string())?,
+                "maxReachedStep": row.try_get::<String, _>("max_reached_step").map_err(|error| error.to_string())?
+            }))
+        })
+        .collect()
+}
+
+#[tauri::command]
 pub async fn db_delete_project(
     state: State<'_, DbState>,
     project_id: String,

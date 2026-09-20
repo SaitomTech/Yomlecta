@@ -19,6 +19,7 @@ type CropTrimPageProps = {
     perspectiveCrop?: PerspectiveCrop,
   ) => void | Promise<void>
   onHome: () => void
+  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -30,6 +31,7 @@ export function CropTrimPage({
   project,
   onCompleted,
   onHome,
+  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -54,6 +56,7 @@ export function CropTrimPage({
       video={video}
       onCompleted={onCompleted}
       onHome={onHome}
+      onArticles={onArticles}
       onBackToProject={onBackToProject}
       onOpenArticle={onOpenArticle}
       onSaveTitle={onSaveTitle}
@@ -69,6 +72,7 @@ function CropTrimEditor({
   video,
   onCompleted,
   onHome,
+  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -99,6 +103,7 @@ function CropTrimEditor({
       <AppHeader
         activeNav="projects"
         onHome={onHome}
+        onArticles={onArticles}
         homeDisabled={editor.busy || editor.isDetecting}
       />
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">

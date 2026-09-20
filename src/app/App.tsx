@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react'
 import { ArticleReviewPage } from '../features/article/ArticleReviewPage'
+import { ArticleDetailPage } from '../features/article/ArticleDetailPage'
+import { ArticlesPage } from '../features/article/ArticlesPage'
+import { getArticleStatus } from '../features/article/articleList'
 import { CropTrimPage } from '../features/crop/CropTrimPage'
 import { ExportPage } from '../features/export/ExportPage'
 import { exportProject, type ExportResult } from '../features/export/export'
@@ -58,6 +61,7 @@ import type {
   PerspectiveCrop,
   ProjectStep,
   ProjectVideo,
+  ArticleListItem,
   SlideOcrResult,
   SlideResultEdits,
   TranscriptionResult,
@@ -68,7 +72,9 @@ import type { SlideDetectionOutput } from '../features/slide-detection/types'
 type Route =
   | { kind: 'home' }
   | { kind: 'projects' }
+  | { kind: 'articles' }
   | { kind: 'project' }
+  | { kind: 'article-detail'; articleId: string; projectId: string }
   | { kind: 'article'; articleId: string; step: ProjectStep }
 
 function App() {
@@ -279,6 +285,43 @@ function App() {
     setRoute({ kind: 'projects' })
   }
 
+  const handleOpenArticles = () => {
+    navigationRequestRef.current += 1
+    setRoute({ kind: 'articles' })
+  }
+
+  const handleOpenArticleDetail = async (item: ArticleListItem) => {
+    const requestId = ++navigationRequestRef.current
+    await enqueueProjectOperation(async () => {
+      const loaded = await loadProject(item.projectId)
+      const next = activateArticle(loaded, item.articleId)
+      setProjectState(next)
+      if (requestId === navigationRequestRef.current) {
+        setRoute({ kind: 'article-detail', projectId: item.projectId, articleId: item.articleId })
+      }
+    })
+  }
+
+  const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
+    const requestId = ++navigationRequestRef.current
+    await enqueueProjectOperation(async () => {
+      const loaded = await loadProject(item.projectId)
+      const next = activateArticle(loaded, item.articleId)
+      const article = next.articles.find((candidate) => candidate.id === item.articleId)
+      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const opened = markProjectOpened(next, step)
+      const saved = await persistProjectWorkflow(opened)
+      setProjectState(saved)
+      if (requestId === navigationRequestRef.current) {
+        setRoute({
+          kind: 'article',
+          articleId: item.articleId,
+          step,
+        })
+      }
+    })
+  }
+
   const handleBackToHome = () => {
     navigationRequestRef.current += 1
     setRoute({ kind: 'home' })
@@ -464,7 +507,10 @@ function App() {
     return (
       <HomePage
         onOpenProjects={handleOpenProjects}
+        onOpenArticles={handleOpenArticles}
         onOpenProject={handleOpenProject}
+        onOpenArticle={handleOpenArticleDetail}
+        onOpenArticleWorkflow={handleOpenArticleWorkflow}
         onAddLocalVideo={handleHomeAddLocalVideo}
         onAddYoutubeVideo={handleHomeAddYoutubeVideo}
       />
@@ -473,16 +519,58 @@ function App() {
     return (
       <ProjectsPage
         onHome={handleBackToHome}
+        onArticles={handleOpenArticles}
         onCreateProject={handleCreateProject}
         onOpenProject={handleOpenProject}
       />
     )
+  if (route.kind === 'articles')
+    return (
+      <ArticlesPage
+        onHome={handleBackToHome}
+        onProjects={handleOpenProjects}
+        onOpenArticle={handleOpenArticleDetail}
+        onOpenWorkflow={handleOpenArticleWorkflow}
+        onOpenProject={(item) => void handleOpenProject(item.projectId)}
+      />
+    )
   if (!project) return null
+  if (route.kind === 'article-detail') {
+    const article = project.articles.find((candidate) => candidate.id === route.articleId)
+    const item: ArticleListItem = {
+      articleId: route.articleId,
+      projectId: route.projectId,
+      title: article?.title ?? '',
+      projectTitle: project.title,
+      createdAt: article?.createdAt ?? project.createdAt,
+      updatedAt: article?.updatedAt ?? project.updatedAt,
+      lastVisitedStep: article?.workflow.lastVisitedStep ?? 'crop',
+      maxReachedStep: article?.workflow.maxReachedStep ?? 'crop',
+    }
+    return (
+      <ArticleDetailPage
+        project={project}
+        item={item}
+        onHome={handleBackToHome}
+        onProjects={handleOpenProjects}
+        onBack={handleOpenArticles}
+        onEdit={() =>
+          void handleOpenArticleWorkflow(
+            item,
+            getArticleStatus(item) === 'done' ? 'article-review' : undefined,
+          )
+        }
+        onExport={() => void handleOpenArticleWorkflow(item, 'export')}
+        onOpenProject={() => void handleOpenProject(project.id)}
+      />
+    )
+  }
   if (route.kind === 'project')
     return (
       <ProjectDetailPage
         project={project}
         onHome={handleBackToHome}
+        onArticles={handleOpenArticles}
         onBackToProjects={handleOpenProjects}
         onDeleteProject={() => handleDeleteProject(project.id)}
         onRenameProject={handleRenameProject}
@@ -498,6 +586,7 @@ function App() {
     maxReachedStep: project.workflow.maxReachedStep,
     onStepClick: handleWorkflowStep,
     onSaveTitle: handleSaveArticleTitle,
+    onArticles: handleOpenArticles,
   }
   if (route.step === 'crop')
     return (

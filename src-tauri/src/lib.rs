@@ -127,6 +127,7 @@ pub fn run() {
             db::services::documents::db_update_document_and_article,
             db::services::projects::db_load_project,
             db::services::projects::db_list_projects,
+            db::services::projects::db_list_articles,
             db::services::projects::db_delete_project,
             db::services::projects::db_check_storage_reference,
             video_server::video_stream_url,

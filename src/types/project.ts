@@ -239,6 +239,17 @@ export type ProjectSummary = {
 export type ProjectListEntry =
   | { kind: 'project'; summary: ProjectSummary }
   | { kind: 'invalid'; id: string; error: string }
+
+export type ArticleListItem = {
+  articleId: string
+  projectId: string
+  title: string
+  projectTitle: string
+  createdAt: string
+  updatedAt: string
+  lastVisitedStep: ProjectStep
+  maxReachedStep: ProjectStep
+}
 /** Stable project fields retained by the SQLite-backed project DTO. */
 export type PersistedProject = {
   version: number

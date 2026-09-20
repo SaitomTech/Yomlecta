@@ -27,6 +27,7 @@ import { useProjectTitleEditor } from './hooks/useProjectTitleEditor'
 export function ProjectDetailPage({
   project,
   onHome,
+  onArticles,
   onBackToProjects,
   onDeleteProject,
   onRenameProject,
@@ -39,6 +40,7 @@ export function ProjectDetailPage({
 }: {
   project: MediaProject
   onHome: () => void
+  onArticles: () => void
   onBackToProjects: () => void
   onDeleteProject: () => Promise<void>
   onRenameProject: (title: string) => Promise<void>
@@ -113,7 +115,7 @@ export function ProjectDetailPage({
 
   return (
     <main className="min-h-svh bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="projects" onHome={onHome} />
+      <AppHeader activeNav="projects" onHome={onHome} onArticles={onArticles} />
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar onBack={onBackToProjects} label="プロジェクト一覧へ戻る" />
       </div>
