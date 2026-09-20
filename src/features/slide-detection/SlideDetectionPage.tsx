@@ -19,6 +19,7 @@ type SlideDetectionPageProps = {
   onCompleted: (output: SlideDetectionOutput) => void | Promise<void>
   onContinue: () => void
   onHome: () => void
+  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -31,6 +32,7 @@ export function SlideDetectionPage({
   onCompleted,
   onContinue,
   onHome,
+  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -122,6 +124,7 @@ export function SlideDetectionPage({
       <AppHeader
         activeNav="projects"
         onHome={onHome}
+        onArticles={onArticles}
         homeDisabled={isRunning || isSavingReview || hasUnsavedReview}
       />
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">

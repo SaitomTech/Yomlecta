@@ -9,10 +9,12 @@ import { ProjectListRow } from './components/ProjectListRow'
 
 export function ProjectsPage({
   onHome,
+  onArticles,
   onCreateProject,
   onOpenProject,
 }: {
   onHome: () => void
+  onArticles: () => void
   onCreateProject: (title: string) => Promise<void>
   onOpenProject: (projectId: string) => Promise<void>
 }) {
@@ -65,7 +67,7 @@ export function ProjectsPage({
 
   return (
     <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="projects" onHome={onHome} />
+      <AppHeader activeNav="projects" onHome={onHome} onArticles={onArticles} />
       <section className="mx-auto flex w-[calc(100%-48px)] max-w-[1040px] flex-1 flex-col pb-14 pt-12 md:w-[calc(100%-11.6vw)] md:pt-16">
         <div className="flex flex-wrap items-end justify-between gap-4 pb-4">
           <div>

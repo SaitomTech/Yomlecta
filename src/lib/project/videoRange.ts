@@ -29,7 +29,3 @@ export function normalizeTrimRange(range: VideoTrimRange, durationMs: number): V
     ? { startMs: 0, endMs: durationMs }
     : clamped
 }
-
-export function isFullTrimRange(range: VideoTrimRange, durationMs: number) {
-  return range.startMs === 0 && range.endMs >= durationMs - 1000
-}

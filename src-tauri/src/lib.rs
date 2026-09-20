@@ -6,6 +6,7 @@ use std::{
 };
 use tauri::Manager;
 
+mod db;
 mod openai;
 mod video_server;
 
@@ -91,6 +92,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            let database = tauri::async_runtime::block_on(db::initialize(app.handle()))
+                .map_err(std::io::Error::other)?;
+            app.manage(database);
             app.manage(video_server::start()?);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -104,6 +108,28 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sha256_app_local_file,
             get_ffmpeg_path,
+            db::services::projects::db_create_project,
+            db::services::projects::db_update_project,
+            db::services::projects::db_create_video_and_update_project,
+            db::services::projects::db_create_project_bundle,
+            db::services::projects::db_create_articles,
+            db::services::projects::db_update_article_content,
+            db::services::projects::db_update_article_source,
+            db::services::projects::db_delete_article,
+            db::services::projects::db_delete_video,
+            db::services::analysis::db_commit_slide_detection,
+            db::services::analysis::db_commit_transcription,
+            db::services::analysis::db_commit_ocr,
+            db::services::analysis::db_commit_slide_content,
+            db::services::analysis::db_update_slide_results,
+            db::services::documents::db_update_article_title,
+            db::services::documents::db_update_article_workflow,
+            db::services::documents::db_update_document_and_article,
+            db::services::projects::db_load_project,
+            db::services::projects::db_list_projects,
+            db::services::projects::db_list_articles,
+            db::services::projects::db_delete_project,
+            db::services::projects::db_check_storage_reference,
             video_server::video_stream_url,
             openai::get_openai_api_key_status,
             openai::validate_and_save_openai_api_key,

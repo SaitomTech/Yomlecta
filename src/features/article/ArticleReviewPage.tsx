@@ -37,6 +37,7 @@ type ArticleReviewPageProps = {
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onExport: () => void
   onHome: () => void
+  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -63,6 +64,7 @@ export function ArticleReviewPage({
   onSaveSummary,
   onExport,
   onHome,
+  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -224,7 +226,12 @@ export function ArticleReviewPage({
 
   return (
     <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader activeNav="projects" onHome={onHome} homeDisabled={hasUnsavedChanges || isBusy} />
+      <AppHeader
+        activeNav="projects"
+        onHome={onHome}
+        onArticles={onArticles}
+        homeDisabled={hasUnsavedChanges || isBusy}
+      />
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar
           onBack={onBackToProject}

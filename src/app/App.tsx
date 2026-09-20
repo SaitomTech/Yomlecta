@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react'
 import { ArticleReviewPage } from '../features/article/ArticleReviewPage'
+import { ArticleDetailPage } from '../features/article/ArticleDetailPage'
+import { ArticlesPage } from '../features/article/ArticlesPage'
+import { getArticleStatus } from '../features/article/articleList'
 import { CropTrimPage } from '../features/crop/CropTrimPage'
 import { ExportPage } from '../features/export/ExportPage'
 import { exportProject, type ExportResult } from '../features/export/export'
@@ -8,33 +11,40 @@ import { HomePage } from '../features/home/HomePage'
 import { ProjectDetailPage } from '../features/project/ProjectDetailPage'
 import { ProjectsPage } from '../features/project/ProjectsPage'
 import { SlideDetectionPage } from '../features/slide-detection/SlideDetectionPage'
+import { useProjectWorkspace } from './useProjectWorkspace'
 import { canNavigateToWorkflowStep, type WorkflowStep } from '../lib/workflow'
+import {
+  saveArticleDraft,
+  saveArticleSections,
+  saveArticleSource,
+  saveArticleSummary,
+  saveArticleTitle,
+  saveOcr,
+  saveSlideContent,
+  saveSlideDetection,
+  saveSlideResultEdits,
+  saveTranscription,
+} from '../lib/project/articleOperations'
 import {
   activateArticle,
   createEmptyProject,
   markProjectOpened,
   markProjectExported,
-  projectWithArticle,
-  updateProjectArticleDraft,
-  updateProjectArticleSections,
-  updateProjectArticleTitle,
-  updateProjectArticleSourceSettings,
-  updateProjectArticleSummary,
-  updateProjectSlideContent,
-  updateProjectSlideDetection,
-  updateProjectSlideOcr,
-  updateProjectSlideResultEdits,
-  updateProjectTranscription,
   updateProjectWorkflow,
 } from '../lib/project/project'
-import { addProjectVideo, createArticlesFromRanges } from '../lib/project/projectMedia'
 import {
+  addArticlesToProject,
+  addVideoToProject,
+  createProjectFromVideo,
+  persistProjectWorkflow,
+  renameProject,
+} from '../lib/project/projectOperations'
+import {
+  createProject,
   deleteProject,
   deleteProjectArticle,
   deleteProjectVideo,
   loadProject,
-  saveProject,
-  saveProjectWithCreatedAssets,
 } from '../lib/storage/projectStorage'
 import { removeProjectSourceAssetDirectory } from '../lib/storage/projectAssets'
 import { downloadYoutubeVideo } from '../lib/youtube/downloader'
@@ -51,6 +61,7 @@ import type {
   PerspectiveCrop,
   ProjectStep,
   ProjectVideo,
+  ArticleListItem,
   SlideOcrResult,
   SlideResultEdits,
   TranscriptionResult,
@@ -61,47 +72,21 @@ import type { SlideDetectionOutput } from '../features/slide-detection/types'
 type Route =
   | { kind: 'home' }
   | { kind: 'projects' }
+  | { kind: 'articles' }
   | { kind: 'project' }
+  | { kind: 'article-detail'; articleId: string; projectId: string }
   | { kind: 'article'; articleId: string; step: ProjectStep }
 
 function App() {
   const [route, setRoute] = useState<Route>({ kind: 'home' })
-  const [project, setProject] = useState<MediaProject | null>(null)
   const [generatedExport, setGeneratedExport] = useState<{
     articleId: string
     result: ExportResult
   } | null>(null)
-  const projectRef = useRef<MediaProject | null>(null)
-  const projectOperationQueue = useRef<Promise<unknown> | null>(null)
   const exportOperationQueue = useRef<Promise<void> | null>(null)
   const navigationRequestRef = useRef(0)
-
-  const enqueueProjectOperation = <T,>(operation: () => Promise<T>) => {
-    const previous = projectOperationQueue.current ?? Promise.resolve()
-    const next = previous.then(operation, operation)
-    projectOperationQueue.current = next.then(
-      () => undefined,
-      () => undefined,
-    )
-    return next
-  }
-
-  const saveProjectState = async (nextProject: MediaProject) => {
-    const synced = await saveProject(nextProject)
-    projectRef.current = synced
-    setProject(synced)
-    return synced
-  }
-
-  const persistProject = (nextProject: MediaProject) =>
-    enqueueProjectOperation(() => saveProjectState(nextProject))
-
-  const updateCurrentProject = (update: (current: MediaProject) => MediaProject) =>
-    enqueueProjectOperation(async () => {
-      const current = projectRef.current
-      if (!current) return null
-      return saveProjectState(update(current))
-    })
+  const { project, projectRef, setProjectState, clearProjectState, enqueueProjectOperation } =
+    useProjectWorkspace()
 
   const regenerateArticleExport = (savedProject: MediaProject | null) => {
     if (!savedProject?.activeArticleId) return Promise.resolve()
@@ -127,7 +112,8 @@ function App() {
 
   const handleCreateProject = async (title: string) => {
     const next = createEmptyProject(title)
-    await persistProject(next)
+    await createProject(next)
+    setProjectState(next)
     setRoute({ kind: 'project' })
   }
 
@@ -136,39 +122,12 @@ function App() {
     selectedVideo: SelectedVideo,
   ): Promise<ProjectVideo> => {
     const emptyProject = createEmptyProject(projectTitle)
-    const added = await addProjectVideo(emptyProject, selectedVideo)
-    const metadata = added.video.media.metadata
-    const article = (
-      await createArticlesFromRanges(
-        added.project,
-        added.video.id,
-        [
-          {
-            title: added.video.title,
-            range: { startMs: 0, endMs: metadata.durationMs },
-          },
-        ],
-        { x: 0, y: 0, width: metadata.width, height: metadata.height },
-      )
-    )[0]
-    if (!article) throw new Error('記事作成フローを開始できませんでした。')
-
-    const withArticle = projectWithArticle(
-      {
-        ...added.project,
-        articles: [...added.project.articles, article],
-        activeArticleId: article.id,
-      },
-      article,
-    )
-    const saved = await saveProjectWithCreatedAssets(withArticle, [
-      { collection: 'videos', assetId: added.video.id },
-      { collection: 'articles', assetId: article.id },
-    ])
-    projectRef.current = saved
-    setProject(saved)
-    setRoute({ kind: 'article', articleId: article.id, step: 'crop' })
-    return added.video
+    const created = await createProjectFromVideo(emptyProject, selectedVideo)
+    setProjectState(created.project)
+    const articleId = created.project.activeArticleId
+    if (!articleId) throw new Error('記事作成フローを開始できませんでした。')
+    setRoute({ kind: 'article', articleId, step: 'crop' })
+    return created.video
   }
 
   const handleHomeAddLocalVideo = (video: SelectedVideo) =>
@@ -199,14 +158,12 @@ function App() {
   }
 
   const handleRenameProject = async (title: string) => {
-    const trimmed = title.trim()
-    if (!trimmed) throw new Error('プロジェクト名を入力してください。')
-    const saved = await updateCurrentProject((current) => ({
-      ...current,
-      title: trimmed,
-      updatedAt: new Date().toISOString(),
-    }))
-    if (!saved) throw new Error('プロジェクトが選択されていません。')
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current) throw new Error('プロジェクトが選択されていません。')
+      const saved = await renameProject(current, title)
+      setProjectState(saved)
+    })
   }
 
   const handleOpenProject = async (projectId: string) => {
@@ -217,7 +174,8 @@ function App() {
         loaded,
         loaded.activeArticleId ? loaded.workflow.lastVisitedStep : 'detect-slides',
       )
-      await saveProjectState(next)
+      const saved = await persistProjectWorkflow(next)
+      setProjectState(saved)
       if (requestId === navigationRequestRef.current) setRoute({ kind: 'project' })
     })
   }
@@ -226,8 +184,7 @@ function App() {
     await enqueueProjectOperation(async () => {
       await deleteProject(projectId)
       if (projectRef.current?.id === projectId) {
-        projectRef.current = null
-        setProject(null)
+        clearProjectState()
         setRoute({ kind: 'home' })
       }
     })
@@ -237,12 +194,8 @@ function App() {
     return enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current) throw new Error('プロジェクトが選択されていません。')
-      const added = await addProjectVideo(current, video)
-      const saved = await saveProjectWithCreatedAssets(added.project, [
-        { collection: 'videos', assetId: added.video.id },
-      ])
-      projectRef.current = saved
-      setProject(saved)
+      const added = await addVideoToProject(current, video)
+      setProjectState(added.project)
       return added.video
     })
   }
@@ -263,12 +216,8 @@ function App() {
         } satisfies YoutubeDownloadInput)
         const current = projectRef.current
         if (!current) throw new Error('プロジェクトが選択されていません。')
-        const added = await addProjectVideo(current, video)
-        const saved = await saveProjectWithCreatedAssets(added.project, [
-          { collection: 'videos', assetId: added.video.id },
-        ])
-        projectRef.current = saved
-        setProject(saved)
+        const added = await addVideoToProject(current, video)
+        setProjectState(added.project)
         return added.video
       } finally {
         await removeProjectSourceAssetDirectory(temporaryProjectId).catch(() => undefined)
@@ -288,26 +237,9 @@ function App() {
     return enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current) throw new Error('プロジェクトが選択されていません。')
-      const created = await createArticlesFromRanges(
-        current,
-        videoId,
-        ranges,
-        crop,
-        perspectiveCrop,
-      )
-      const nextProject = {
-        ...current,
-        articles: [...current.articles, ...created],
-        updatedAt: new Date().toISOString(),
-      }
-      if (created.length === 0) throw new Error('記事を作成できませんでした。')
-      const saved = await saveProjectWithCreatedAssets(
-        nextProject,
-        created.map((article) => ({ collection: 'articles' as const, assetId: article.id })),
-      )
-      projectRef.current = saved
-      setProject(saved)
-      return created
+      const created = await addArticlesToProject(current, videoId, ranges, crop, perspectiveCrop)
+      setProjectState(created.project)
+      return created.articles
     })
   }
 
@@ -319,7 +251,8 @@ function App() {
       const next = activateArticle(current, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
       const opened = markProjectOpened(next, article?.workflow.lastVisitedStep ?? 'detect-slides')
-      await saveProjectState(opened)
+      const saved = await persistProjectWorkflow(opened)
+      setProjectState(saved)
       if (requestId === navigationRequestRef.current)
         setRoute({
           kind: 'article',
@@ -334,8 +267,7 @@ function App() {
       const current = projectRef.current
       if (!current) return
       const saved = await deleteProjectArticle(current, articleId)
-      projectRef.current = saved
-      setProject(saved)
+      setProjectState(saved)
     })
   }
 
@@ -344,14 +276,50 @@ function App() {
       const current = projectRef.current
       if (!current) return
       const saved = await deleteProjectVideo(current, videoId)
-      projectRef.current = saved
-      setProject(saved)
+      setProjectState(saved)
     })
   }
 
   const handleOpenProjects = () => {
     navigationRequestRef.current += 1
     setRoute({ kind: 'projects' })
+  }
+
+  const handleOpenArticles = () => {
+    navigationRequestRef.current += 1
+    setRoute({ kind: 'articles' })
+  }
+
+  const handleOpenArticleDetail = async (item: ArticleListItem) => {
+    const requestId = ++navigationRequestRef.current
+    await enqueueProjectOperation(async () => {
+      const loaded = await loadProject(item.projectId)
+      const next = activateArticle(loaded, item.articleId)
+      setProjectState(next)
+      if (requestId === navigationRequestRef.current) {
+        setRoute({ kind: 'article-detail', projectId: item.projectId, articleId: item.articleId })
+      }
+    })
+  }
+
+  const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
+    const requestId = ++navigationRequestRef.current
+    await enqueueProjectOperation(async () => {
+      const loaded = await loadProject(item.projectId)
+      const next = activateArticle(loaded, item.articleId)
+      const article = next.articles.find((candidate) => candidate.id === item.articleId)
+      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const opened = markProjectOpened(next, step)
+      const saved = await persistProjectWorkflow(opened)
+      setProjectState(saved)
+      if (requestId === navigationRequestRef.current) {
+        setRoute({
+          kind: 'article',
+          articleId: item.articleId,
+          step,
+        })
+      }
+    })
   }
 
   const handleBackToHome = () => {
@@ -370,7 +338,13 @@ function App() {
       }
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
-      const saved = await updateCurrentProject((current) => markProjectOpened(current, nextStep))
+      const saved = await enqueueProjectOperation(async () => {
+        const current = projectRef.current
+        if (!current || current.activeArticleId !== articleId) return null
+        const next = markProjectOpened(current, nextStep)
+        const persisted = await persistProjectWorkflow(next)
+        return setProjectState(persisted)
+      })
       if (!saved || requestId !== navigationRequestRef.current) return
       setRoute({ kind: 'article', articleId, step: nextStep })
     } catch (error) {
@@ -384,15 +358,25 @@ function App() {
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
       if (nextStep === 'export') {
-        const saved = await updateCurrentProject((current) => markProjectOpened(current, nextStep))
+        const saved = await enqueueProjectOperation(async () => {
+          const current = projectRef.current
+          if (!current || current.activeArticleId !== articleId) return null
+          const next = markProjectOpened(current, nextStep)
+          const persisted = await persistProjectWorkflow(next)
+          return setProjectState(persisted)
+        })
         if (saved) await regenerateArticleExport(saved)
         if (saved && requestId === navigationRequestRef.current)
           setRoute({ kind: 'article', articleId, step: nextStep })
         return
       }
-      const saved = await updateCurrentProject((current) =>
-        updateProjectWorkflow(current, nextStep),
-      )
+      const saved = await enqueueProjectOperation(async () => {
+        const current = projectRef.current
+        if (!current || current.activeArticleId !== articleId) return null
+        const next = updateProjectWorkflow(current, nextStep)
+        const persisted = await persistProjectWorkflow(next)
+        return setProjectState(persisted)
+      })
       if (saved && requestId === navigationRequestRef.current)
         setRoute({ kind: 'article', articleId, step: nextStep })
     } catch (error) {
@@ -401,59 +385,121 @@ function App() {
   }
 
   const handleExportCompleted = async () => {
-    await updateCurrentProject(markProjectExported)
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current) return
+      const next = markProjectExported(current)
+      const persisted = await persistProjectWorkflow(next)
+      setProjectState(persisted)
+    })
   }
 
   const handleSlideDetectionCompleted = async (output: SlideDetectionOutput) => {
-    await updateCurrentProject((current) =>
-      updateProjectSlideDetection(current, output.result, output.slides),
-    )
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
+      const next = await saveSlideDetection(current, output)
+      if (next) setProjectState(next)
+    })
   }
   const handleArticleCropCompleted = async (
     range: VideoTrimRange,
     crop: CropRegion,
     perspectiveCrop?: PerspectiveCrop,
   ) => {
-    await updateCurrentProject((current) =>
-      updateProjectArticleSourceSettings(current, range, crop, perspectiveCrop),
-    )
-    if (route.kind === 'article')
-      setRoute({ kind: 'article', articleId: route.articleId, step: 'detect-slides' })
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleSource(current, range, crop, perspectiveCrop)
+      if (next) setProjectState(next)
+      return next
+    })
+    if (saved && targetArticleId)
+      setRoute({ kind: 'article', articleId: targetArticleId, step: 'detect-slides' })
   }
   const handleTranscriptionCompleted = async (transcription: TranscriptionResult) => {
-    await updateCurrentProject((current) => updateProjectTranscription(current, transcription))
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
+      const next = await saveTranscription(current, transcription)
+      if (next) setProjectState(next)
+    })
   }
   const handleOcrSlideCompleted = async (slideId: string, ocr: SlideOcrResult) => {
-    await updateCurrentProject((current) => updateProjectSlideOcr(current, slideId, ocr))
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
+      const next = await saveOcr(current, slideId, ocr)
+      if (next) setProjectState(next)
+    })
   }
   const handleContentSlideCompleted = async (slideId: string, result: ContentProcessingResult) => {
-    await updateCurrentProject((current) => updateProjectSlideContent(current, slideId, result))
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
+      const next = await saveSlideContent(current, slideId, result)
+      if (next) setProjectState(next)
+    })
   }
   const handleSaveSlideResultEdits = async (slideId: string, edits: SlideResultEdits) => {
-    const saved = await updateCurrentProject((current) =>
-      updateProjectSlideResultEdits(current, slideId, edits),
-    )
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveSlideResultEdits(current, slideId, edits)
+      if (next) setProjectState(next)
+      return next
+    })
     await regenerateArticleExport(saved)
   }
   const handleSaveArticle = async (draft: ArticleDraft) => {
-    const saved = await updateCurrentProject((current) => updateProjectArticleDraft(current, draft))
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleDraft(current, draft)
+      if (next) setProjectState(next)
+      return next
+    })
     await regenerateArticleExport(saved)
   }
   const handleSaveArticleSections = async (sections: ArticleSections | null) => {
-    const saved = await updateCurrentProject((current) =>
-      updateProjectArticleSections(current, sections),
-    )
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleSections(current, sections)
+      if (next) setProjectState(next)
+      return next
+    })
     await regenerateArticleExport(saved)
   }
   const handleSaveArticleTitle = async (title: string) => {
-    const saved = await updateCurrentProject((current) => updateProjectArticleTitle(current, title))
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleTitle(current, title)
+      if (next) setProjectState(next)
+      return next
+    })
     if (!saved) throw new Error('記事が選択されていません。')
     await regenerateArticleExport(saved)
   }
   const handleSaveArticleSummary = async (summary: ArticleSummary) => {
-    const saved = await updateCurrentProject((current) =>
-      updateProjectArticleSummary(current, summary),
-    )
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleSummary(current, summary)
+      if (next) setProjectState(next)
+      return next
+    })
     await regenerateArticleExport(saved)
   }
 
@@ -461,7 +507,10 @@ function App() {
     return (
       <HomePage
         onOpenProjects={handleOpenProjects}
+        onOpenArticles={handleOpenArticles}
         onOpenProject={handleOpenProject}
+        onOpenArticle={handleOpenArticleDetail}
+        onOpenArticleWorkflow={handleOpenArticleWorkflow}
         onAddLocalVideo={handleHomeAddLocalVideo}
         onAddYoutubeVideo={handleHomeAddYoutubeVideo}
       />
@@ -470,16 +519,58 @@ function App() {
     return (
       <ProjectsPage
         onHome={handleBackToHome}
+        onArticles={handleOpenArticles}
         onCreateProject={handleCreateProject}
         onOpenProject={handleOpenProject}
       />
     )
+  if (route.kind === 'articles')
+    return (
+      <ArticlesPage
+        onHome={handleBackToHome}
+        onProjects={handleOpenProjects}
+        onOpenArticle={handleOpenArticleDetail}
+        onOpenWorkflow={handleOpenArticleWorkflow}
+        onOpenProject={(item) => void handleOpenProject(item.projectId)}
+      />
+    )
   if (!project) return null
+  if (route.kind === 'article-detail') {
+    const article = project.articles.find((candidate) => candidate.id === route.articleId)
+    const item: ArticleListItem = {
+      articleId: route.articleId,
+      projectId: route.projectId,
+      title: article?.title ?? '',
+      projectTitle: project.title,
+      createdAt: article?.createdAt ?? project.createdAt,
+      updatedAt: article?.updatedAt ?? project.updatedAt,
+      lastVisitedStep: article?.workflow.lastVisitedStep ?? 'crop',
+      maxReachedStep: article?.workflow.maxReachedStep ?? 'crop',
+    }
+    return (
+      <ArticleDetailPage
+        project={project}
+        item={item}
+        onHome={handleBackToHome}
+        onProjects={handleOpenProjects}
+        onBack={handleOpenArticles}
+        onEdit={() =>
+          void handleOpenArticleWorkflow(
+            item,
+            getArticleStatus(item) === 'done' ? 'article-review' : undefined,
+          )
+        }
+        onExport={() => void handleOpenArticleWorkflow(item, 'export')}
+        onOpenProject={() => void handleOpenProject(project.id)}
+      />
+    )
+  }
   if (route.kind === 'project')
     return (
       <ProjectDetailPage
         project={project}
         onHome={handleBackToHome}
+        onArticles={handleOpenArticles}
         onBackToProjects={handleOpenProjects}
         onDeleteProject={() => handleDeleteProject(project.id)}
         onRenameProject={handleRenameProject}
@@ -495,6 +586,7 @@ function App() {
     maxReachedStep: project.workflow.maxReachedStep,
     onStepClick: handleWorkflowStep,
     onSaveTitle: handleSaveArticleTitle,
+    onArticles: handleOpenArticles,
   }
   if (route.step === 'crop')
     return (

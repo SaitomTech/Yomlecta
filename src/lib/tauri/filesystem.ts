@@ -50,15 +50,6 @@ export async function readAppLocalDirectory(path: string): Promise<AppLocalDirec
   return readDir(path, { baseDir: BaseDirectory.AppLocalData })
 }
 
-export async function appLocalFileExists(path: string) {
-  try {
-    const fileInfo = await stat(path, { baseDir: BaseDirectory.AppLocalData })
-    return fileInfo.isFile
-  } catch {
-    return false
-  }
-}
-
 export async function appLocalPathExists(path: string) {
   try {
     await stat(path, { baseDir: BaseDirectory.AppLocalData })
