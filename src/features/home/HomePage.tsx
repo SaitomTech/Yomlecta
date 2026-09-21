@@ -1,4 +1,4 @@
-import { ArrowRight, FileVideo, RefreshCw } from 'lucide-react'
+import { ArrowRight, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { AppHeader } from '../../components/AppHeader'
 import { getErrorDetail } from '../../lib/errors'
@@ -183,12 +183,8 @@ export function HomePage({
                 読み込み中…
               </div>
             ) : recentProjects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
-                <FileVideo className="text-[#9aada3]" size={32} strokeWidth={1.3} />
-                <p className="mt-4 text-[15px] font-semibold">まだプロジェクトがありません</p>
-                <p className="mt-2 text-xs leading-6 text-[#71807b]">
-                  上のエリアから動画を読み込むと、ここに表示されます。
-                </p>
+              <div className="px-5 py-10 text-center text-xs leading-6 text-[#71807b]">
+                まだプロジェクトがありません。上のエリアから動画を読み込むと、ここに表示されます。
               </div>
             ) : (
               recentProjects.map(({ summary }) => (
