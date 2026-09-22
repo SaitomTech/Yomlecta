@@ -262,6 +262,28 @@ function App() {
     })
   }
 
+  const handleOpenProjectArticle = async (articleId: string) => {
+    const current = projectRef.current
+    const article = current?.articles.find((candidate) => candidate.id === articleId)
+    if (!current || !article) return
+
+    if (getArticleStatus(article) !== 'done') {
+      await handleOpenArticle(articleId)
+      return
+    }
+
+    await handleOpenArticleDetail({
+      articleId: article.id,
+      projectId: current.id,
+      title: article.title,
+      projectTitle: current.title,
+      createdAt: article.createdAt,
+      updatedAt: article.updatedAt,
+      lastVisitedStep: article.workflow.lastVisitedStep,
+      maxReachedStep: article.workflow.maxReachedStep,
+    })
+  }
+
   const handleDeleteArticle = async (articleId: string) => {
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
@@ -576,7 +598,7 @@ function App() {
         onRenameProject={handleRenameProject}
         onAddLocalVideo={handleAddLocalVideo}
         onAddYoutubeVideo={handleAddYoutubeVideo}
-        onOpenArticle={(articleId) => void handleOpenArticle(articleId)}
+        onOpenArticle={(articleId) => void handleOpenProjectArticle(articleId)}
         onDeleteArticle={handleDeleteArticle}
         onDeleteVideo={handleDeleteVideo}
         onCreateArticles={handleCreateArticles}
