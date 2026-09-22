@@ -30,6 +30,8 @@ type ExportPageProps = {
   onStepClick: (step: WorkflowStep) => void
 }
 
+const MIN_PREVIEW_HEIGHT = 420
+
 function getStatusMessage({ status, progress, error }: ExportController) {
   switch (status) {
     case 'running':
@@ -74,6 +76,10 @@ export function ExportPage({
   useEffect(() => {
     const handlePreviewMessage = (event: MessageEvent) => {
       if (event.source !== previewFrameRef.current?.contentWindow) return
+      if (event.data?.type === 'preview-height' && typeof event.data.height === 'number') {
+        setPreviewHeight(Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(event.data.height)))
+        return
+      }
       if (event.data?.type !== 'preview-image' || typeof event.data.src !== 'string') return
       setPreviewImage(event.data.src)
     }
@@ -92,6 +98,7 @@ export function ExportPage({
 
   const handleGenerate = useCallback(async () => {
     setSaveError(null)
+    setPreviewHeight(MIN_PREVIEW_HEIGHT)
     const output = await generate()
     if (!output) return
     try {
@@ -144,12 +151,12 @@ export function ExportPage({
 
     // Measure from a short viewport first. Otherwise scrollHeight can reflect
     // the iframe's previous height and keep a large blank area forever.
-    iframe.style.height = '420px'
+    iframe.style.height = `${MIN_PREVIEW_HEIGHT}px`
     requestAnimationFrame(() => {
       if (!iframe.isConnected) return
       setPreviewHeight(
         Math.max(
-          420,
+          MIN_PREVIEW_HEIGHT,
           previewDocument.documentElement.scrollHeight,
           previewDocument.body.scrollHeight,
         ),
