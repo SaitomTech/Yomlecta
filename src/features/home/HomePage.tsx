@@ -38,14 +38,14 @@ export function HomePage({
 
   const refresh = useCallback(async () => {
     const [projectsResult, articlesResult] = await Promise.allSettled([
-      listProjects(),
-      listArticles(),
+      listProjects({ pageSize: 5 }),
+      listArticles({ pageSize: 5 }),
     ])
     const errors: string[] = []
-    if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value)
+    if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value.items)
     else
       errors.push(getErrorDetail(projectsResult.reason, 'プロジェクト一覧を読み込めませんでした。'))
-    if (articlesResult.status === 'fulfilled') setArticles(articlesResult.value)
+    if (articlesResult.status === 'fulfilled') setArticles(articlesResult.value.items)
     else errors.push(getErrorDetail(articlesResult.reason, '記事一覧を読み込めませんでした。'))
     setError(errors.length > 0 ? errors.join(' ') : null)
     setLoading(false)
@@ -60,8 +60,6 @@ export function HomePage({
   const projects = entries.filter(
     (entry): entry is Extract<ProjectListEntry, { kind: 'project' }> => entry.kind === 'project',
   )
-  const recentProjects = projects.slice(0, 3)
-
   return (
     <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <section className="mx-auto flex w-[calc(100%-48px)] max-w-[1120px] flex-1 flex-col pb-14 pt-12 md:w-[calc(100%-11.6vw)] md:pt-16">
@@ -140,7 +138,7 @@ export function HomePage({
               </div>
             ) : (
               <div>
-                {articles.slice(0, 3).map((item) => (
+                {articles.map((item) => (
                   <ArticleListRow
                     key={item.articleId}
                     item={item}
@@ -184,12 +182,12 @@ export function HomePage({
                 <RefreshCw className="mr-2 animate-spin" size={15} />
                 読み込み中…
               </div>
-            ) : recentProjects.length === 0 ? (
+            ) : projects.length === 0 ? (
               <div className="px-5 py-10 text-center text-xs leading-6 text-[#71807b]">
                 まだプロジェクトがありません。上のエリアから動画を読み込むと、ここに表示されます。
               </div>
             ) : (
-              recentProjects.map(({ summary }) => (
+              projects.map(({ summary }) => (
                 <ProjectListRow
                   key={summary.id}
                   summary={summary}

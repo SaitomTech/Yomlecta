@@ -5,10 +5,112 @@ use super::super::services::require_rows_affected;
 use super::super::{
     id_from, json_text, json_value, optional_string, validate_id, value_string, DbState,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::path::Path;
 use tauri::State;
+
+const MAX_LIST_PAGE_SIZE: i64 = 100;
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ListCursor {
+    version: u8,
+    kind: String,
+    query: String,
+    status: Option<String>,
+    sort_value: String,
+    id: String,
+}
+
+fn normalize_page_size(page_size: i64) -> Result<i64, String> {
+    if !(1..=MAX_LIST_PAGE_SIZE).contains(&page_size) {
+        return Err(format!(
+            "VALIDATION_ERROR: pageSizeは1〜{MAX_LIST_PAGE_SIZE}の範囲で指定してください。"
+        ));
+    }
+    Ok(page_size)
+}
+
+fn normalize_list_query(query: Option<String>) -> String {
+    query.unwrap_or_default().trim().to_string()
+}
+
+fn encode_list_cursor(cursor: &ListCursor) -> Result<String, String> {
+    let bytes = serde_json::to_vec(cursor)
+        .map_err(|error| format!("ページトークンを作成できませんでした: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn decode_list_cursor(
+    page_token: Option<String>,
+    kind: &str,
+    query: &str,
+    status: Option<&str>,
+) -> Result<Option<ListCursor>, String> {
+    let Some(token) = page_token.filter(|token| !token.trim().is_empty()) else {
+        return Ok(None);
+    };
+    if token.len() % 2 != 0 {
+        return Err("INVALID_ARGUMENT: ページトークンが不正です。".to_string());
+    }
+    let mut bytes = Vec::with_capacity(token.len() / 2);
+    for pair in token.as_bytes().chunks_exact(2) {
+        let value = std::str::from_utf8(pair)
+            .ok()
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+            .ok_or_else(|| "INVALID_ARGUMENT: ページトークンが不正です。".to_string())?;
+        bytes.push(value);
+    }
+    let cursor: ListCursor = serde_json::from_slice(&bytes)
+        .map_err(|_| "INVALID_ARGUMENT: ページトークンが不正です。".to_string())?;
+    if cursor.version != 1
+        || cursor.kind != kind
+        || cursor.query != query
+        || cursor.status.as_deref() != status
+        || cursor.sort_value.is_empty()
+        || cursor.id.is_empty()
+    {
+        return Err("INVALID_ARGUMENT: ページトークンが現在の一覧条件と一致しません。".to_string());
+    }
+    Ok(Some(cursor))
+}
+
+fn article_status_sql() -> &'static str {
+    "CASE
+       WHEN COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') = 'export'
+         OR COALESCE(json_extract(a.workflow_json, '$.maxReachedStep'), 'crop') = 'export'
+         THEN 'done'
+       WHEN COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') = 'crop'
+         THEN 'not-started'
+       ELSE 'working'
+     END"
+}
+
+fn article_list_cte() -> String {
+    format!(
+        "WITH article_list AS (
+           SELECT a.id, a.project_id, a.title, a.created_at, a.updated_at,
+                  p.title AS project_title,
+                  COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') AS last_visited_step,
+                  COALESCE(json_extract(a.workflow_json, '$.maxReachedStep'), 'crop') AS max_reached_step,
+                  {status_sql} AS status
+           FROM articles a
+           JOIN projects p ON p.id = a.project_id
+         )",
+        status_sql = article_status_sql()
+    )
+}
+
+fn normalize_article_status(status: Option<String>) -> Result<Option<String>, String> {
+    let status = status.filter(|status| !status.trim().is_empty());
+    if let Some(status) = status.as_deref() {
+        if !matches!(status, "not-started" | "working" | "done") {
+            return Err("VALIDATION_ERROR: 記事の状態が不正です。".to_string());
+        }
+    }
+    Ok(status)
+}
 
 async fn insert_video_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -789,14 +891,94 @@ pub async fn db_load_project(
 }
 
 #[tauri::command]
-pub async fn db_list_projects(state: State<'_, DbState>) -> Result<Vec<Value>, String> {
-    let ids =
-        sqlx::query_scalar::<_, String>("SELECT id FROM projects ORDER BY updated_at DESC, id")
-            .fetch_all(&state.pool)
-            .await
-            .map_err(|error| format!("プロジェクト一覧を読めませんでした: {error}"))?;
-    let mut projects = Vec::with_capacity(ids.len());
-    for id in ids {
+pub async fn db_list_projects(
+    state: State<'_, DbState>,
+    page_size: i64,
+    page_token: Option<String>,
+    query: Option<String>,
+) -> Result<Value, String> {
+    list_projects_page(&state, page_size, page_token, query).await
+}
+
+async fn list_projects_page(
+    state: &DbState,
+    page_size: i64,
+    page_token: Option<String>,
+    query: Option<String>,
+) -> Result<Value, String> {
+    let page_size = normalize_page_size(page_size)?;
+    let query = normalize_list_query(query);
+    let cursor = decode_list_cursor(page_token, "projects", &query, None)?;
+
+    let project_list_cte = "WITH project_list AS (
+       SELECT p.id, p.title,
+              COALESCE(
+                (SELECT json_extract(a.workflow_json, '$.lastOpenedAt')
+                 FROM articles a
+                 WHERE a.project_id = p.id AND a.id = COALESCE(
+                   p.active_article_id,
+                   (SELECT id FROM articles WHERE project_id = p.id ORDER BY created_at, id LIMIT 1)
+                 )
+                 LIMIT 1),
+                p.updated_at
+              ) AS last_opened_at
+       FROM projects p
+     )";
+    let filter_clause = if query.is_empty() {
+        String::new()
+    } else {
+        " WHERE instr(lower(title), lower(?)) > 0".to_string()
+    };
+    let count_sql = format!("{project_list_cte} SELECT COUNT(*) FROM project_list{filter_clause}");
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    if !query.is_empty() {
+        count_query = count_query.bind(&query);
+    }
+    let total = count_query
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|error| format!("プロジェクト件数を読めませんでした: {error}"))?;
+
+    let cursor_clause = if cursor.is_some() {
+        if filter_clause.is_empty() {
+            " WHERE (last_opened_at < ? OR (last_opened_at = ? AND id > ?))"
+        } else {
+            " AND (last_opened_at < ? OR (last_opened_at = ? AND id > ?))"
+        }
+    } else {
+        ""
+    };
+    let sql = format!(
+        "{project_list_cte}
+         SELECT id, last_opened_at FROM project_list{filter_clause}{cursor_clause}
+         ORDER BY last_opened_at DESC, id ASC LIMIT ?"
+    );
+    let mut list_query = sqlx::query(&sql);
+    if !query.is_empty() {
+        list_query = list_query.bind(&query);
+    }
+    if let Some(cursor) = cursor.as_ref() {
+        list_query = list_query
+            .bind(&cursor.sort_value)
+            .bind(&cursor.sort_value)
+            .bind(&cursor.id);
+    }
+    let rows = list_query
+        .bind(page_size + 1)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|error| format!("プロジェクト一覧を読めませんでした: {error}"))?;
+    let has_next_page = rows.len() > page_size as usize;
+    let rows = rows
+        .into_iter()
+        .take(page_size as usize)
+        .collect::<Vec<_>>();
+
+    let mut projects = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let id: String = row
+            .try_get("id")
+            .map_err(|error| format!("プロジェクトIDを読めませんでした: {error}"))?;
         match load_project_summary(&state.pool, &id).await {
             Ok(summary) => projects.push(summary),
             Err(error) => projects.push(json!({
@@ -806,25 +988,131 @@ pub async fn db_list_projects(state: State<'_, DbState>) -> Result<Vec<Value>, S
             })),
         }
     }
-    Ok(projects)
+    let next_page_token = if has_next_page {
+        if let Some(row) = rows.last() {
+            let sort_value: String = row
+                .try_get("last_opened_at")
+                .map_err(|error| format!("プロジェクト最終閲覧日時を読めませんでした: {error}"))?;
+            let id: String = row
+                .try_get("id")
+                .map_err(|error| format!("プロジェクトIDを読めませんでした: {error}"))?;
+            Some(encode_list_cursor(&ListCursor {
+                version: 1,
+                kind: "projects".to_string(),
+                query: query.clone(),
+                status: None,
+                sort_value,
+                id,
+            })?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Ok(json!({
+        "items": projects,
+        "pageInfo": {
+            "pageSize": page_size,
+            "total": total,
+            "hasNextPage": has_next_page
+        },
+        "nextPageToken": next_page_token
+    }))
 }
 
 #[tauri::command]
-pub async fn db_list_articles(state: State<'_, DbState>) -> Result<Vec<Value>, String> {
-    let rows = sqlx::query(
-        "SELECT a.id, a.project_id, a.title, a.created_at, a.updated_at,
-                p.title AS project_title,
-                COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') AS last_visited_step,
-                COALESCE(json_extract(a.workflow_json, '$.maxReachedStep'), 'crop') AS max_reached_step
-         FROM articles a
-         JOIN projects p ON p.id = a.project_id
-         ORDER BY a.created_at DESC, a.id DESC",
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|error| format!("記事一覧を読めませんでした: {error}"))?;
+pub async fn db_list_articles(
+    state: State<'_, DbState>,
+    page_size: i64,
+    page_token: Option<String>,
+    query: Option<String>,
+    status: Option<String>,
+) -> Result<Value, String> {
+    list_articles_page(&state, page_size, page_token, query, status).await
+}
 
-    rows.into_iter()
+async fn list_articles_page(
+    state: &DbState,
+    page_size: i64,
+    page_token: Option<String>,
+    query: Option<String>,
+    status: Option<String>,
+) -> Result<Value, String> {
+    let page_size = normalize_page_size(page_size)?;
+    let query = normalize_list_query(query);
+    let status = normalize_article_status(status)?;
+    let cursor = decode_list_cursor(page_token, "articles", &query, status.as_deref())?;
+    let cte = article_list_cte();
+
+    let mut conditions = Vec::new();
+    let mut filter_params = Vec::new();
+    if !query.is_empty() {
+        conditions.push(
+            "(instr(lower(title), lower(?)) > 0 OR instr(lower(project_title), lower(?)) > 0)"
+                .to_string(),
+        );
+        filter_params.push(query.clone());
+        filter_params.push(query.clone());
+    }
+    if let Some(status) = status.as_ref() {
+        conditions.push("status = ?".to_string());
+        filter_params.push(status.clone());
+    }
+    let filter_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+    let count_sql = format!("{cte} SELECT COUNT(*) FROM article_list{filter_clause}");
+    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+    for parameter in &filter_params {
+        count_query = count_query.bind(parameter);
+    }
+    let total = count_query
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|error| format!("記事件数を読めませんでした: {error}"))?;
+
+    let cursor_clause = if cursor.is_some() {
+        if filter_clause.is_empty() {
+            " WHERE (created_at < ? OR (created_at = ? AND id < ?))"
+        } else {
+            " AND (created_at < ? OR (created_at = ? AND id < ?))"
+        }
+    } else {
+        ""
+    };
+    let list_sql = format!(
+        "{cte}
+         SELECT id, project_id, title, project_title, created_at, updated_at,
+                last_visited_step, max_reached_step, status
+         FROM article_list{filter_clause}{cursor_clause}
+         ORDER BY created_at DESC, id DESC LIMIT ?"
+    );
+    let mut list_query = sqlx::query(&list_sql);
+    for parameter in &filter_params {
+        list_query = list_query.bind(parameter);
+    }
+    if let Some(cursor) = cursor.as_ref() {
+        list_query = list_query
+            .bind(&cursor.sort_value)
+            .bind(&cursor.sort_value)
+            .bind(&cursor.id);
+    }
+    let rows = list_query
+        .bind(page_size + 1)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|error| format!("記事一覧を読めませんでした: {error}"))?;
+    let has_next_page = rows.len() > page_size as usize;
+    let rows = rows
+        .into_iter()
+        .take(page_size as usize)
+        .collect::<Vec<_>>();
+
+    let items = rows
+        .iter()
         .map(|row| {
             Ok(json!({
                 "articleId": row.try_get::<String, _>("id").map_err(|error| error.to_string())?,
@@ -834,10 +1122,43 @@ pub async fn db_list_articles(state: State<'_, DbState>) -> Result<Vec<Value>, S
                 "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
                 "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?,
                 "lastVisitedStep": row.try_get::<String, _>("last_visited_step").map_err(|error| error.to_string())?,
-                "maxReachedStep": row.try_get::<String, _>("max_reached_step").map_err(|error| error.to_string())?
+                "maxReachedStep": row.try_get::<String, _>("max_reached_step").map_err(|error| error.to_string())?,
+                "status": row.try_get::<String, _>("status").map_err(|error| error.to_string())?
             }))
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let next_page_token = if has_next_page {
+        if let Some(row) = rows.last() {
+            let sort_value: String = row
+                .try_get("created_at")
+                .map_err(|error| format!("記事作成日時を読めませんでした: {error}"))?;
+            let id: String = row
+                .try_get("id")
+                .map_err(|error| format!("記事IDを読めませんでした: {error}"))?;
+            Some(encode_list_cursor(&ListCursor {
+                version: 1,
+                kind: "articles".to_string(),
+                query: query.clone(),
+                status: status.clone(),
+                sort_value,
+                id,
+            })?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Ok(json!({
+        "items": items,
+        "pageInfo": {
+            "pageSize": page_size,
+            "total": total,
+            "hasNextPage": has_next_page
+        },
+        "nextPageToken": next_page_token
+    }))
 }
 
 #[tauri::command]
@@ -903,4 +1224,148 @@ pub async fn db_check_storage_reference(
         _ => return Err("VALIDATION_ERROR: 不正な参照種別です。".to_string()),
     };
     Ok(json!({ "referenced": referenced }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+
+    async fn test_state() -> DbState {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("create in-memory database");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("apply migrations");
+        DbState {
+            pool,
+            app_data_dir: PathBuf::from("/tmp/yomlecta-list-test"),
+        }
+    }
+
+    async fn insert_article(state: &DbState, id: &str, created_at: &str, title: &str) {
+        sqlx::query(
+            "INSERT INTO projects (id, title, version, created_at, updated_at)
+             VALUES ('project', 'Project', 1, 'created', 'updated')
+             ON CONFLICT(id) DO NOTHING",
+        )
+        .execute(&state.pool)
+        .await
+        .expect("insert project");
+        sqlx::query(
+            "INSERT INTO articles (id, project_id, title, source_range_json, settings_json, workflow_json, created_at, updated_at)
+             VALUES (?, 'project', ?, '{}', '{}', ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(title)
+        .bind(
+            serde_json::to_string(&json!({
+                "lastVisitedStep": "crop",
+                "maxReachedStep": "crop"
+            }))
+            .expect("serialize workflow"),
+        )
+        .bind(created_at)
+        .bind(created_at)
+        .execute(&state.pool)
+        .await
+        .expect("insert article");
+    }
+
+    #[test]
+    fn article_cursor_returns_stable_pages_and_validates_filters() {
+        tauri::async_runtime::block_on(async {
+            let state = test_state().await;
+            insert_article(&state, "article-1", "2026-09-01", "Old").await;
+            insert_article(&state, "article-2", "2026-09-02", "Middle").await;
+            insert_article(&state, "article-3", "2026-09-03", "Newest").await;
+
+            let first = list_articles_page(&state, 2, None, None, None)
+                .await
+                .expect("read first article page");
+            assert_eq!(first["items"].as_array().expect("items").len(), 2);
+            assert_eq!(first["items"][0]["articleId"], "article-3");
+            assert_eq!(first["items"][1]["articleId"], "article-2");
+            assert_eq!(first["pageInfo"]["total"], 3);
+            assert_eq!(first["pageInfo"]["hasNextPage"], true);
+
+            let token = first["nextPageToken"]
+                .as_str()
+                .expect("next page token")
+                .to_string();
+            let second = list_articles_page(&state, 2, Some(token.clone()), None, None)
+                .await
+                .expect("read second article page");
+            assert_eq!(second["items"].as_array().expect("items").len(), 1);
+            assert_eq!(second["items"][0]["articleId"], "article-1");
+            assert_eq!(second["nextPageToken"], Value::Null);
+
+            let mismatch =
+                list_articles_page(&state, 2, Some(token), Some("different".to_string()), None)
+                    .await
+                    .expect_err("reject token for a different query");
+            assert!(mismatch.contains("ページトークン"));
+
+            let filtered =
+                list_articles_page(&state, 2, None, None, Some("not-started".to_string()))
+                    .await
+                    .expect("filter article status");
+            assert_eq!(filtered["pageInfo"]["total"], 3);
+            assert_eq!(filtered["items"][0]["status"], "not-started");
+        });
+    }
+
+    #[test]
+    fn project_cursor_returns_summaries_in_last_opened_order() {
+        tauri::async_runtime::block_on(async {
+            let state = test_state().await;
+            for (id, updated_at) in [
+                ("project-1", "2026-09-01"),
+                ("project-2", "2026-09-02"),
+                ("project-3", "2026-09-03"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO projects (id, title, version, created_at, updated_at)
+                     VALUES (?, ?, 1, ?, ?)",
+                )
+                .bind(id)
+                .bind(id)
+                .bind(updated_at)
+                .bind(updated_at)
+                .execute(&state.pool)
+                .await
+                .expect("insert project");
+            }
+
+            let first = list_projects_page(&state, 2, None, None)
+                .await
+                .expect("read first project page");
+            assert_eq!(first["items"].as_array().expect("items").len(), 2);
+            assert_eq!(first["items"][0]["summary"]["id"], "project-3");
+            assert_eq!(first["items"][1]["summary"]["id"], "project-2");
+            assert_eq!(first["pageInfo"]["total"], 3);
+
+            let second = list_projects_page(
+                &state,
+                2,
+                Some(
+                    first["nextPageToken"]
+                        .as_str()
+                        .expect("next page token")
+                        .to_string(),
+                ),
+                None,
+            )
+            .await
+            .expect("read second project page");
+            assert_eq!(second["items"].as_array().expect("items").len(), 1);
+            assert_eq!(second["items"][0]["summary"]["id"], "project-1");
+        });
+    }
 }

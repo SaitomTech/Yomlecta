@@ -10,6 +10,9 @@ import type {
   TranscriptionResult,
   ProjectListEntry,
   ArticleListItem,
+  ListArticlesOptions,
+  ListProjectsOptions,
+  PagedResult,
 } from '../../types/project'
 import {
   appLocalPathExists,
@@ -479,11 +482,17 @@ export async function loadProject(projectId: string) {
   return project
 }
 
-export async function listProjects() {
+export async function listProjects(
+  options: ListProjectsOptions,
+): Promise<PagedResult<ProjectListEntry>> {
   await initializeProjectStorage()
-  const persistedProjects = await invoke<ProjectListEntry[]>('db_list_projects')
+  const persistedProjects = await invoke<PagedResult<ProjectListEntry>>('db_list_projects', {
+    pageSize: options.pageSize,
+    pageToken: options.pageToken ?? null,
+    query: options.query?.trim() || null,
+  })
   const projects = await Promise.all(
-    persistedProjects.map(async (entry): Promise<ProjectListEntry> => {
+    persistedProjects.items.map(async (entry): Promise<ProjectListEntry> => {
       if (entry.kind === 'invalid') return entry
       const sourceExists = entry.summary.sourcePath
         ? await fileExists(entry.summary.sourcePath)
@@ -497,16 +506,19 @@ export async function listProjects() {
       }
     }),
   )
-  return projects.sort((first, second) => {
-    const a = first.kind === 'project' ? first.summary.lastOpenedAt : ''
-    const b = second.kind === 'project' ? second.summary.lastOpenedAt : ''
-    return b.localeCompare(a)
-  })
+  return { ...persistedProjects, items: projects }
 }
 
-export async function listArticles() {
+export async function listArticles(
+  options: ListArticlesOptions,
+): Promise<PagedResult<ArticleListItem>> {
   await initializeProjectStorage()
-  return invoke<ArticleListItem[]>('db_list_articles')
+  return invoke<PagedResult<ArticleListItem>>('db_list_articles', {
+    pageSize: options.pageSize,
+    pageToken: options.pageToken ?? null,
+    query: options.query?.trim() || null,
+    status: options.status ?? null,
+  })
 }
 
 export async function deleteProjectArticle(project: MediaProject, articleId: string) {

@@ -1,4 +1,4 @@
-import { ArrowRight, FileVideo, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowRight, FileVideo, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ProjectSummary } from '../../../types/project'
@@ -61,5 +61,19 @@ export function ProjectListRow({
         {!isOpening && <ArrowRight size={14} />}
       </button>
     </article>
+  )
+}
+
+export function InvalidProjectListRow({ error }: { error: string }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-[#d8e1dc] px-5 py-5 text-xs text-[#a4573e]">
+      <AlertTriangle className="shrink-0" size={18} />
+      <div className="min-w-0">
+        <p className="font-semibold">プロジェクトを読み込めません</p>
+        <p className="mt-1 truncate text-[#71807b]" title={error}>
+          {error}
+        </p>
+      </div>
+    </div>
   )
 }

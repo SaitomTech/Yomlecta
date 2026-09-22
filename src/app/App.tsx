@@ -282,6 +282,7 @@ function App() {
       updatedAt: article.updatedAt,
       lastVisitedStep: article.workflow.lastVisitedStep,
       maxReachedStep: article.workflow.maxReachedStep,
+      status: getArticleStatus(article),
     })
   }
 
@@ -563,6 +564,7 @@ function App() {
         updatedAt: article?.updatedAt ?? project.updatedAt,
         lastVisitedStep: article?.workflow.lastVisitedStep ?? 'crop',
         maxReachedStep: article?.workflow.maxReachedStep ?? 'crop',
+        status: article ? getArticleStatus(article) : 'not-started',
       }
       return (
         <ArticleDetailPage

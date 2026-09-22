@@ -1,11 +1,6 @@
 import { ArrowRight, FileText } from 'lucide-react'
 import type { ArticleListItem } from '../../../types/project'
-import {
-  formatArticleDate,
-  getArticleActionLabel,
-  getArticleStatus,
-  getArticleStatusLabel,
-} from '../articleList'
+import { formatArticleDate, getArticleActionLabel, getArticleStatusLabel } from '../articleList'
 
 const statusClass = {
   done: 'bg-[#e8f2ec] text-[#1d6b50]',
@@ -24,7 +19,7 @@ export function ArticleListRow({
   onOpenWorkflow: (item: ArticleListItem) => void
   onOpenProject: (item: ArticleListItem) => void
 }) {
-  const status = getArticleStatus(item)
+  const status = item.status
   return (
     <div className="grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
       <div className="flex min-w-0 items-start gap-3">

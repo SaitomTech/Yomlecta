@@ -1,6 +1,6 @@
-import type { Article, ArticleListItem } from '../../types/project'
+import type { Article, ArticleListItem, ArticleListStatus } from '../../types/project'
 
-export type ArticleListStatus = 'not-started' | 'working' | 'done'
+export type { ArticleListStatus } from '../../types/project'
 
 export function getArticleStatus(
   article: Pick<Article, 'workflow'> | Pick<ArticleListItem, 'lastVisitedStep' | 'maxReachedStep'>,

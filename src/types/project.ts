@@ -215,6 +215,34 @@ export type Article = {
   updatedAt: string
 }
 export type ProjectHealth = 'ready' | 'source-missing' | 'needs-repair'
+export type ArticleListStatus = 'not-started' | 'working' | 'done'
+
+export type PageInfo = {
+  pageSize: number
+  total: number
+  hasNextPage: boolean
+}
+
+export type PagedResult<T> = {
+  items: T[]
+  pageInfo: PageInfo
+  nextPageToken: string | null
+}
+
+export type ListPageOptions = {
+  pageSize: number
+  pageToken?: string
+}
+
+export type ListProjectsOptions = ListPageOptions & {
+  query?: string
+}
+
+export type ListArticlesOptions = ListPageOptions & {
+  query?: string
+  status?: ArticleListStatus
+}
+
 export type ProjectSummary = {
   projectVersion: number
   id: string
@@ -249,6 +277,7 @@ export type ArticleListItem = {
   updatedAt: string
   lastVisitedStep: ProjectStep
   maxReachedStep: ProjectStep
+  status: ArticleListStatus
 }
 /** Stable project fields retained by the SQLite-backed project DTO. */
 export type PersistedProject = {
