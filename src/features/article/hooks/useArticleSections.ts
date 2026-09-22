@@ -12,6 +12,7 @@ export function useArticleSections(
   project: MediaProject,
   modelId: ArticleModelId,
   onCompleted: (sections: ArticleSections) => void | Promise<void>,
+  getCurrentProject?: () => MediaProject | null,
 ) {
   const articleSlides = project.slides.filter((slide) => slide.transcript)
   const hasAllArticleBodies =
@@ -24,16 +25,22 @@ export function useArticleSections(
   const [error, setError] = useState<string | null>(null)
   const activeController = useRef<AbortController | null>(null)
 
-  async function generate(force = false) {
-    if (activeController.current) return
-    if (!hasAllArticleBodies) {
+  async function generate(force = false): Promise<boolean> {
+    if (activeController.current) return false
+    const currentProject = getCurrentProject?.() ?? project
+    const currentArticleSlides = currentProject.slides.filter((slide) => slide.transcript)
+    const currentHasAllArticleBodies =
+      currentArticleSlides.length > 0 &&
+      currentArticleSlides.every((slide) => slide.transcript?.articleBody?.trim())
+    const currentIsUpToDate = hasCurrentArticleSections(currentProject, modelId)
+    if (!currentHasAllArticleBodies) {
       setStatus('error')
       setError('Slide本文をすべて生成してから、セクション構成を作成してください。')
-      return
+      return false
     }
-    if (isUpToDate && !force) {
+    if (currentIsUpToDate && !force) {
       setStatus('completed')
-      return
+      return true
     }
 
     const controller = new AbortController()
@@ -45,7 +52,7 @@ export function useArticleSections(
 
     try {
       const sections = await runArticleSectionGeneration({
-        project,
+        project: currentProject,
         modelId,
         signal: controller.signal,
         onPreparationProgress: setStageProgress,
@@ -55,8 +62,12 @@ export function useArticleSections(
         },
       })
       await onCompleted(sections)
+      if (controller.signal.aborted) {
+        throw new DOMException('処理を中止しました。', 'AbortError')
+      }
       setStageProgress(1)
       setStatus('completed')
+      return true
     } catch (generationError) {
       if (controller.signal.aborted) {
         setStatus('cancelled')
@@ -71,6 +82,7 @@ export function useArticleSections(
           ),
         )
       }
+      return false
     } finally {
       if (activeController.current === controller) activeController.current = null
     }
