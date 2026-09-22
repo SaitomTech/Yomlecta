@@ -1,5 +1,5 @@
 import { Settings } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { SettingsDialog } from './SettingsDialog'
 
 type AppHeaderProps = {
@@ -89,24 +89,30 @@ export function AppHeader({
 }: AppHeaderProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const brandContainerClass = 'inline-flex w-fit items-center justify-self-start text-left'
+  const activateHome = () => {
+    if (!homeDisabled) onHome?.()
+  }
+  const handleBrandKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    activateHome()
+  }
 
   const navigationDisabled = homeDisabled
 
   return (
     <header className="grid h-[76px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-[#d8e1dc]/75 bg-white px-[5.8vw]">
-      {onHome ? (
-        <button
-          className={`${brandContainerClass} cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 disabled:cursor-not-allowed disabled:opacity-45`}
-          type="button"
-          onClick={onHome}
-          disabled={homeDisabled}
-          aria-label="ホームへ戻る"
-        >
-          {appBrand}
-        </button>
-      ) : (
-        <div className={brandContainerClass}>{appBrand}</div>
-      )}
+      <div
+        className={`${brandContainerClass} ${onHome ? 'cursor-pointer' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30`}
+        role={onHome ? 'button' : undefined}
+        tabIndex={onHome ? 0 : undefined}
+        onClick={onHome ? activateHome : undefined}
+        onKeyDown={onHome ? handleBrandKeyDown : undefined}
+        aria-label={onHome ? 'ホームへ戻る' : undefined}
+        aria-disabled={onHome && homeDisabled ? true : undefined}
+      >
+        {appBrand}
+      </div>
       {activeNav && (
         <HeaderNavigation
           activeNav={activeNav}

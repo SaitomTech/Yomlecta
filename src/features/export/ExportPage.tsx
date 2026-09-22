@@ -7,7 +7,7 @@ import {
   type ChangeEvent,
   type SyntheticEvent,
 } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -20,8 +20,6 @@ import { useExport, type ExportController } from './hooks/useExport'
 type ExportPageProps = {
   project: MediaProject
   exportResult?: ExportResult | null
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -48,8 +46,6 @@ function getStatusMessage({ status, progress, error }: ExportController) {
 export function ExportPage({
   project,
   exportResult = null,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -68,6 +64,7 @@ export function ExportPage({
   const previewDialogRef = useRef<HTMLDialogElement | null>(null)
   const isRunning = exporter.status === 'running'
   const isBusy = isRunning || isDownloading
+  useNavigationDisabled(isBusy)
   const statusMessage = getStatusMessage(exporter)
   const progressPercent = exporter.progress.total
     ? Math.round((exporter.progress.completed / exporter.progress.total) * 100)
@@ -165,13 +162,7 @@ export function ExportPage({
   }
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={isBusy}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar onBack={onBackToProject} disabled={isBusy} />
       </div>

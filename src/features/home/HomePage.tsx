@@ -1,6 +1,5 @@
 import { ArrowRight, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
 import { getErrorDetail } from '../../lib/errors'
 import { listArticles, listProjects } from '../../lib/storage/projectStorage'
 import type { ArticleListItem, ProjectListEntry, ProjectVideo } from '../../types/project'
@@ -38,10 +37,14 @@ export function HomePage({
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    const [projectsResult, articlesResult] = await Promise.allSettled([listProjects(), listArticles()])
+    const [projectsResult, articlesResult] = await Promise.allSettled([
+      listProjects(),
+      listArticles(),
+    ])
     const errors: string[] = []
     if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value)
-    else errors.push(getErrorDetail(projectsResult.reason, 'プロジェクト一覧を読み込めませんでした。'))
+    else
+      errors.push(getErrorDetail(projectsResult.reason, 'プロジェクト一覧を読み込めませんでした。'))
     if (articlesResult.status === 'fulfilled') setArticles(articlesResult.value)
     else errors.push(getErrorDetail(articlesResult.reason, '記事一覧を読み込めませんでした。'))
     setError(errors.length > 0 ? errors.join(' ') : null)
@@ -60,8 +63,7 @@ export function HomePage({
   const recentProjects = projects.slice(0, 3)
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="home" onProjects={onOpenProjects} onArticles={onOpenArticles} />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <section className="mx-auto flex w-[calc(100%-48px)] max-w-[1120px] flex-1 flex-col pb-14 pt-12 md:w-[calc(100%-11.6vw)] md:pt-16">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-stretch lg:gap-14">
           <div className="flex min-w-0 flex-col">

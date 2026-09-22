@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { AppLayout } from './AppLayout'
 import { ArticleReviewPage } from '../features/article/ArticleReviewPage'
 import { ArticleDetailPage } from '../features/article/ArticleDetailPage'
 import { ArticlesPage } from '../features/article/ArticlesPage'
@@ -525,163 +526,168 @@ function App() {
     await regenerateArticleExport(saved)
   }
 
-  if (route.kind === 'home')
-    return (
-      <HomePage
-        onOpenProjects={handleOpenProjects}
-        onOpenArticles={handleOpenArticles}
-        onOpenProject={handleOpenProject}
-        onOpenArticle={handleOpenArticleDetail}
-        onOpenArticleWorkflow={handleOpenArticleWorkflow}
-        onAddLocalVideo={handleHomeAddLocalVideo}
-        onAddYoutubeVideo={handleHomeAddYoutubeVideo}
-      />
-    )
-  if (route.kind === 'projects')
-    return (
-      <ProjectsPage
-        onHome={handleBackToHome}
-        onArticles={handleOpenArticles}
-        onCreateProject={handleCreateProject}
-        onOpenProject={handleOpenProject}
-      />
-    )
-  if (route.kind === 'articles')
-    return (
-      <ArticlesPage
-        onHome={handleBackToHome}
-        onProjects={handleOpenProjects}
-        onOpenArticle={handleOpenArticleDetail}
-        onOpenWorkflow={handleOpenArticleWorkflow}
-        onOpenProject={(item) => void handleOpenProject(item.projectId)}
-      />
-    )
-  if (!project) return null
-  if (route.kind === 'article-detail') {
-    const article = project.articles.find((candidate) => candidate.id === route.articleId)
-    const item: ArticleListItem = {
-      articleId: route.articleId,
-      projectId: route.projectId,
-      title: article?.title ?? '',
-      projectTitle: project.title,
-      createdAt: article?.createdAt ?? project.createdAt,
-      updatedAt: article?.updatedAt ?? project.updatedAt,
-      lastVisitedStep: article?.workflow.lastVisitedStep ?? 'crop',
-      maxReachedStep: article?.workflow.maxReachedStep ?? 'crop',
-    }
-    return (
-      <ArticleDetailPage
-        project={project}
-        item={item}
-        onHome={handleBackToHome}
-        onProjects={handleOpenProjects}
-        onBack={handleOpenArticles}
-        onEdit={() =>
-          void handleOpenArticleWorkflow(
-            item,
-            getArticleStatus(item) === 'done' ? 'article-review' : undefined,
-          )
-        }
-        onExport={() => void handleOpenArticleWorkflow(item, 'export')}
-        onOpenProject={() => void handleOpenProject(project.id)}
-      />
-    )
-  }
-  if (route.kind === 'project')
-    return (
-      <ProjectDetailPage
-        project={project}
-        onHome={handleBackToHome}
-        onArticles={handleOpenArticles}
-        onBackToProjects={handleOpenProjects}
-        onDeleteProject={() => handleDeleteProject(project.id)}
-        onRenameProject={handleRenameProject}
-        onAddLocalVideo={handleAddLocalVideo}
-        onAddYoutubeVideo={handleAddYoutubeVideo}
-        onOpenArticle={(articleId) => void handleOpenProjectArticle(articleId)}
-        onDeleteArticle={handleDeleteArticle}
-        onDeleteVideo={handleDeleteVideo}
-        onCreateArticles={handleCreateArticles}
-      />
-    )
-  const articleProps = {
-    maxReachedStep: project.workflow.maxReachedStep,
-    onStepClick: handleWorkflowStep,
-    onSaveTitle: handleSaveArticleTitle,
-    onArticles: handleOpenArticles,
-  }
-  if (route.step === 'crop')
-    return (
-      <CropTrimPage
-        key={route.articleId}
-        project={project}
-        onCompleted={handleArticleCropCompleted}
-        onHome={handleBackToHome}
-        onBackToProject={handleOpenProjects}
-        onOpenArticle={handleOpenArticle}
-        {...articleProps}
-      />
-    )
-  if (route.step === 'detect-slides')
-    return (
-      <SlideDetectionPage
-        key={route.articleId}
-        project={project}
-        onCompleted={handleSlideDetectionCompleted}
-        onContinue={() => void handleProjectStep('generate-notes')}
-        onHome={handleBackToHome}
-        onBackToProject={handleOpenProjects}
-        onOpenArticle={handleOpenArticle}
-        {...articleProps}
-      />
-    )
-  if (route.step === 'generate-notes')
-    return (
-      <GenerateNotesPage
-        key={route.articleId}
-        project={project}
-        onCompleted={handleTranscriptionCompleted}
-        onOcrSlideCompleted={handleOcrSlideCompleted}
-        onSaveSlideResultEdits={handleSaveSlideResultEdits}
-        onOpenArticleReview={() => void handleProjectStep('article-review')}
-        onHome={handleBackToHome}
-        onBackToProject={handleOpenProjects}
-        onOpenArticle={handleOpenArticle}
-        {...articleProps}
-      />
-    )
-  if (route.step === 'article-review')
-    return (
-      <ArticleReviewPage
-        key={route.articleId}
-        project={project}
-        onContentSlideCompleted={handleContentSlideCompleted}
-        onSaveSections={handleSaveArticleSections}
-        getCurrentProject={() => projectRef.current}
-        onSave={handleSaveArticle}
-        onSaveSummary={handleSaveArticleSummary}
-        onExport={() => void handleProjectStep('export')}
-        onHome={handleBackToHome}
-        onBackToProject={handleOpenProjects}
-        onOpenArticle={handleOpenArticle}
-        {...articleProps}
-      />
-    )
-  return (
-    <ExportPage
-      key={route.articleId}
-      project={project}
-      exportResult={
-        generatedExport && generatedExport.articleId === project.activeArticleId
-          ? generatedExport.result
-          : null
+  const page = (() => {
+    if (route.kind === 'home')
+      return (
+        <HomePage
+          onOpenProjects={handleOpenProjects}
+          onOpenArticles={handleOpenArticles}
+          onOpenProject={handleOpenProject}
+          onOpenArticle={handleOpenArticleDetail}
+          onOpenArticleWorkflow={handleOpenArticleWorkflow}
+          onAddLocalVideo={handleHomeAddLocalVideo}
+          onAddYoutubeVideo={handleHomeAddYoutubeVideo}
+        />
+      )
+    if (route.kind === 'projects')
+      return (
+        <ProjectsPage onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
+      )
+    if (route.kind === 'articles')
+      return (
+        <ArticlesPage
+          onOpenArticle={handleOpenArticleDetail}
+          onOpenWorkflow={handleOpenArticleWorkflow}
+          onOpenProject={(item) => void handleOpenProject(item.projectId)}
+        />
+      )
+    if (!project) return null
+    if (route.kind === 'article-detail') {
+      const article = project.articles.find((candidate) => candidate.id === route.articleId)
+      const item: ArticleListItem = {
+        articleId: route.articleId,
+        projectId: route.projectId,
+        title: article?.title ?? '',
+        projectTitle: project.title,
+        createdAt: article?.createdAt ?? project.createdAt,
+        updatedAt: article?.updatedAt ?? project.updatedAt,
+        lastVisitedStep: article?.workflow.lastVisitedStep ?? 'crop',
+        maxReachedStep: article?.workflow.maxReachedStep ?? 'crop',
       }
-      onHome={handleBackToHome}
-      onBackToProject={handleOpenProjects}
-      onOpenArticle={handleOpenArticle}
-      onGenerated={handleExportCompleted}
-      {...articleProps}
-    />
+      return (
+        <ArticleDetailPage
+          project={project}
+          item={item}
+          onBack={handleOpenArticles}
+          onEdit={() =>
+            void handleOpenArticleWorkflow(
+              item,
+              getArticleStatus(item) === 'done' ? 'article-review' : undefined,
+            )
+          }
+          onExport={() => void handleOpenArticleWorkflow(item, 'export')}
+          onOpenProject={() => void handleOpenProject(project.id)}
+        />
+      )
+    }
+    if (route.kind === 'project')
+      return (
+        <ProjectDetailPage
+          project={project}
+          onBackToProjects={handleOpenProjects}
+          onDeleteProject={() => handleDeleteProject(project.id)}
+          onRenameProject={handleRenameProject}
+          onAddLocalVideo={handleAddLocalVideo}
+          onAddYoutubeVideo={handleAddYoutubeVideo}
+          onOpenArticle={(articleId) => void handleOpenProjectArticle(articleId)}
+          onDeleteArticle={handleDeleteArticle}
+          onDeleteVideo={handleDeleteVideo}
+          onCreateArticles={handleCreateArticles}
+        />
+      )
+    const articleProps = {
+      maxReachedStep: project.workflow.maxReachedStep,
+      onStepClick: handleWorkflowStep,
+      onSaveTitle: handleSaveArticleTitle,
+    }
+    if (route.step === 'crop')
+      return (
+        <CropTrimPage
+          key={route.articleId}
+          project={project}
+          onCompleted={handleArticleCropCompleted}
+          onBackToProject={handleOpenProjects}
+          onOpenArticle={handleOpenArticle}
+          {...articleProps}
+        />
+      )
+    if (route.step === 'detect-slides')
+      return (
+        <SlideDetectionPage
+          key={route.articleId}
+          project={project}
+          onCompleted={handleSlideDetectionCompleted}
+          onContinue={() => void handleProjectStep('generate-notes')}
+          onBackToProject={handleOpenProjects}
+          onOpenArticle={handleOpenArticle}
+          {...articleProps}
+        />
+      )
+    if (route.step === 'generate-notes')
+      return (
+        <GenerateNotesPage
+          key={route.articleId}
+          project={project}
+          onCompleted={handleTranscriptionCompleted}
+          onOcrSlideCompleted={handleOcrSlideCompleted}
+          onSaveSlideResultEdits={handleSaveSlideResultEdits}
+          onOpenArticleReview={() => void handleProjectStep('article-review')}
+          onBackToProject={handleOpenProjects}
+          onOpenArticle={handleOpenArticle}
+          {...articleProps}
+        />
+      )
+    if (route.step === 'article-review')
+      return (
+        <ArticleReviewPage
+          key={route.articleId}
+          project={project}
+          onContentSlideCompleted={handleContentSlideCompleted}
+          onSaveSections={handleSaveArticleSections}
+          getCurrentProject={() => projectRef.current}
+          onSave={handleSaveArticle}
+          onSaveSummary={handleSaveArticleSummary}
+          onExport={() => void handleProjectStep('export')}
+          onBackToProject={handleOpenProjects}
+          onOpenArticle={handleOpenArticle}
+          {...articleProps}
+        />
+      )
+    return (
+      <ExportPage
+        key={route.articleId}
+        project={project}
+        exportResult={
+          generatedExport && generatedExport.articleId === project.activeArticleId
+            ? generatedExport.result
+            : null
+        }
+        onBackToProject={handleOpenProjects}
+        onOpenArticle={handleOpenArticle}
+        onGenerated={handleExportCompleted}
+        {...articleProps}
+      />
+    )
+  })()
+
+  if (!page) return null
+
+  const activeNav =
+    route.kind === 'home'
+      ? 'home'
+      : route.kind === 'articles' || route.kind === 'article-detail'
+        ? 'articles'
+        : 'projects'
+
+  return (
+    <AppLayout
+      activeNav={activeNav}
+      onHome={route.kind === 'home' ? undefined : handleBackToHome}
+      onProjects={activeNav === 'projects' ? undefined : handleOpenProjects}
+      onArticles={activeNav === 'articles' ? undefined : handleOpenArticles}
+    >
+      {page}
+    </AppLayout>
   )
 }
 

@@ -1,6 +1,6 @@
 import { ArrowRight, Play, Square } from 'lucide-react'
 import { useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -36,8 +36,6 @@ type ArticleReviewPageProps = {
   onSave: (draft: ArticleDraft) => void | Promise<void>
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onExport: () => void
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -64,8 +62,6 @@ export function ArticleReviewPage({
   onSave,
   onSaveSummary,
   onExport,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -260,15 +256,10 @@ export function ArticleReviewPage({
       return
     onStepClick(nextStep)
   }
+  useNavigationDisabled(hasUnsavedChanges || isBusy)
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={hasUnsavedChanges || isBusy}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar
           onBack={onBackToProject}
@@ -321,9 +312,7 @@ export function ArticleReviewPage({
                     }
                     void handleRunAll()
                   }}
-                  disabled={
-                    !isBatchRunning && (isBusy || project.slides.length === 0)
-                  }
+                  disabled={!isBatchRunning && (isBusy || project.slides.length === 0)}
                   aria-label={isBatchRunning ? '一括実行を停止' : undefined}
                 >
                   {isBatchRunning ? (

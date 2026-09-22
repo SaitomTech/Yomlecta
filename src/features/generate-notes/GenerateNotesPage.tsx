@@ -1,6 +1,6 @@
 import { Play, Square } from 'lucide-react'
 import { useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -34,8 +34,6 @@ type GenerateNotesPageProps = {
   onOcrSlideCompleted: OcrSlideCompleted
   onSaveSlideResultEdits: (slideId: string, edits: SlideResultEdits) => void | Promise<void>
   onOpenArticleReview: () => void
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -51,8 +49,6 @@ export function GenerateNotesPage({
   onOcrSlideCompleted,
   onSaveSlideResultEdits,
   onOpenArticleReview,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -81,6 +77,7 @@ export function GenerateNotesPage({
   const isBatchRunning = batchStage !== 'idle'
   const isOcrRunning = ocr.status === 'running'
   const isProcessing = isBatchRunning || transcription.status === 'running' || isOcrRunning
+  useNavigationDisabled(isProcessing)
 
   const handleRunAll = async () => {
     if (isProcessing) return
@@ -101,13 +98,7 @@ export function GenerateNotesPage({
     if (batchStage === 'transcription') transcription.cancel()
   }
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={isProcessing}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar onBack={onBackToProject} disabled={isProcessing} />
       </div>

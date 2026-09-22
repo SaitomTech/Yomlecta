@@ -1,6 +1,5 @@
 import { FileText, RefreshCw, Search, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
 import { getErrorDetail } from '../../lib/errors'
 import { listArticles } from '../../lib/storage/projectStorage'
 import type { ArticleListItem } from '../../types/project'
@@ -10,14 +9,10 @@ import { getArticleStatus, type ArticleListStatus } from './articleList'
 type StatusFilter = 'all' | ArticleListStatus
 
 export function ArticlesPage({
-  onHome,
-  onProjects,
   onOpenArticle,
   onOpenWorkflow,
   onOpenProject,
 }: {
-  onHome: () => void
-  onProjects: () => void
   onOpenArticle: (item: ArticleListItem) => void
   onOpenWorkflow: (item: ArticleListItem) => void
   onOpenProject: (item: ArticleListItem) => void
@@ -61,8 +56,7 @@ export function ArticlesPage({
   )
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="articles" onHome={onHome} onProjects={onProjects} />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <section className="mx-auto flex w-[calc(100%-48px)] max-w-[1040px] flex-1 flex-col pb-14 pt-12 md:w-[calc(100%-11.6vw)] md:pt-16">
         <div className="flex flex-wrap items-end justify-between gap-4 pb-4">
           <div>

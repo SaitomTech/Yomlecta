@@ -1,6 +1,6 @@
 import { ArrowRight, Check } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -18,8 +18,6 @@ type SlideDetectionPageProps = {
   project: MediaProject
   onCompleted: (output: SlideDetectionOutput) => void | Promise<void>
   onContinue: () => void
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -31,8 +29,6 @@ export function SlideDetectionPage({
   project,
   onCompleted,
   onContinue,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -90,6 +86,8 @@ export function SlideDetectionPage({
   const boundaries = output?.result.boundaries ?? []
   const isRunning = detection.status === 'running'
   const isCompleted = detection.status === 'completed'
+  const navigationDisabled = isRunning || isSavingReview || hasUnsavedReview
+  useNavigationDisabled(navigationDisabled)
 
   const updateReviewBoundaries = useCallback((nextBoundaries: SlideBoundary[]) => {
     setReviewBoundaries(
@@ -120,13 +118,7 @@ export function SlideDetectionPage({
   const handleDetect = () => detection.detect({ threshold, sampleIntervalMs })
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={isRunning || isSavingReview || hasUnsavedReview}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar
           onBack={onBackToProject}

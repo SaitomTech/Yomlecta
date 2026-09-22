@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { AppHeader } from '../../components/AppHeader'
 import { useVideoSourceUrl } from '../../lib/media/useVideoSourceUrl'
 import { formatTimestamp } from '../../lib/time'
 import { useDialogA11y } from '../../lib/ui/useDialogA11y'
@@ -38,7 +37,10 @@ function renderParagraphs(value: string) {
     .map((paragraph, index) => {
       const lines = paragraph.split('\n')
       return (
-        <p key={`${paragraph.slice(0, 16)}-${index}`} className="mb-4 text-[16px] leading-[1.9] last:mb-0">
+        <p
+          key={`${paragraph.slice(0, 16)}-${index}`}
+          className="mb-4 text-[16px] leading-[1.9] last:mb-0"
+        >
           {lines.map((line, lineIndex) => (
             <span key={`${line}-${lineIndex}`}>
               {line}
@@ -53,8 +55,6 @@ function renderParagraphs(value: string) {
 export function ArticleDetailPage({
   project,
   item,
-  onHome,
-  onProjects,
   onBack,
   onEdit,
   onExport,
@@ -62,8 +62,6 @@ export function ArticleDetailPage({
 }: {
   project: MediaProject
   item: ArticleListItem
-  onHome: () => void
-  onProjects: () => void
   onBack: () => void
   onEdit: () => void
   onExport: () => void
@@ -87,8 +85,7 @@ export function ArticleDetailPage({
   })
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#fbfcfa] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="articles" onHome={onHome} onProjects={onProjects} />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#fbfcfa] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-32px)] max-w-[1200px] items-center">
         <button
           className="inline-flex items-center gap-1.5 rounded-[8px] px-2 py-1.5 text-xs font-semibold text-[#71807b] transition hover:bg-[#e2eee8] hover:text-[#1d6b50]"
@@ -116,11 +113,17 @@ export function ArticleDetailPage({
             <span aria-hidden="true">·</span>
             <span>{formatTimestamp(project.source.metadata.durationMs)}</span>
             <span aria-hidden="true">·</span>
-            <button className="font-semibold text-[#1d6b50] hover:underline" type="button" onClick={onOpenProject}>
+            <button
+              className="font-semibold text-[#1d6b50] hover:underline"
+              type="button"
+              onClick={onOpenProject}
+            >
               {item.projectTitle}
             </button>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
-            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}>
+            <span
+              className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}
+            >
               {getArticleStatusLabel(status)}
             </span>
           </div>
@@ -131,7 +134,9 @@ export function ArticleDetailPage({
               onClick={onEdit}
             >
               <PencilLine size={14} />
-              {getArticleActionLabel(status) === '記事を見る' ? '記事を編集' : getArticleActionLabel(status)}
+              {getArticleActionLabel(status) === '記事を見る'
+                ? '記事を編集'
+                : getArticleActionLabel(status)}
               <ArrowRight size={14} />
             </button>
             <button
@@ -182,110 +187,138 @@ export function ArticleDetailPage({
               </div>
             </aside>
             <article className="min-w-0">
-            {summary && (
-              <section
-                className="mb-7 overflow-hidden rounded-[15px] border border-[#b7cbc0] bg-[#fbfcfa]"
-                aria-labelledby="article-detail-summary"
-              >
-                <header className="border-b border-[#d8e1dc] bg-[#eef6f0] px-[22px] py-[18px]">
-                  <h2 id="article-detail-summary" className="flex items-center gap-2 text-[20px] font-bold tracking-[-0.04em] text-[#1d6b50]">
-                    <Sparkles size={16} aria-hidden="true" /> AI要約
-                  </h2>
-                </header>
-                <div className="px-[22px] py-[22px]">
-                  <div className="text-[#35443e]">{renderParagraphs(summary.overview)}</div>
-                  <div className="mt-[22px] rounded-[9px] bg-[#f4f8f4] px-[18px] py-[14px]">
-                    <h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">中心メッセージ</h3>
-                    <p className="m-0 text-[15px] leading-[1.8] text-[#35443e]">{summary.mainMessage}</p>
-                  </div>
-                  <div className="mt-[22px] grid gap-7 border-t border-[#d8e1dc] pt-[18px] md:grid-cols-[1.2fr_1fr]">
-                    <div>
-                      <h3 className="mb-2 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">主なポイント</h3>
-                      <ul className="space-y-[7px] pl-[18px] text-[14px] leading-[1.7] text-[#35443e]">
-                        {summary.keyPoints.map((point) => (
-                          <li key={point} className="list-disc">
-                            {point}
-                          </li>
-                        ))}
-                      </ul>
+              {summary && (
+                <section
+                  className="mb-7 overflow-hidden rounded-[15px] border border-[#b7cbc0] bg-[#fbfcfa]"
+                  aria-labelledby="article-detail-summary"
+                >
+                  <header className="border-b border-[#d8e1dc] bg-[#eef6f0] px-[22px] py-[18px]">
+                    <h2
+                      id="article-detail-summary"
+                      className="flex items-center gap-2 text-[20px] font-bold tracking-[-0.04em] text-[#1d6b50]"
+                    >
+                      <Sparkles size={16} aria-hidden="true" /> AI要約
+                    </h2>
+                  </header>
+                  <div className="px-[22px] py-[22px]">
+                    <div className="text-[#35443e]">{renderParagraphs(summary.overview)}</div>
+                    <div className="mt-[22px] rounded-[9px] bg-[#f4f8f4] px-[18px] py-[14px]">
+                      <h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">
+                        中心メッセージ
+                      </h3>
+                      <p className="m-0 text-[15px] leading-[1.8] text-[#35443e]">
+                        {summary.mainMessage}
+                      </p>
                     </div>
-                    <div>
-                      <h3 className="mb-2 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">キーワード</h3>
-                      <div className="flex flex-wrap gap-[7px]">
-                        {summary.keywords.map((keyword) => (
-                          <span key={keyword} className="rounded-full border border-[#b7cbc0] bg-[#f4f8f4] px-[9px] py-1 text-xs text-[#53615b]">
-                            {keyword}
-                          </span>
-                        ))}
+                    <div className="mt-[22px] grid gap-7 border-t border-[#d8e1dc] pt-[18px] md:grid-cols-[1.2fr_1fr]">
+                      <div>
+                        <h3 className="mb-2 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">
+                          主なポイント
+                        </h3>
+                        <ul className="space-y-[7px] pl-[18px] text-[14px] leading-[1.7] text-[#35443e]">
+                          {summary.keyPoints.map((point) => (
+                            <li key={point} className="list-disc">
+                              {point}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h3 className="mb-2 text-[11px] font-semibold tracking-[0.03em] text-[#71807b]">
+                          キーワード
+                        </h3>
+                        <div className="flex flex-wrap gap-[7px]">
+                          {summary.keywords.map((keyword) => (
+                            <span
+                              key={keyword}
+                              className="rounded-full border border-[#b7cbc0] bg-[#f4f8f4] px-[9px] py-1 text-xs text-[#53615b]"
+                            >
+                              {keyword}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </section>
-            )}
+                </section>
+              )}
 
-            {slides.length === 0 ? (
-              <div className="mt-8 rounded-[14px] border border-dashed border-[#b7cbc0] bg-[#fbfcfa] px-5 py-12 text-center">
-                <p className="text-sm font-semibold">本文はまだありません</p>
-                <p className="mt-2 text-xs leading-6 text-[#71807b]">
-                  {status === 'not-started'
-                    ? '記事の作成を開始すると、ここに本文が表示されます。'
-                    : '記事を編集して本文を生成してください。'}
-                </p>
-                <button
-                  className="mt-5 inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white"
-                  type="button"
-                  onClick={onEdit}
-                >
-                  {getArticleActionLabel(status)} <ArrowRight size={14} />
-                </button>
-              </div>
-            ) : (
-              <div>
-                {slides.map((slide, index) => {
-                  const section = sections.find((candidate) => candidate.slideIds.includes(slide.id))
-                  const isSectionStart = section?.slideIds[0] === slide.id
-                  return (
-                    <div key={slide.id} className={isSectionStart && index > 0 ? 'mt-5' : undefined}>
-                      {isSectionStart && section && (
-                        <div id={section.id} className="mb-[10px] flex min-h-[44px] items-center border-l-[10px] border-[#8bb6a2] bg-[#e8f2ec] px-3 py-[7px] scroll-mt-6">
-                          <h2 className="text-[22px] font-bold leading-[1.35] tracking-[-0.05em]">{section.heading}</h2>
-                        </div>
-                      )}
-                      <article className="py-2 pb-[18px]">
-                        <div className="grid items-start gap-8 min-[601px]:grid-cols-2">
-                          <figure className="relative m-0">
-                            {slide.image.representativeFramePath && (
-                              <button
-                                className="group relative block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left"
-                                type="button"
-                                onClick={() => setExpandedImage(convertFileSrc(slide.image.representativeFramePath!))}
-                                aria-label="画像を拡大"
-                              >
-                                <img
-                                  className="block w-full border border-[#d8e1dc]"
-                                  src={convertFileSrc(slide.image.representativeFramePath)}
-                                  alt="代表画像"
-                                />
-                                <span className="absolute bottom-[10px] right-[10px] inline-flex items-center gap-1 bg-[rgba(24,33,31,0.78)] px-[7px] py-1 text-[11px] leading-[1.3] text-[#f3faf6] opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-                                  <Maximize2 size={12} aria-hidden="true" /> 拡大
-                                </span>
-                              </button>
-                            )}
-                            <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
-                              {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
-                            </figcaption>
-                          </figure>
-                          <div className="content min-w-0 text-[#35443e]">
-                            {renderParagraphs(slide.transcript?.articleBody ?? '')}
+              {slides.length === 0 ? (
+                <div className="mt-8 rounded-[14px] border border-dashed border-[#b7cbc0] bg-[#fbfcfa] px-5 py-12 text-center">
+                  <p className="text-sm font-semibold">本文はまだありません</p>
+                  <p className="mt-2 text-xs leading-6 text-[#71807b]">
+                    {status === 'not-started'
+                      ? '記事の作成を開始すると、ここに本文が表示されます。'
+                      : '記事を編集して本文を生成してください。'}
+                  </p>
+                  <button
+                    className="mt-5 inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white"
+                    type="button"
+                    onClick={onEdit}
+                  >
+                    {getArticleActionLabel(status)} <ArrowRight size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  {slides.map((slide, index) => {
+                    const section = sections.find((candidate) =>
+                      candidate.slideIds.includes(slide.id),
+                    )
+                    const isSectionStart = section?.slideIds[0] === slide.id
+                    return (
+                      <div
+                        key={slide.id}
+                        className={isSectionStart && index > 0 ? 'mt-5' : undefined}
+                      >
+                        {isSectionStart && section && (
+                          <div
+                            id={section.id}
+                            className="mb-[10px] flex min-h-[44px] items-center border-l-[10px] border-[#8bb6a2] bg-[#e8f2ec] px-3 py-[7px] scroll-mt-6"
+                          >
+                            <h2 className="text-[22px] font-bold leading-[1.35] tracking-[-0.05em]">
+                              {section.heading}
+                            </h2>
                           </div>
-                        </div>
-                      </article>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+                        )}
+                        <article className="py-2 pb-[18px]">
+                          <div className="grid items-start gap-8 min-[601px]:grid-cols-2">
+                            <figure className="relative m-0">
+                              {slide.image.representativeFramePath && (
+                                <button
+                                  className="group relative block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left"
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedImage(
+                                      convertFileSrc(slide.image.representativeFramePath!),
+                                    )
+                                  }
+                                  aria-label="画像を拡大"
+                                >
+                                  <img
+                                    className="block w-full border border-[#d8e1dc]"
+                                    src={convertFileSrc(slide.image.representativeFramePath)}
+                                    alt="代表画像"
+                                  />
+                                  <span className="absolute bottom-[10px] right-[10px] inline-flex items-center gap-1 bg-[rgba(24,33,31,0.78)] px-[7px] py-1 text-[11px] leading-[1.3] text-[#f3faf6] opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                                    <Maximize2 size={12} aria-hidden="true" /> 拡大
+                                  </span>
+                                </button>
+                              )}
+                              <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
+                                {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                              </figcaption>
+                            </figure>
+                            <div className="content min-w-0 text-[#35443e]">
+                              {renderParagraphs(slide.transcript?.articleBody ?? '')}
+                            </div>
+                          </div>
+                        </article>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </article>
           </div>
         )}
