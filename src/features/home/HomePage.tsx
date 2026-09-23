@@ -1,6 +1,5 @@
-import { ArrowRight, FileVideo, RefreshCw } from 'lucide-react'
+import { ArrowRight, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
 import { getErrorDetail } from '../../lib/errors'
 import { listArticles, listProjects } from '../../lib/storage/projectStorage'
 import type { ArticleListItem, ProjectListEntry, ProjectVideo } from '../../types/project'
@@ -38,11 +37,15 @@ export function HomePage({
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    const [projectsResult, articlesResult] = await Promise.allSettled([listProjects(), listArticles()])
+    const [projectsResult, articlesResult] = await Promise.allSettled([
+      listProjects({ pageSize: 5 }),
+      listArticles({ pageSize: 5 }),
+    ])
     const errors: string[] = []
-    if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value)
-    else errors.push(getErrorDetail(projectsResult.reason, 'プロジェクト一覧を読み込めませんでした。'))
-    if (articlesResult.status === 'fulfilled') setArticles(articlesResult.value)
+    if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value.items)
+    else
+      errors.push(getErrorDetail(projectsResult.reason, 'プロジェクト一覧を読み込めませんでした。'))
+    if (articlesResult.status === 'fulfilled') setArticles(articlesResult.value.items)
     else errors.push(getErrorDetail(articlesResult.reason, '記事一覧を読み込めませんでした。'))
     setError(errors.length > 0 ? errors.join(' ') : null)
     setLoading(false)
@@ -57,11 +60,8 @@ export function HomePage({
   const projects = entries.filter(
     (entry): entry is Extract<ProjectListEntry, { kind: 'project' }> => entry.kind === 'project',
   )
-  const recentProjects = projects.slice(0, 3)
-
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader activeNav="home" onProjects={onOpenProjects} onArticles={onOpenArticles} />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <section className="mx-auto flex w-[calc(100%-48px)] max-w-[1120px] flex-1 flex-col pb-14 pt-12 md:w-[calc(100%-11.6vw)] md:pt-16">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-stretch lg:gap-14">
           <div className="flex min-w-0 flex-col">
@@ -138,7 +138,7 @@ export function HomePage({
               </div>
             ) : (
               <div>
-                {articles.slice(0, 3).map((item) => (
+                {articles.map((item) => (
                   <ArticleListRow
                     key={item.articleId}
                     item={item}
@@ -182,16 +182,12 @@ export function HomePage({
                 <RefreshCw className="mr-2 animate-spin" size={15} />
                 読み込み中…
               </div>
-            ) : recentProjects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
-                <FileVideo className="text-[#9aada3]" size={32} strokeWidth={1.3} />
-                <p className="mt-4 text-[15px] font-semibold">まだプロジェクトがありません</p>
-                <p className="mt-2 text-xs leading-6 text-[#71807b]">
-                  上のエリアから動画を読み込むと、ここに表示されます。
-                </p>
+            ) : projects.length === 0 ? (
+              <div className="px-5 py-10 text-center text-xs leading-6 text-[#71807b]">
+                まだプロジェクトがありません。上のエリアから動画を読み込むと、ここに表示されます。
               </div>
             ) : (
-              recentProjects.map(({ summary }) => (
+              projects.map(({ summary }) => (
                 <ProjectListRow
                   key={summary.id}
                   summary={summary}

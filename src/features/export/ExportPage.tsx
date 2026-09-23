@@ -7,7 +7,7 @@ import {
   type ChangeEvent,
   type SyntheticEvent,
 } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -20,8 +20,6 @@ import { useExport, type ExportController } from './hooks/useExport'
 type ExportPageProps = {
   project: MediaProject
   exportResult?: ExportResult | null
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -29,6 +27,8 @@ type ExportPageProps = {
   maxReachedStep: WorkflowStep
   onStepClick: (step: WorkflowStep) => void
 }
+
+const MIN_PREVIEW_HEIGHT = 420
 
 function getStatusMessage({ status, progress, error }: ExportController) {
   switch (status) {
@@ -46,8 +46,6 @@ function getStatusMessage({ status, progress, error }: ExportController) {
 export function ExportPage({
   project,
   exportResult = null,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -66,6 +64,7 @@ export function ExportPage({
   const previewDialogRef = useRef<HTMLDialogElement | null>(null)
   const isRunning = exporter.status === 'running'
   const isBusy = isRunning || isDownloading
+  useNavigationDisabled(isBusy)
   const statusMessage = getStatusMessage(exporter)
   const progressPercent = exporter.progress.total
     ? Math.round((exporter.progress.completed / exporter.progress.total) * 100)
@@ -74,6 +73,10 @@ export function ExportPage({
   useEffect(() => {
     const handlePreviewMessage = (event: MessageEvent) => {
       if (event.source !== previewFrameRef.current?.contentWindow) return
+      if (event.data?.type === 'preview-height' && typeof event.data.height === 'number') {
+        setPreviewHeight(Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(event.data.height)))
+        return
+      }
       if (event.data?.type !== 'preview-image' || typeof event.data.src !== 'string') return
       setPreviewImage(event.data.src)
     }
@@ -92,6 +95,7 @@ export function ExportPage({
 
   const handleGenerate = useCallback(async () => {
     setSaveError(null)
+    setPreviewHeight(MIN_PREVIEW_HEIGHT)
     const output = await generate()
     if (!output) return
     try {
@@ -144,12 +148,12 @@ export function ExportPage({
 
     // Measure from a short viewport first. Otherwise scrollHeight can reflect
     // the iframe's previous height and keep a large blank area forever.
-    iframe.style.height = '420px'
+    iframe.style.height = `${MIN_PREVIEW_HEIGHT}px`
     requestAnimationFrame(() => {
       if (!iframe.isConnected) return
       setPreviewHeight(
         Math.max(
-          420,
+          MIN_PREVIEW_HEIGHT,
           previewDocument.documentElement.scrollHeight,
           previewDocument.body.scrollHeight,
         ),
@@ -158,13 +162,7 @@ export function ExportPage({
   }
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={isBusy}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar onBack={onBackToProject} disabled={isBusy} />
       </div>

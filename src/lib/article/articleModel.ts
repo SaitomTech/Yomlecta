@@ -1,10 +1,10 @@
 import { getTextModel, TEXT_MODELS, type TextModel, type TextModelId } from '../llama/textModel'
 
 export const OPENAI_LUNA_MODEL = {
-  id: 'openai:gpt-5.6-luna',
+  id: 'openai:gpt-6-luna',
   provider: 'openai',
-  apiModel: 'gpt-5.6-luna',
-  label: 'GPT-5.6 Luna',
+  apiModel: 'gpt-6-luna',
+  label: 'GPT-6 Luna',
   description: 'OpenAI APIを使う高速・低コストなクラウドモデルです。',
   reasoningEffort: 'none',
 } as const
@@ -37,6 +37,7 @@ export const ARTICLE_MODELS: readonly ArticleModel[] = [
 
 export function getArticleModel(id: string | undefined): ArticleModel {
   if (id === undefined) return OPENAI_LUNA_MODEL
+  if (id === 'openai:gpt-5.6-luna') return OPENAI_LUNA_MODEL
   if (id === OPENAI_LUNA_MODEL.id) return OPENAI_LUNA_MODEL
   if (id === APPLE_FOUNDATION_MODELS.id) return APPLE_FOUNDATION_MODELS
   const model = getTextModel(id)

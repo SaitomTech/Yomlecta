@@ -1,6 +1,6 @@
 const OPENAI_TRANSCRIPTION_USD_PER_MINUTE = 0.0045
-const OPENAI_INPUT_USD_PER_MILLION_TOKENS = 0.2
-const OPENAI_OUTPUT_USD_PER_MILLION_TOKENS = 1.2
+const OPENAI_INPUT_USD_PER_MILLION_TOKENS = 0.1
+const OPENAI_OUTPUT_USD_PER_MILLION_TOKENS = 0.5
 
 /** Deliberately conservative display-only conversion for the Japanese UI. */
 export const DISPLAY_USD_TO_JPY = 160

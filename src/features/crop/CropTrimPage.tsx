@@ -1,6 +1,6 @@
 import { ArrowRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -18,8 +18,6 @@ type CropTrimPageProps = {
     crop: CropRegion,
     perspectiveCrop?: PerspectiveCrop,
   ) => void | Promise<void>
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -30,8 +28,6 @@ type CropTrimPageProps = {
 export function CropTrimPage({
   project,
   onCompleted,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -55,8 +51,6 @@ export function CropTrimPage({
       project={project}
       video={video}
       onCompleted={onCompleted}
-      onHome={onHome}
-      onArticles={onArticles}
       onBackToProject={onBackToProject}
       onOpenArticle={onOpenArticle}
       onSaveTitle={onSaveTitle}
@@ -71,8 +65,6 @@ function CropTrimEditor({
   article,
   video,
   onCompleted,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -97,15 +89,11 @@ function CropTrimEditor({
       await onCompleted(selected.range, crop, perspectiveCrop)
     },
   })
+  const navigationDisabled = editor.busy || editor.isDetecting
+  useNavigationDisabled(navigationDisabled)
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={editor.busy || editor.isDetecting}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar
           onBack={onBackToProject}

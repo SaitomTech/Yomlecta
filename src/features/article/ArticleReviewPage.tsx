@@ -1,6 +1,6 @@
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Play, Square } from 'lucide-react'
 import { useState } from 'react'
-import { AppHeader } from '../../components/AppHeader'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
@@ -36,8 +36,6 @@ type ArticleReviewPageProps = {
   onSave: (draft: ArticleDraft) => void | Promise<void>
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onExport: () => void
-  onHome: () => void
-  onArticles: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -46,6 +44,7 @@ type ArticleReviewPageProps = {
 }
 
 type EditingTarget = { type: 'slide'; slideId: string } | null
+type BatchStage = 'idle' | 'content' | 'summary' | 'sections'
 
 function getCurrentArticleSections(project: MediaProject) {
   const sections = project.article?.sections
@@ -63,8 +62,6 @@ export function ArticleReviewPage({
   onSave,
   onSaveSummary,
   onExport,
-  onHome,
-  onArticles,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -84,7 +81,12 @@ export function ArticleReviewPage({
       getArticleModel(project.article?.summary?.model ?? articleSlides[0]?.transcript?.articleModel)
         .id,
   )
-  const summaryGeneration = useArticleSummary(project, summaryModelId, onSaveSummary)
+  const summaryGeneration = useArticleSummary(
+    project,
+    summaryModelId,
+    onSaveSummary,
+    getCurrentProject,
+  )
   const storedTextModelId = project.slides
     .map((slide) => slide.transcript?.articleModel)
     .find((modelId): modelId is string => Boolean(modelId))
@@ -106,6 +108,7 @@ export function ArticleReviewPage({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [switchingArticleId, setSwitchingArticleId] = useState<string | null>(null)
+  const [batchStage, setBatchStage] = useState<BatchStage>('idle')
 
   const handleContentSlideCompleted = async (slideId: string, result: ContentProcessingResult) => {
     await onContentSlideCompleted(slideId, result)
@@ -118,31 +121,61 @@ export function ArticleReviewPage({
     textModelId,
     getCurrentProject,
   )
-  const sectionsGeneration = useArticleSections(project, textModelId, onSaveSections)
+  const sectionsGeneration = useArticleSections(
+    project,
+    textModelId,
+    onSaveSections,
+    getCurrentProject,
+  )
 
   const editingSlideId = editingTarget?.type === 'slide' ? editingTarget.slideId : null
   const isBodyDirty = editingSlideId !== null && bodyDraft !== (savedBodies[editingSlideId] ?? '')
   const hasUnsavedChanges = isBodyDirty
   const isBusy =
     isSaving ||
+    batchStage !== 'idle' ||
     summaryGeneration.status === 'running' ||
     processing.status === 'running' ||
     sectionsGeneration.status === 'running'
+  const isBatchRunning = batchStage !== 'idle'
   const contentControlsDisabled =
+    isBatchRunning ||
     isSaving ||
     summaryGeneration.status === 'running' ||
     sectionsGeneration.status === 'running' ||
     hasUnsavedChanges
   const sharedGenerationDisabled = isSaving || hasUnsavedChanges || switchingArticleId !== null
   const summaryControlsDisabled =
+    isBatchRunning ||
     sharedGenerationDisabled ||
     processing.status === 'running' ||
     sectionsGeneration.status === 'running'
   const sectionsControlsDisabled =
+    isBatchRunning ||
     sharedGenerationDisabled ||
     summaryGeneration.status === 'running' ||
     processing.status === 'running'
   const canEdit = editingTarget === null && !isBusy
+
+  const handleRunAll = async () => {
+    if (isBusy) return
+    setBatchStage('content')
+    try {
+      if (!(await processing.process(processing.status === 'completed'))) return
+      setBatchStage('summary')
+      if (!(await summaryGeneration.generate(summaryGeneration.isUpToDate))) return
+      setBatchStage('sections')
+      await sectionsGeneration.generate(sectionsGeneration.isUpToDate)
+    } finally {
+      setBatchStage('idle')
+    }
+  }
+
+  const handleCancelBatch = () => {
+    if (batchStage === 'content') processing.cancel()
+    if (batchStage === 'summary') summaryGeneration.cancel()
+    if (batchStage === 'sections') sectionsGeneration.cancel()
+  }
 
   const handleTextModelChange = (nextModelId: ArticleModelId) => {
     processing.reset()
@@ -223,15 +256,10 @@ export function ArticleReviewPage({
       return
     onStepClick(nextStep)
   }
+  useNavigationDisabled(hasUnsavedChanges || isBusy)
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
-      <AppHeader
-        activeNav="projects"
-        onHome={onHome}
-        onArticles={onArticles}
-        homeDisabled={hasUnsavedChanges || isBusy}
-      />
+    <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
       <div className="mx-auto flex min-h-[56px] w-[calc(100%-48px)] max-w-[1040px] items-center md:w-[calc(100%-11.6vw)]">
         <ArticleNavigationBar
           onBack={onBackToProject}
@@ -262,16 +290,38 @@ export function ArticleReviewPage({
 
           <div className="space-y-10 p-5 md:p-7">
             <section aria-labelledby="article-generation-heading">
-              <div>
-                <h2
-                  id="article-generation-heading"
-                  className="text-[21px] font-bold tracking-[-0.05em]"
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h2
+                    id="article-generation-heading"
+                    className="text-[21px] font-bold tracking-[-0.05em]"
+                  >
+                    1. 記事を生成
+                  </h2>
+                  <p className="mt-1 text-xs text-[#71807b]">
+                    OCR結果で文字起こしを補正し、要約とテーマ別セクションを追加します。
+                  </p>
+                </div>
+                <button
+                  className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-[9px] px-4 py-3 text-xs font-semibold shadow-[0_7px_16px_rgba(49,95,117,0.2)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#315f75]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${isBatchRunning ? 'border border-[#d28d7a] bg-[#fff5f1] text-[#9d422d] shadow-none hover:bg-[#fbe8e2]' : 'bg-[#315f75] text-[#f4fbff] hover:bg-[#264b5d]'}`}
+                  type="button"
+                  onClick={() => {
+                    if (isBatchRunning) {
+                      handleCancelBatch()
+                      return
+                    }
+                    void handleRunAll()
+                  }}
+                  disabled={!isBatchRunning && (isBusy || project.slides.length === 0)}
+                  aria-label={isBatchRunning ? '一括実行を停止' : undefined}
                 >
-                  1. 記事を生成
-                </h2>
-                <p className="mt-1 text-xs text-[#71807b]">
-                  OCR結果で文字起こしを補正し、要約とテーマ別セクションを追加します。
-                </p>
+                  {isBatchRunning ? (
+                    <Square size={13} fill="currentColor" />
+                  ) : (
+                    <Play size={13} fill="currentColor" />
+                  )}
+                  {isBatchRunning ? '停止' : '一括実行'}
+                </button>
               </div>
               <div className="mt-5 space-y-5">
                 <div>

@@ -13,7 +13,7 @@ use tauri::Manager;
 
 const KEYCHAIN_SERVICE: &str = "com.saitomtech.yomlecta.openai";
 const KEYCHAIN_ACCOUNT: &str = "default";
-const OPENAI_MODEL: &str = "gpt-5.6-luna";
+const OPENAI_MODEL: &str = "gpt-6-luna";
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
 const OPENAI_TRANSCRIPTIONS_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 const OPENAI_TRANSCRIPTION_MODEL: &str = "gpt-transcribe";
