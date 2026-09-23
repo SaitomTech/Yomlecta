@@ -9,10 +9,10 @@ export const APPLE_VISION_OCR_MODEL = {
 } as const
 
 export const OPENAI_OCR_MODEL = {
-  id: 'openai:gpt-5.6-luna',
+  id: 'openai:gpt-6-luna',
   provider: 'openai',
-  apiModel: 'gpt-5.6-luna',
-  label: 'GPT-5.6 Luna',
+  apiModel: 'gpt-6-luna',
+  label: 'GPT-6 Luna',
   description: 'OpenAI APIの画像認識モデルです。スライド内の細かい文字を読み取ります。',
   prompt: [
     '画像内に実際に表示されている文字だけを、読み取った順序で抽出してください。',

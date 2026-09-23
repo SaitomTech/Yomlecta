@@ -39,11 +39,11 @@ export function getOpenAiApiKeyStatus() {
   return invoke<OpenAiCredentialStatus>('get_openai_api_key_status')
 }
 
-export function validateAndSaveOpenAiApiKey(apiKey: string, model = 'gpt-5.6-luna') {
+export function validateAndSaveOpenAiApiKey(apiKey: string, model = 'gpt-6-luna') {
   return invoke<OpenAiCredentialStatus>('validate_and_save_openai_api_key', { apiKey, model })
 }
 
-export function testOpenAiConnection(model = 'gpt-5.6-luna') {
+export function testOpenAiConnection(model = 'gpt-6-luna') {
   return invoke<void>('test_openai_connection', { model })
 }
 
