@@ -9,6 +9,7 @@ export type SidecarName =
   | 'binaries/apple-vision-ocr'
   | 'binaries/apple-speech-transcriber'
   | 'binaries/apple-foundation-models'
+  | 'binaries/apple-translator'
   | 'binaries/yt-dlp'
 
 export function getBundledFfmpegPath() {

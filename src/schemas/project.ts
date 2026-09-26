@@ -264,10 +264,32 @@ const ArticleSectionsSchema = z.strictObject({
   generatedAt: IsoDateSchema.optional(),
 })
 
+const ArticleTranslationSchema = z.strictObject({
+  sourceLanguage: z.enum(['ja', 'en']),
+  targetLanguage: z.enum(['ja', 'en']),
+  engine: z.enum(['apple-translation', 'openai', 'local']),
+  model: z.string().min(1),
+  inputFingerprint: z.string().min(1),
+  generatedAt: IsoDateSchema,
+  title: z.string(),
+  bodies: z.record(z.string(), z.string()),
+  summary: z
+    .strictObject({
+      overview: z.string(),
+      mainMessage: z.string(),
+      keyPoints: z.array(z.string()),
+      keywords: z.array(z.string()),
+    })
+    .optional(),
+  sections: z.array(ArticleSectionSchema).optional(),
+})
+
 const ArticleDataSchema = z.strictObject({
   title: z.string().min(1),
   summary: ArticleSummarySchema.optional(),
   sections: ArticleSectionsSchema.optional(),
+  translations: z.record(z.string(), ArticleTranslationSchema).optional(),
+  outputLanguage: z.enum(['ja', 'en', 'both']).optional(),
 })
 
 const ProjectWorkflowSchema = z.strictObject({

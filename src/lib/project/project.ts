@@ -7,8 +7,10 @@ import {
   getActiveArticle,
   type Article,
   type ArticleDraft,
+  type ArticleOutputLanguage,
   type ArticleSections,
   type ArticleSummary,
+  type ArticleTranslation,
   type ContentProcessingResult,
   type CropRegion,
   type MediaProject,
@@ -463,6 +465,32 @@ export function updateProjectArticleTitle(project: MediaProject, draftTitle: str
   }
 }
 
+export function updateProjectArticleOutputLanguage(
+  project: MediaProject,
+  outputLanguage: ArticleOutputLanguage,
+): MediaProject {
+  const activeArticle = getActiveArticle(project)
+  if (!activeArticle) return project
+  const title =
+    activeArticle.title.trim() ||
+    project.article?.title?.trim() ||
+    project.source.name.replace(/\.[^.]+$/, '')
+  const nextArticle = { ...project.article, title, outputLanguage }
+  if (sameValue(project.article, nextArticle)) return project
+  return {
+    ...project,
+    article: nextArticle,
+    workflow: workflowWithReachableStep(
+      project,
+      getWorkflowStepIndex(project.workflow.maxReachedStep) >= getWorkflowStepIndex('export')
+        ? 'export'
+        : 'article-review',
+      'article-review',
+    ),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 export function updateProjectArticleSections(
   project: MediaProject,
   sections: ArticleSections | null,
@@ -502,6 +530,39 @@ export function updateProjectArticleSummary(
     project.article?.title?.trim() ||
     project.source.name.replace(/\.[^.]+$/, '')
   const nextArticle = { ...project.article, title, summary }
+  if (sameValue(project.article, nextArticle)) return project
+  return {
+    ...project,
+    article: nextArticle,
+    workflow: workflowWithReachableStep(
+      project,
+      getWorkflowStepIndex(project.workflow.maxReachedStep) >= getWorkflowStepIndex('export')
+        ? 'export'
+        : 'article-review',
+      'article-review',
+    ),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+export function updateProjectArticleTranslation(
+  project: MediaProject,
+  translation: ArticleTranslation,
+): MediaProject {
+  const activeArticle = getActiveArticle(project)
+  const title =
+    activeArticle?.title.trim() ||
+    project.article?.title?.trim() ||
+    project.source.name.replace(/\.[^.]+$/, '')
+  const currentArticle = project.article ?? { title }
+  const nextArticle = {
+    ...currentArticle,
+    title,
+    translations: {
+      ...currentArticle.translations,
+      [translation.targetLanguage]: translation,
+    },
+  }
   if (sameValue(project.article, nextArticle)) return project
   return {
     ...project,

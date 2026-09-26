@@ -13,10 +13,12 @@ import {
 import {
   syncActiveArticle,
   updateProjectArticleDraft,
+  updateProjectArticleOutputLanguage,
   updateProjectArticleSections,
   updateProjectArticleSourceSettings,
   updateProjectArticleSummary,
   updateProjectArticleTitle,
+  updateProjectArticleTranslation,
   updateProjectSlideContent,
   updateProjectSlideDetection,
   updateProjectSlideOcr,
@@ -26,8 +28,10 @@ import {
 import type {
   ContentProcessingResult,
   ArticleDraft,
+  ArticleOutputLanguage,
   ArticleSections,
   ArticleSummary,
+  ArticleTranslation,
   CropRegion,
   MediaProject,
   PerspectiveCrop,
@@ -77,6 +81,30 @@ export async function saveArticleSummary(project: MediaProject, summary: Article
   await updateDocumentAndArticle(synced.next, synced.article, synced.next.article, {
     runKind: 'summary_generation',
   })
+  return synced.next
+}
+
+export async function saveArticleTranslation(
+  project: MediaProject,
+  translation: ArticleTranslation,
+) {
+  const updated = updateProjectArticleTranslation(project, translation)
+  if (updated === project) return project
+  const synced = syncedArticle(updated)
+  if (!synced) return null
+  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
+  return synced.next
+}
+
+export async function saveArticleOutputLanguage(
+  project: MediaProject,
+  outputLanguage: ArticleOutputLanguage,
+) {
+  const updated = updateProjectArticleOutputLanguage(project, outputLanguage)
+  if (updated === project) return project
+  const synced = syncedArticle(updated)
+  if (!synced) return null
+  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
   return synced.next
 }
 

@@ -1,6 +1,7 @@
 type ModelOption = {
   id: string
   label: string
+  disabled?: boolean
 }
 
 type ModelSelectProps = {
@@ -39,7 +40,7 @@ export function ModelSelect({
       {systemModels.length > 0 && (
         <optgroup label="macOS標準">
           {systemModels.map((model) => (
-            <option key={model.id} value={model.id}>
+            <option key={model.id} value={model.id} disabled={model.disabled}>
               {model.label}
             </option>
           ))}
@@ -47,7 +48,7 @@ export function ModelSelect({
       )}
       <optgroup label="ローカルモデル">
         {localModels.map((model) => (
-          <option key={model.id} value={model.id}>
+          <option key={model.id} value={model.id} disabled={model.disabled}>
             {model.label}
           </option>
         ))}
@@ -55,7 +56,7 @@ export function ModelSelect({
       {apiModels.length > 0 && (
         <optgroup label="OpenAI API">
           {apiModels.map((model) => (
-            <option key={model.id} value={model.id}>
+            <option key={model.id} value={model.id} disabled={model.disabled}>
               {model.label}
             </option>
           ))}

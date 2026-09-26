@@ -19,7 +19,9 @@ import {
   saveArticleSections,
   saveArticleSource,
   saveArticleSummary,
+  saveArticleOutputLanguage,
   saveArticleTitle,
+  saveArticleTranslation,
   saveOcr,
   saveSlideContent,
   saveSlideDetection,
@@ -54,7 +56,9 @@ import type { YoutubeImportOptions, YoutubeImportRequest } from '../features/imp
 import type { YoutubeDownloadInput } from '../lib/youtube/types'
 import type {
   ArticleDraft,
+  ArticleOutputLanguage,
   ArticleSummary,
+  ArticleTranslation,
   ContentProcessingResult,
   CropRegion,
   ArticleSections,
@@ -526,6 +530,28 @@ function App() {
     })
     await regenerateArticleExport(saved)
   }
+  const handleSaveArticleTranslation = async (translation: ArticleTranslation) => {
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleTranslation(current, translation)
+      if (next) setProjectState(next)
+      return next
+    })
+    await regenerateArticleExport(saved)
+  }
+  const handleSaveArticleOutputLanguage = async (outputLanguage: ArticleOutputLanguage) => {
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleOutputLanguage(current, outputLanguage)
+      if (next) setProjectState(next)
+      return next
+    })
+    await regenerateArticleExport(saved)
+  }
 
   const page = (() => {
     if (route.kind === 'home')
@@ -649,6 +675,8 @@ function App() {
           getCurrentProject={() => projectRef.current}
           onSave={handleSaveArticle}
           onSaveSummary={handleSaveArticleSummary}
+          onSaveTranslation={handleSaveArticleTranslation}
+          onSaveOutputLanguage={handleSaveArticleOutputLanguage}
           onExport={() => void handleProjectStep('export')}
           onBackToProject={handleOpenProjects}
           onOpenArticle={handleOpenArticle}

@@ -160,11 +160,32 @@ export type ArticleSections = {
   requestId?: string
   generatedAt?: string
 }
+export type ArticleTranslationEngine = 'apple-translation' | 'openai' | 'local'
+export type ArticleTranslationLanguage = 'ja' | 'en'
+export type ArticleOutputLanguage = 'ja' | 'en' | 'both'
+export type ArticleTranslationSummary = Pick<
+  ArticleSummary,
+  'overview' | 'mainMessage' | 'keyPoints' | 'keywords'
+>
+export type ArticleTranslation = {
+  sourceLanguage: ArticleTranslationLanguage
+  targetLanguage: ArticleTranslationLanguage
+  engine: ArticleTranslationEngine
+  model: string
+  inputFingerprint: string
+  generatedAt: string
+  title: string
+  bodies: Record<string, string>
+  summary?: ArticleTranslationSummary
+  sections?: ArticleSection[]
+}
 export type ContentProcessingResult = { article: ArticleFormattingResult }
 export type ArticleData = {
   title: string
   summary?: ArticleSummary
   sections?: ArticleSections
+  translations?: Record<string, ArticleTranslation>
+  outputLanguage?: ArticleOutputLanguage
 }
 export type ArticleDraft = { title: string; bodies: Record<string, string> }
 export type SlideResultEdits = { ocrText: string; transcriptRaw: string; articleBody: string }

@@ -14,6 +14,7 @@ const SUMMARY_INSTRUCTION_TOKENS = 500
 const SUMMARY_OUTPUT_TOKENS = 450
 const SECTIONS_INSTRUCTION_TOKENS = 700
 const SECTIONS_OUTPUT_TOKENS = 500
+const TRANSLATION_INSTRUCTION_TOKENS_PER_SEGMENT = 100
 
 export type OpenAiCostEstimate = {
   usd: number
@@ -101,6 +102,17 @@ export function estimateOpenAiSectionsCost(articleCharacters: number): OpenAiCos
     SECTIONS_INSTRUCTION_TOKENS + estimateTextTokens(articleCharacters),
     SECTIONS_OUTPUT_TOKENS,
   )
+}
+
+export function estimateOpenAiTranslationCost(
+  segmentCharacterCounts: number[],
+): OpenAiCostEstimate {
+  const segmentTokens = segmentCharacterCounts.map(estimateTextTokens)
+  const inputTokens =
+    segmentTokens.reduce((total, tokens) => total + tokens, 0) +
+    segmentTokens.length * TRANSLATION_INSTRUCTION_TOKENS_PER_SEGMENT
+  const outputTokens = Math.ceil(segmentTokens.reduce((total, tokens) => total + tokens, 0) * 1.2)
+  return costForTokens(inputTokens, outputTokens)
 }
 
 export function formatOpenAiCost(usd: number) {

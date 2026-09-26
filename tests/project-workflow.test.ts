@@ -25,6 +25,12 @@ import {
 } from '../src/lib/workflow'
 import type { Article, MediaProject, ProjectVideo, SlideData } from '../src/types/project'
 import { PROJECT_VERSION } from '../src/types/project'
+import {
+  TRANSLATION_LANGUAGES,
+  articleTranslationInputFingerprint,
+  getCurrentArticleTranslation,
+  normalizeLanguage,
+} from '../src/features/article/translation'
 
 const NOW = '2026-09-15T00:00:00.000Z'
 
@@ -391,4 +397,48 @@ test('project parser accepts the current persisted shape and rejects stale or un
       ],
     }),
   ).toThrow()
+})
+
+test('article translation is limited to Japanese and English', () => {
+  expect(TRANSLATION_LANGUAGES.map((language) => language.id)).toEqual(['ja', 'en'])
+  expect(normalizeLanguage('ja-JP')).toBe('ja')
+  expect(normalizeLanguage('en-US')).toBe('en')
+  expect(normalizeLanguage('fr-FR')).toBeUndefined()
+})
+
+test('article translation becomes stale when its source body changes', () => {
+  const project = createArticleWorkspace()
+  const inputFingerprint = articleTranslationInputFingerprint(project, 'ja', 'en')
+  const translated: MediaProject = {
+    ...project,
+    article: {
+      ...project.article,
+      title: project.article?.title ?? 'article',
+      translations: {
+        en: {
+          sourceLanguage: 'ja',
+          targetLanguage: 'en',
+          engine: 'apple-translation' as const,
+          model: 'Apple Translation',
+          inputFingerprint,
+          generatedAt: NOW,
+          title: 'Article',
+          bodies: { 'slide-1': 'Body' },
+        },
+      },
+    },
+  }
+
+  expect(getCurrentArticleTranslation(translated, 'en', 'ja')?.title).toBe('Article')
+
+  const changed = {
+    ...translated,
+    slides: translated.slides.map((slide) => ({
+      ...slide,
+      transcript: slide.transcript
+        ? { ...slide.transcript, articleBody: 'changed body' }
+        : undefined,
+    })),
+  }
+  expect(getCurrentArticleTranslation(changed, 'en', 'ja')).toBeUndefined()
 })

@@ -1,16 +1,33 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { copyFile, ensureDirectory, writeTextFile } from '../../lib/tauri/filesystem'
+import {
+  copyFile,
+  ensureDirectory,
+  fileExists,
+  getFileFingerprint,
+  readTextFile,
+  removeAbsolutePath,
+  writeTextFile,
+} from '../../lib/tauri/filesystem'
 import { hasCurrentArticleSections, hasCurrentArticleSummary } from '../article/article'
 import {
   getActiveArticle,
   getActiveMediaSource,
   type ArticleSection,
+  type ArticleOutputLanguage,
   type ArticleSummary,
+  type ArticleTranslation,
+  type ArticleTranslationSummary,
   type MediaProject,
 } from '../../types/project'
 import { getActiveArticleDuration } from '../../lib/project/articleSource'
+import {
+  getArticleSourceLanguage,
+  getCurrentTranslationForOutputLanguage,
+  getArticleOutputLanguage,
+  isArticleOutputLanguageAvailable,
+} from '../article/outputLanguage'
 import { renderHtml, renderMarkdown, renderTxt } from './renderers'
 
 export const EXPORT_OPTIONS = [
@@ -54,13 +71,22 @@ export type ExportSection = {
   ocrText: string
   transcriptRaw: string
   body: string
+  translations: Array<{ language: string; body: string; heading?: string }>
+}
+
+export type ExportTranslation = {
+  language: string
+  title: string
+  summary?: ArticleTranslationSummary
 }
 
 export type ExportDocument = {
   title: string
+  sourceLanguage: string
   sourceName: string
   durationMs: number
-  summary?: ArticleSummary
+  summary?: ArticleSummary | ArticleTranslationSummary
+  translations: ExportTranslation[]
   articleSections?: ArticleSection[]
   sections: ExportSection[]
 }
@@ -69,6 +95,75 @@ const EXPORT_RENDERERS: Record<ExportFormat, (document: ExportDocument) => strin
   html: renderHtml,
   markdown: renderMarkdown,
   txt: renderTxt,
+}
+
+type ExportAssetFingerprint = {
+  sourcePath: string
+  size: number
+  mtimeMs: number | null
+}
+
+type ExportAssetManifest = Record<string, ExportAssetFingerprint>
+
+function isExportAssetFingerprint(value: unknown): value is ExportAssetFingerprint {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<ExportAssetFingerprint>
+  return (
+    typeof candidate.sourcePath === 'string' &&
+    typeof candidate.size === 'number' &&
+    (typeof candidate.mtimeMs === 'number' || candidate.mtimeMs === null)
+  )
+}
+
+async function readExportAssetManifest(path: string): Promise<ExportAssetManifest> {
+  try {
+    const parsed = JSON.parse(await readTextFile(path)) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, ExportAssetFingerprint] =>
+        isExportAssetFingerprint(entry[1]),
+      ),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function sameExportAssetFingerprint(
+  first: ExportAssetFingerprint | undefined,
+  second: ExportAssetFingerprint,
+) {
+  return (
+    first?.sourcePath === second.sourcePath &&
+    first.size === second.size &&
+    first.mtimeMs === second.mtimeMs
+  )
+}
+
+export function staleExportAssetFilenames(
+  previousFilenames: Iterable<string>,
+  nextFilenames: ReadonlySet<string>,
+) {
+  return [...previousFilenames].filter(
+    (filename) => /^slide-\d+\.jpg$/.test(filename) && !nextFilenames.has(filename),
+  )
+}
+
+async function removeStaleExportAssets(
+  assetsDirectory: string,
+  previousManifest: ExportAssetManifest,
+  nextManifest: ExportAssetManifest,
+) {
+  const staleFilenames = staleExportAssetFilenames(
+    Object.keys(previousManifest),
+    new Set(Object.keys(nextManifest)),
+  )
+  await Promise.all(
+    staleFilenames.map(async (filename) => {
+      const path = await join(assetsDirectory, filename)
+      if (await fileExists(path)) await removeAbsolutePath(path)
+    }),
+  )
 }
 
 function defaultArticleTitle(project: MediaProject) {
@@ -81,6 +176,26 @@ function defaultArticleTitle(project: MediaProject) {
 
 function imageFilename(index: number) {
   return `slide-${String(index + 1).padStart(3, '0')}.jpg`
+}
+
+function translatedValue(
+  original: string,
+  translated: string | undefined,
+  translation: ArticleTranslation | undefined,
+  language: string,
+) {
+  if (!translation || language === translation.sourceLanguage) return original
+  if (language === translation.targetLanguage) return translated ?? ''
+  return original
+}
+
+function translatedSummary(
+  summary: ArticleSummary | undefined,
+  translation: ArticleTranslation | undefined,
+  language: string,
+) {
+  if (!translation || language === translation.sourceLanguage) return summary
+  return language === translation.targetLanguage ? translation.summary : summary
 }
 
 function buildExportDocument(
@@ -99,6 +214,42 @@ function buildExportDocument(
   }
 
   const source = getActiveMediaSource(project)
+  const requestedLanguage = getArticleOutputLanguage(project)
+  const translation = getCurrentTranslationForOutputLanguage(project, requestedLanguage)
+  const sourceLanguage = getArticleSourceLanguage(project, translation)
+  const bilingual = requestedLanguage === 'both' && Boolean(translation)
+  const primaryLanguage: ArticleOutputLanguage = bilingual
+    ? 'ja'
+    : requestedLanguage === 'both'
+      ? sourceLanguage === 'en'
+        ? 'en'
+        : 'ja'
+      : requestedLanguage
+  const outputLanguage = isArticleOutputLanguageAvailable(project, primaryLanguage, translation)
+    ? primaryLanguage
+    : sourceLanguage
+  const secondaryLanguage = bilingual ? 'en' : undefined
+  const currentSummary =
+    project.article?.summary && hasCurrentArticleSummary(project, project.article.summary.model)
+      ? project.article.summary
+      : undefined
+  const currentSections =
+    project.article?.sections &&
+    project.article.sections.sections.length > 0 &&
+    (project.article.sections.model === 'manual' ||
+      hasCurrentArticleSections(project, project.article.sections.model))
+      ? project.article.sections.sections
+      : undefined
+  const translatedSectionById = new Map(
+    (translation?.sections ?? []).map((section) => [section.id, section]),
+  )
+  const getHeading = (section: ArticleSection, language: string) =>
+    translatedValue(
+      section.heading,
+      translatedSectionById.get(section.id)?.heading,
+      translation,
+      language,
+    )
   const sections = project.slides.map((slide) => ({
     id: slide.id,
     index: slide.index,
@@ -108,24 +259,66 @@ function buildExportDocument(
     sourceImagePath: slide.image.representativeFramePath ?? '',
     ocrText: slide.ocr?.rawText ?? '',
     transcriptRaw: slide.transcript?.raw ?? '',
-    body: slide.transcript?.articleBody ?? '',
+    body: translatedValue(
+      slide.transcript?.articleBody ?? '',
+      translation?.bodies[slide.id],
+      translation,
+      outputLanguage,
+    ),
+    translations:
+      bilingual && secondaryLanguage
+        ? [
+            {
+              language: secondaryLanguage,
+              body: translatedValue(
+                slide.transcript?.articleBody ?? '',
+                translation?.bodies[slide.id],
+                translation,
+                secondaryLanguage,
+              ),
+              heading:
+                currentSections
+                  ?.map((section) =>
+                    section.slideIds.includes(slide.id)
+                      ? getHeading(section, secondaryLanguage)
+                      : undefined,
+                  )
+                  .find((heading) => heading !== undefined) ?? undefined,
+            },
+          ]
+        : [],
   }))
 
   return {
-    title: defaultArticleTitle(project),
+    sourceLanguage: outputLanguage,
     sourceName: source.name,
     durationMs: getActiveArticleDuration(project),
-    summary:
-      project.article?.summary && hasCurrentArticleSummary(project, project.article.summary.model)
-        ? project.article.summary
-        : undefined,
-    articleSections:
-      project.article?.sections &&
-      project.article.sections.sections.length > 0 &&
-      (project.article.sections.model === 'manual' ||
-        hasCurrentArticleSections(project, project.article.sections.model))
-        ? project.article.sections.sections
-        : undefined,
+    title: translatedValue(
+      defaultArticleTitle(project),
+      translation?.title,
+      translation,
+      outputLanguage,
+    ),
+    summary: translatedSummary(currentSummary, translation, outputLanguage),
+    translations:
+      bilingual && translation && secondaryLanguage
+        ? [
+            {
+              language: secondaryLanguage,
+              title: translatedValue(
+                defaultArticleTitle(project),
+                translation.title,
+                translation,
+                secondaryLanguage,
+              ),
+              ...(translation.summary ? { summary: translation.summary } : {}),
+            },
+          ]
+        : [],
+    articleSections: currentSections?.map((section) => ({
+      ...section,
+      heading: getHeading(section, outputLanguage),
+    })),
     sections,
   }
 }
@@ -153,21 +346,40 @@ export async function exportProject(
 
   const assetsDirectory = await join(destination, 'assets')
   await ensureDirectory(assetsDirectory)
-  const assets = await Promise.all(
-    document.sections.map(async (section) => ({
-      filename: imageFilename(section.index),
-      path: await join(assetsDirectory, imageFilename(section.index)),
-    })),
-  )
+  const assetManifestPath = await join(destination, '.asset-manifest.json')
+  const [previousAssetManifest, assets] = await Promise.all([
+    readExportAssetManifest(assetManifestPath),
+    Promise.all(
+      document.sections.map(async (section) => ({
+        filename: imageFilename(section.index),
+        path: await join(assetsDirectory, imageFilename(section.index)),
+      })),
+    ),
+  ])
 
   report('copying-images')
+  const nextAssetManifest: ExportAssetManifest = {}
   await Promise.all(
     document.sections.map(async (section, sectionIndex) => {
-      await copyFile(section.sourceImagePath, assets[sectionIndex].path)
+      const filename = assets[sectionIndex].filename
+      const destinationPath = assets[sectionIndex].path
+      const sourceFingerprint = {
+        sourcePath: section.sourceImagePath,
+        ...(await getFileFingerprint(section.sourceImagePath)),
+      }
+      nextAssetManifest[filename] = sourceFingerprint
+      if (
+        !sameExportAssetFingerprint(previousAssetManifest[filename], sourceFingerprint) ||
+        !(await fileExists(destinationPath))
+      ) {
+        await copyFile(section.sourceImagePath, destinationPath)
+      }
       completed += 1
       report('copying-images')
     }),
   )
+  await removeStaleExportAssets(assetsDirectory, previousAssetManifest, nextAssetManifest)
+  await writeTextFile(assetManifestPath, JSON.stringify(nextAssetManifest))
 
   report('writing-files')
   const files = await Promise.all(

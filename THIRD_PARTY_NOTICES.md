@@ -1,8 +1,8 @@
 # Third-party notices
 
-Yomlecta 0.9.0 の macOS Apple Silicon 配布物で使用する、アプリ本体以外のソフトウェアとモデルを記載します。アプリ本体のコードにはリポジトリ直下の [MIT License](./LICENSE) が適用されますが、ここに記載する外部コンポーネントにはそれぞれのライセンスと追加条件が適用されます。
+Yomlecta 0.22.0 の macOS Apple Silicon 配布物で使用する、アプリ本体以外のソフトウェアとモデルを記載します。アプリ本体のコードにはリポジトリ直下の [MIT License](./LICENSE) が適用されますが、ここに記載する外部コンポーネントにはそれぞれのライセンスと追加条件が適用されます。
 
-このファイルの確認日: 2026-09-08
+このファイルの確認日: 2026-09-25
 
 ## 配布物に含まれるsidecar
 
@@ -41,9 +41,10 @@ Yomlecta 0.9.0 の macOS Apple Silicon 配布物で使用する、アプリ本�
 
 ### アプリ固有のhelper
 
-- `apple-vision-ocr-aarch64-apple-darwin`: Yomlecta 0.9.0のビルド、ソースは [`src-tauri/vision-ocr/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/vision-ocr/main.swift)
-- `apple-speech-transcriber-aarch64-apple-darwin`: Yomlecta 0.9.0のビルド、ソースは [`src-tauri/speech-transcriber/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/speech-transcriber/main.swift)
-- `apple-foundation-models-aarch64-apple-darwin`: Yomlecta 0.9.0のビルド、ソースは [`src-tauri/foundation-models/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/foundation-models/main.swift)
+- `apple-vision-ocr-aarch64-apple-darwin`: Yomlecta 0.22.0のビルド、ソースは [`src-tauri/vision-ocr/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/vision-ocr/main.swift)
+- `apple-speech-transcriber-aarch64-apple-darwin`: Yomlecta 0.22.0のビルド、ソースは [`src-tauri/speech-transcriber/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/speech-transcriber/main.swift)
+- `apple-foundation-models-aarch64-apple-darwin`: Yomlecta 0.22.0のビルド、ソースは [`src-tauri/foundation-models/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/foundation-models/main.swift)
+- `apple-translator-aarch64-apple-darwin`: Yomlecta 0.22.0のビルド、ソースは [`src-tauri/apple-translator/main.swift`](https://github.com/SaitomTech/Yomlecta/blob/develop/src-tauri/apple-translator/main.swift)。macOS 26以降のTranslation frameworkを利用します。
 
 上記はこのリポジトリのSwiftソースからビルドするアプリ固有のコードです。AppleのOS/API自体の条件はAppleの利用規約・SDKライセンスに従います。
 
@@ -85,6 +86,15 @@ Yomlecta 0.9.0 の macOS Apple Silicon 配布物で使用する、アプリ本�
 | Qwen3 1.7B Q8_0             | `Qwen3-1.7B-Q8_0.gguf`             | [Qwen/Qwen3-1.7B-GGUF](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/tree/90862c4b9d2787eaed51d12237eafdfe7c5f6077) @ `90862c4b9d2787eaed51d12237eafdfe7c5f6077` | `061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a` |
 | Qwen3-4B-Instruct-2507 Q8_0 | `qwen3-4b-instruct-2507-q8_0.gguf` | [ggml-org/Qwen3-4B-Instruct-2507-Q8_0-GGUF](https://huggingface.co/ggml-org/Qwen3-4B-Instruct-2507-Q8_0-GGUF/tree/e6f794d) @ `e6f794d`                         | `ae916ede1c010a26955ee8ae2e908bf8815a3f135ec860439ab924701c69d5f1` |
 | Qwen3 8B Q4_K_M             | `Qwen3-8B-Q4_K_M.gguf`             | [Qwen/Qwen3-8B-GGUF](https://huggingface.co/Qwen/Qwen3-8B-GGUF/tree/7c41481) @ `7c41481`                                                                       | `d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785` |
+
+### 翻訳モデル
+
+- モデル名: LFM2-350M-ENJP-MT Q4_K_M
+- ファイル: `LFM2-350M-ENJP-MT-Q4_K_M.gguf`（約229 MB）
+- 取得元: [LiquidAI/LFM2-350M-ENJP-MT-GGUF](https://huggingface.co/LiquidAI/LFM2-350M-ENJP-MT-GGUF/tree/1a5bdb2d6e596656ed645a4088b9bb8f3423801c) revision `1a5bdb2d6e596656ed645a4088b9bb8f3423801c`
+- SHA-256: `574ef7980dd20d69b494bce82565db5f25124d404be02052bbca62277d33077b`
+- ライセンス: [LFM Open License v1.0](https://huggingface.co/LiquidAI/LFM2-350M-ENJP-MT-GGUF/blob/1a5bdb2d6e596656ed645a4088b9bb8f3423801c/LICENSE)
+- 対応言語: 日本語と英語の双方向翻訳。モデルカード記載の推奨値（temperature 0.5、top_p 1.0、min_p 0.1、repetition_penalty 1.05）と翻訳方向を示す必須システムプロンプトを使用します。
 
 ### GLM-OCR
 
