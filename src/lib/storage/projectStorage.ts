@@ -32,6 +32,7 @@ import {
   restoreAssetTrashTransaction,
 } from './projectAssetTransactions'
 import { invokeDb } from '../tauri/db'
+import { cleanupProjectDerivedAssets } from './projectAssets'
 
 const invoke = invokeDb
 
@@ -53,6 +54,11 @@ type LoadedProjectPayload = {
 }
 
 function applyRevisionSnapshot(projectId: string, loaded: LoadedProjectPayload) {
+  projectRevisions.clear()
+  articleRevisions.clear()
+  documentRevisions.clear()
+  slideRevisions.clear()
+  ocrRevisions.clear()
   projectRevisions.set(projectId, loaded.revision)
   for (const [key, map] of [
     [articleRevisions, loaded.articleRevisions],
@@ -61,6 +67,19 @@ function applyRevisionSnapshot(projectId: string, loaded: LoadedProjectPayload) 
     [ocrRevisions, loaded.ocrRevisions],
   ] as const) {
     for (const [id, revision] of Object.entries(map ?? {})) key.set(id, revision)
+  }
+}
+
+function articlePersistenceMetadata(article: Article) {
+  return {
+    id: article.id,
+    title: article.title,
+    sourceRange: article.sourceRange,
+    crop: article.crop,
+    perspectiveCrop: article.perspectiveCrop,
+    settings: article.settings,
+    workflow: article.workflow,
+    updatedAt: article.updatedAt,
   }
 }
 
@@ -272,7 +291,7 @@ export async function commitSlideDetection(
     runId: runId(),
     result: detectionResult,
     slides,
-    article,
+    article: articlePersistenceMetadata(article),
     projectTitle: project.title,
     activeArticleId: project.activeArticleId,
     projectUpdatedAt: project.updatedAt,
@@ -305,7 +324,7 @@ export async function commitTranscription(
     runId: runId(),
     transcription,
     slides,
-    article,
+    article: articlePersistenceMetadata(article),
     projectTitle: project.title,
     activeArticleId: project.activeArticleId,
     projectUpdatedAt: project.updatedAt,
@@ -319,11 +338,13 @@ export async function commitTranscription(
   return result
 }
 
-export async function commitOcr(
+export async function commitOcrBatch(
   project: MediaProject,
-  slideId: string,
-  ocr: SlideOcrResult,
-  transcript: NonNullable<SlideData['transcript']> | undefined,
+  items: Array<{
+    slideId: string
+    ocr: SlideOcrResult
+    transcript: NonNullable<SlideData['transcript']> | undefined
+  }>,
 ) {
   await initializeProjectStorage()
   const articleId = project.activeArticleId
@@ -333,66 +354,67 @@ export async function commitOcr(
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
-    slideId: string
-    slideRevision: number
-    ocrId: string
-    ocrRevision: number
-  }>('db_commit_ocr', {
+    slideRevisions: Array<{ id: string; revision: number; ocrRevision: number }>
+  }>('db_commit_ocr_batch', {
     articleId,
-    slideId,
-    runId: runId(),
-    ocrResultId: runId(),
-    ocr,
-    transcript: transcript ?? null,
-    article,
-    projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
-    projectUpdatedAt: project.updatedAt,
-    expectedProjectRevision: projectRevisions.get(project.id),
-    expectedRevision: articleRevisions.get(articleId),
-    expectedSlideRevision: slideRevisions.get(slideId),
-  })
-  projectRevisions.set(project.id, result.projectRevision)
-  articleRevisions.set(articleId, result.articleRevision)
-  slideRevisions.set(result.slideId, result.slideRevision)
-  ocrRevisions.set(result.slideId, result.ocrRevision)
-  return result
-}
-
-export async function commitSlideContent(
-  project: MediaProject,
-  slideId: string,
-  contentResult: unknown,
-  transcript: NonNullable<SlideData['transcript']>,
-) {
-  await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
-  const result = await invoke<{
-    projectRevision: number
-    articleRevision: number
-    slideId: string
-    revision: number
-  }>('db_commit_slide_content', {
-    articleId,
-    slideId,
-    runId: runId(),
-    result: contentResult,
-    transcript,
-    article,
+    items: items.map((item) => ({
+      ...item,
+      runId: runId(),
+      ocrResultId: runId(),
+      transcript: item.transcript ?? null,
+      expectedSlideRevision: slideRevisions.get(item.slideId),
+    })),
+    article: articlePersistenceMetadata(article),
     projectTitle: project.title,
     activeArticleId: project.activeArticleId,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(articleId),
-    expectedRevision: slideRevisions.get(slideId),
   })
   projectRevisions.set(project.id, result.projectRevision)
   articleRevisions.set(articleId, result.articleRevision)
-  slideRevisions.set(result.slideId, result.revision)
+  for (const revision of result.slideRevisions) {
+    slideRevisions.set(revision.id, revision.revision)
+    ocrRevisions.set(revision.id, revision.ocrRevision)
+  }
   return result
+}
+
+export async function commitSlideContentBatch(
+  project: MediaProject,
+  items: Array<{
+    slideId: string
+    result: unknown
+    transcript: NonNullable<SlideData['transcript']>
+  }>,
+) {
+  await initializeProjectStorage()
+  const articleId = project.activeArticleId
+  if (!articleId) throw new Error('記事が選択されていません。')
+  const article = project.articles.find((candidate) => candidate.id === articleId)
+  if (!article) throw new Error('記事が見つかりません。')
+  const response = await invoke<{
+    projectRevision: number
+    articleRevision: number
+    slideRevisions: Array<{ id: string; revision: number }>
+  }>('db_commit_slide_content_batch', {
+    articleId,
+    items: items.map((item) => ({
+      ...item,
+      runId: runId(),
+      expectedSlideRevision: slideRevisions.get(item.slideId),
+    })),
+    article: articlePersistenceMetadata(article),
+    projectTitle: project.title,
+    activeArticleId: project.activeArticleId,
+    projectUpdatedAt: project.updatedAt,
+    expectedProjectRevision: projectRevisions.get(project.id),
+    expectedArticleRevision: articleRevisions.get(articleId),
+  })
+  projectRevisions.set(project.id, response.projectRevision)
+  articleRevisions.set(articleId, response.articleRevision)
+  for (const revision of response.slideRevisions) slideRevisions.set(revision.id, revision.revision)
+  return response
 }
 
 export async function updateSlideResults(
@@ -472,13 +494,17 @@ export async function checkStorageReference(
   })
 }
 
-export async function loadProject(projectId: string) {
+export async function loadProject(projectId: string, articleId?: string) {
   await initializeProjectStorage()
   const loaded = await invoke<LoadedProjectPayload>('db_load_project', {
     projectId,
+    articleId: articleId ?? null,
   })
   const project = parseMediaProject(loaded.project)
   applyRevisionSnapshot(projectId, loaded)
+  await cleanupProjectDerivedAssets(project, articleId).catch((error) =>
+    console.warn('不要な解析ファイルを整理できませんでした。', error),
+  )
   return project
 }
 

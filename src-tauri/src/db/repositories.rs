@@ -41,6 +41,7 @@ pub(crate) async fn upsert_asset(
 pub(crate) async fn load_project_from_indexes(
     pool: &SqlitePool,
     project_id: &str,
+    detail_article_id: Option<&str>,
 ) -> Result<Value, String> {
     let project = sqlx::query(
         "SELECT id, title, version, active_article_id, created_at, updated_at FROM projects WHERE id = ?",
@@ -50,6 +51,23 @@ pub(crate) async fn load_project_from_indexes(
     .await
     .map_err(|error| format!("プロジェクトを読めませんでした: {error}"))?
     .ok_or_else(|| "プロジェクトが見つかりません。".to_string())?;
+    let active_article_id = project
+        .try_get::<Option<String>, _>("active_article_id")
+        .map_err(|error| error.to_string())?;
+    if let Some(detail_article_id) = detail_article_id {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM articles WHERE id = ? AND project_id = ?)",
+        )
+        .bind(detail_article_id)
+        .bind(project_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| format!("記事の所属を確認できませんでした: {error}"))?;
+        if !exists {
+            return Err("NOT_FOUND: 記事が見つかりません。".to_string());
+        }
+    }
+    let loaded_article_id = detail_article_id.or(active_article_id.as_deref());
 
     let video_rows = sqlx::query(
         "SELECT v.id, v.title, v.media_json, v.created_at, v.updated_at, a.relative_path,
@@ -145,6 +163,35 @@ pub(crate) async fn load_project_from_indexes(
         )
         .map_err(|error| format!("記事workflow JSONが壊れています: {error}"))?;
 
+        if loaded_article_id != Some(article_id.as_str()) {
+            let mut article = json!({
+                "id": article_id,
+                "title": row.try_get::<String, _>("title").map_err(|error| error.to_string())?,
+                "sourceVideoId": source_video_id,
+                "inputMedia": input_media,
+                "sourceRange": source_range,
+                "settings": settings,
+                "slides": [],
+                "workflow": workflow,
+                "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
+                "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
+            });
+            for (column, key) in [
+                ("crop_json", "crop"),
+                ("perspective_crop_json", "perspectiveCrop"),
+            ] {
+                if let Some(raw) = row
+                    .try_get::<Option<String>, _>(column)
+                    .map_err(|error| error.to_string())?
+                {
+                    article[key] = serde_json::from_str(&raw)
+                        .map_err(|error| format!("記事設定JSONが壊れています: {error}"))?;
+                }
+            }
+            articles.push(article);
+            continue;
+        }
+
         let detection_raw = sqlx::query_scalar::<_, Option<String>>(
             "SELECT r.result_json FROM analysis_runs r
              LEFT JOIN article_material_selections m ON m.slide_run_id = r.id
@@ -182,7 +229,19 @@ pub(crate) async fn load_project_from_indexes(
 
         let slide_rows = sqlx::query(
             "SELECT s.id, s.position, s.start_ms, s.end_ms, s.detection_json, s.transcript_json, s.revision,
-                    a.relative_path AS image_path
+                    a.relative_path AS image_path,
+                    (SELECT COALESCE(o.edited_text, o.raw_text) FROM ocr_results o
+                     WHERE o.id = COALESCE(
+                       (SELECT sel.ocr_result_id FROM slide_ocr_selections sel WHERE sel.slide_id = s.id),
+                       (SELECT latest.id FROM ocr_results latest WHERE latest.slide_id = s.id
+                        ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
+                     )) AS ocr_effective_text,
+                    (SELECT o.metadata_json FROM ocr_results o
+                     WHERE o.id = COALESCE(
+                       (SELECT sel.ocr_result_id FROM slide_ocr_selections sel WHERE sel.slide_id = s.id),
+                       (SELECT latest.id FROM ocr_results latest WHERE latest.slide_id = s.id
+                        ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
+                     )) AS ocr_metadata_json
              FROM slides s LEFT JOIN assets a ON a.id = s.image_asset_id
              WHERE s.article_id = ? AND s.run_id = COALESCE(
                (SELECT slide_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)
@@ -224,32 +283,20 @@ pub(crate) async fn load_project_from_indexes(
                         .map_err(|error| format!("スライド本文JSONが壊れています: {error}"))?;
                 }
             }
-            let ocr_query = format!(
-                "SELECT COALESCE(edited_text, raw_text) AS effective_text, metadata_json
-                 FROM ocr_results
-                 WHERE id = {} AND slide_id = ?",
-                OCR_ID_FOR_SLIDE_SQL.replace("{slide_id}", "?")
-            );
-            if let Some(ocr_row) = sqlx::query(&ocr_query)
-                .bind(&slide_id)
-                .bind(&slide_id)
-                .bind(&slide_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|error| format!("OCR結果を読めませんでした: {error}"))?
+            if let Some(metadata) = row
+                .try_get::<Option<String>, _>("ocr_metadata_json")
+                .map_err(|error| error.to_string())?
             {
-                let metadata: String = ocr_row
-                    .try_get("metadata_json")
-                    .map_err(|error| error.to_string())?;
                 let mut ocr = match serde_json::from_str::<Value>(&metadata)
                     .map_err(|error| error.to_string())?
                 {
                     Value::Object(map) => map,
                     _ => Map::new(),
                 };
-                let effective_text: String = ocr_row
-                    .try_get("effective_text")
-                    .map_err(|error| error.to_string())?;
+                let effective_text = row
+                    .try_get::<Option<String>, _>("ocr_effective_text")
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or_default();
                 ocr.insert("rawText".to_string(), json!(effective_text));
                 slide["ocr"] = Value::Object(ocr);
             }
@@ -311,10 +358,7 @@ pub(crate) async fn load_project_from_indexes(
         "createdAt": project.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
         "updatedAt": project.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
     });
-    if let Some(active) = project
-        .try_get::<Option<String>, _>("active_article_id")
-        .map_err(|error| error.to_string())?
-    {
+    if let Some(active) = active_article_id {
         project_value["activeArticleId"] = json!(active);
     }
     Ok(project_value)
@@ -534,6 +578,7 @@ pub(crate) async fn load_project_summary(
 pub(crate) async fn load_revision_snapshot(
     pool: &SqlitePool,
     project_id: &str,
+    detail_article_id: Option<&str>,
 ) -> Result<Value, String> {
     let article_rows =
         sqlx::query("SELECT id, revision FROM articles WHERE project_id = ? ORDER BY id")
@@ -543,16 +588,26 @@ pub(crate) async fn load_revision_snapshot(
             .map_err(|error| format!("記事revisionを読めませんでした: {error}"))?;
     let document_rows = sqlx::query(
         "SELECT d.article_id, d.revision FROM documents d
-         JOIN articles a ON a.id = d.article_id WHERE a.project_id = ? ORDER BY d.article_id",
+         JOIN articles a ON a.id = d.article_id
+         WHERE a.project_id = ? AND a.id = COALESCE(
+           ?, (SELECT active_article_id FROM projects WHERE id = ?)
+         ) ORDER BY d.article_id",
     )
+    .bind(project_id)
+    .bind(detail_article_id)
     .bind(project_id)
     .fetch_all(pool)
     .await
     .map_err(|error| format!("document revisionを読めませんでした: {error}"))?;
     let slide_rows = sqlx::query(
         "SELECT s.id, s.revision FROM slides s
-         JOIN articles a ON a.id = s.article_id WHERE a.project_id = ? ORDER BY s.id",
+         JOIN articles a ON a.id = s.article_id
+         WHERE a.project_id = ? AND a.id = COALESCE(
+           ?, (SELECT active_article_id FROM projects WHERE id = ?)
+         ) ORDER BY s.id",
     )
+    .bind(project_id)
+    .bind(detail_article_id)
     .bind(project_id)
     .fetch_all(pool)
     .await
@@ -568,9 +623,13 @@ pub(crate) async fn load_revision_snapshot(
          LEFT JOIN ocr_results latest ON latest.id = (
            SELECT id FROM ocr_results WHERE slide_id = s.id ORDER BY created_at DESC, id DESC LIMIT 1
          )
-         WHERE a.project_id = ? AND COALESCE(selected.revision, latest.revision) IS NOT NULL
+         WHERE a.project_id = ? AND a.id = COALESCE(
+           ?, (SELECT active_article_id FROM projects WHERE id = ?)
+         ) AND COALESCE(selected.revision, latest.revision) IS NOT NULL
          ORDER BY s.id",
     )
+    .bind(project_id)
+    .bind(detail_article_id)
     .bind(project_id)
     .fetch_all(pool)
     .await

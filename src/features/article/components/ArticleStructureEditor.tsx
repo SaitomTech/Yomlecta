@@ -8,6 +8,7 @@ import {
   useDroppable,
 } from '@dnd-kit/react'
 import { Fragment, useRef, useState } from 'react'
+import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
 import type {
   ArticleSection,
   ArticleSections,
@@ -450,13 +451,15 @@ type ReviewGroupSlidesProps = {
   isSavingBody: boolean
   isBodyDirty: boolean
   bodySaveError: string | null
-  sourcePath: string
+  videoSrc: string | null
+  activeVideoSlideId: string | null
   canEditSlide: boolean
   onAddAtGap: (gapIndex: number) => void
   onStartSlideEditing: (slideId: string) => void
   onCancelSlideEditing: () => void
   onSaveSlide: () => void
   onBodyChange: (body: string) => void
+  onVideoToggle: (slideId: string, open: boolean) => void
 }
 
 function ReviewGroupSlides(props: ReviewGroupSlidesProps) {
@@ -475,7 +478,8 @@ function ReviewGroupSlides(props: ReviewGroupSlidesProps) {
         )}
         <ArticleSectionEditor
           slide={slide}
-          videoPath={props.sourcePath}
+          videoSrc={props.videoSrc}
+          videoOpen={props.activeVideoSlideId === slide.id}
           body={isEditing ? props.bodyDraft : (props.savedBodies[slide.id] ?? '')}
           sourceLanguage={props.sourceLanguage}
           outputLanguage={props.outputLanguage}
@@ -490,6 +494,7 @@ function ReviewGroupSlides(props: ReviewGroupSlidesProps) {
           onCancel={props.onCancelSlideEditing}
           onSave={props.onSaveSlide}
           onBodyChange={props.onBodyChange}
+          onVideoToggle={(open) => props.onVideoToggle(slide.id, open)}
         />
       </Fragment>
     )
@@ -513,7 +518,8 @@ function SectionReviewGroup({
   isSavingBody,
   isBodyDirty,
   bodySaveError,
-  sourcePath,
+  videoSrc,
+  activeVideoSlideId,
   canEditSlide,
   onHeadingSave,
   onMoveByButton,
@@ -523,6 +529,7 @@ function SectionReviewGroup({
   onCancelSlideEditing,
   onSaveSlide,
   onBodyChange,
+  onVideoToggle,
 }: {
   section?: ArticleSection
   group: ArticleReviewSectionGroup
@@ -540,7 +547,8 @@ function SectionReviewGroup({
   isSavingBody: boolean
   isBodyDirty: boolean
   bodySaveError: string | null
-  sourcePath: string
+  videoSrc: string | null
+  activeVideoSlideId: string | null
   canEditSlide: boolean
   onHeadingSave: (sectionId: string, heading: string) => Promise<void>
   onMoveByButton: (offset: -1 | 1) => void
@@ -550,6 +558,7 @@ function SectionReviewGroup({
   onCancelSlideEditing: () => void
   onSaveSlide: () => void
   onBodyChange: (body: string) => void
+  onVideoToggle: (slideId: string, open: boolean) => void
 }) {
   const isDragging = draggingSectionId !== null
   return (
@@ -599,15 +608,101 @@ function SectionReviewGroup({
           isSavingBody={isSavingBody}
           isBodyDirty={isBodyDirty}
           bodySaveError={bodySaveError}
-          sourcePath={sourcePath}
+          videoSrc={videoSrc}
+          activeVideoSlideId={activeVideoSlideId}
           canEditSlide={canEditSlide}
           onAddAtGap={onAddAtGap}
           onStartSlideEditing={onStartSlideEditing}
           onCancelSlideEditing={onCancelSlideEditing}
           onSaveSlide={onSaveSlide}
           onBodyChange={onBodyChange}
+          onVideoToggle={onVideoToggle}
         />
       </div>
+    </div>
+  )
+}
+
+function OutputLanguageSelector({
+  project,
+  translation,
+  sourceLanguage,
+  outputLanguage,
+  disabled,
+  canEditSlide,
+  saving,
+  error,
+  onChange,
+}: {
+  project: MediaProject
+  translation?: ArticleTranslation
+  sourceLanguage: string
+  outputLanguage: ArticleOutputLanguage
+  disabled: boolean
+  canEditSlide: boolean
+  saving: boolean
+  error: string | null
+  onChange: (language: ArticleOutputLanguage) => void
+}) {
+  return (
+    <fieldset className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">
+      <legend className="px-1 text-xs font-semibold text-[#18211f]">記事の出力言語</legend>
+      <div className="flex flex-wrap gap-3">
+        {ARTICLE_OUTPUT_LANGUAGE_OPTIONS.map((option) => {
+          const language = option.value
+          const available = isArticleOutputLanguageAvailable(project, language, translation)
+          return (
+            <label
+              key={language}
+              className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-semibold ${available ? 'border-[#b7cbc0] bg-white text-[#33413c]' : 'border-[#e0e8e3] bg-[#f0f3f1] text-[#9aa6a1]'}`}
+            >
+              <input
+                className="accent-[#1d6b50]"
+                type="radio"
+                name="article-output-language"
+                value={language}
+                checked={outputLanguage === language}
+                onChange={() => onChange(language)}
+                disabled={
+                  disabled || !canEditSlide || saving || (!available && language !== outputLanguage)
+                }
+              />
+              {option.label}
+            </label>
+          )
+        })}
+      </div>
+      {!translation && (
+        <p className="mt-2 text-[10px] leading-5 text-[#71807b]">
+          {sourceLanguage === 'en' ? '日本語のみ' : '英語のみ'}または「両方」を選ぶには、Step
+          1で翻訳を生成してください。
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-[#b6533a]">{error}</p>}
+    </fieldset>
+  )
+}
+
+function TranslatedArticleTitle({
+  translation,
+  outputLanguage,
+}: {
+  translation?: ArticleTranslation
+  outputLanguage: ArticleOutputLanguage
+}) {
+  if (!translation || (outputLanguage !== 'both' && outputLanguage !== translation.targetLanguage))
+    return null
+  return (
+    <div className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#fbfcfa] px-4 py-3">
+      <p className="text-[10px] font-semibold text-[#71807b]">記事タイトルの訳文</p>
+      {outputLanguage === 'both' && (
+        <p className="mt-1 text-[10px] font-semibold text-[#71807b]">
+          {articleLanguageLabel(translation.targetLanguage)}
+        </p>
+      )}
+      <p className="mt-1 px-2 py-1.5 text-[16px] font-semibold leading-6 text-[#33413c]">
+        {translation.title}
+      </p>
     </div>
   )
 }
@@ -637,6 +732,8 @@ export function ArticleStructureEditor({
   onSaveSummary,
   disabled = false,
 }: ArticleStructureEditorProps) {
+  const videoSource = useVideoSourceUrl(sourcePath)
+  const [activeVideoSlideId, setActiveVideoSlideId] = useState<string | null>(null)
   const [draftState, setDraftState] = useState<{
     version: string
     value: ArticleSections
@@ -647,7 +744,6 @@ export function ArticleStructureEditor({
   const [isSavingOutputLanguage, setIsSavingOutputLanguage] = useState(false)
   const [outputLanguageError, setOutputLanguageError] = useState<string | null>(null)
   const sourceLanguage = getArticleSourceLanguage(project, translation)
-  const translationLanguage = translation?.targetLanguage
 
   const sectionVersion = `${sections.model}:${sections.inputFingerprint}:${sections.generatedAt ?? ''}`
   const draft = draftState?.version === sectionVersion ? draftState.value : null
@@ -775,6 +871,9 @@ export function ArticleStructureEditor({
       setIsSavingOutputLanguage(false)
     }
   }
+  const handleVideoToggle = (slideId: string, open: boolean) => {
+    setActiveVideoSlideId((current) => (open ? slideId : current === slideId ? null : current))
+  }
   return (
     <DragDropProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div>
@@ -788,59 +887,18 @@ export function ArticleStructureEditor({
             </p>
           </div>
         </div>
-        <fieldset className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">
-          <legend className="px-1 text-xs font-semibold text-[#18211f]">記事の出力言語</legend>
-          <div className="flex flex-wrap gap-3">
-            {ARTICLE_OUTPUT_LANGUAGE_OPTIONS.map((option) => {
-              const language = option.value
-              const available = isArticleOutputLanguageAvailable(project, language, translation)
-              return (
-                <label
-                  key={language}
-                  className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-semibold ${available ? 'border-[#b7cbc0] bg-white text-[#33413c]' : 'border-[#e0e8e3] bg-[#f0f3f1] text-[#9aa6a1]'}`}
-                >
-                  <input
-                    className="accent-[#1d6b50]"
-                    type="radio"
-                    name="article-output-language"
-                    value={language}
-                    checked={outputLanguage === language}
-                    onChange={() => void handleOutputLanguageChange(language)}
-                    disabled={
-                      disabled ||
-                      !canEditSlide ||
-                      isSavingOutputLanguage ||
-                      (!available && language !== outputLanguage)
-                    }
-                  />
-                  {option.label}
-                </label>
-              )
-            })}
-          </div>
-          {!translation && (
-            <p className="mt-2 text-[10px] leading-5 text-[#71807b]">
-              {sourceLanguage === 'en' ? '日本語のみ' : '英語のみ'}または「両方」を選ぶには、Step
-              1で翻訳を生成してください。
-            </p>
-          )}
-          {outputLanguageError && (
-            <p className="mt-2 text-xs text-[#b6533a]">{outputLanguageError}</p>
-          )}
-        </fieldset>
-        {translation && (outputLanguage === 'both' || outputLanguage === translationLanguage) && (
-          <div className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#fbfcfa] px-4 py-3">
-            <p className="text-[10px] font-semibold text-[#71807b]">記事タイトルの訳文</p>
-            {outputLanguage === 'both' && (
-              <p className="mt-1 text-[10px] font-semibold text-[#71807b]">
-                {articleLanguageLabel(translation.targetLanguage)}
-              </p>
-            )}
-            <p className="mt-1 px-2 py-1.5 text-[16px] font-semibold leading-6 text-[#33413c]">
-              {translation.title}
-            </p>
-          </div>
-        )}
+        <OutputLanguageSelector
+          project={project}
+          translation={translation}
+          sourceLanguage={sourceLanguage}
+          outputLanguage={outputLanguage}
+          disabled={disabled}
+          canEditSlide={canEditSlide}
+          saving={isSavingOutputLanguage}
+          error={outputLanguageError}
+          onChange={(language) => void handleOutputLanguageChange(language)}
+        />
+        <TranslatedArticleTitle translation={translation} outputLanguage={outputLanguage} />
         {sectionError && <p className="mt-3 text-xs text-[#b6533a]">{sectionError}</p>}
 
         <ArticleSummaryResult
@@ -873,7 +931,8 @@ export function ArticleStructureEditor({
                 isSavingBody={isSavingBody}
                 isBodyDirty={isBodyDirty}
                 bodySaveError={bodySaveError}
-                sourcePath={sourcePath}
+                videoSrc={videoSource.src}
+                activeVideoSlideId={activeVideoSlideId}
                 canEditSlide={canEditSlide}
                 onHeadingSave={saveHeading}
                 onMoveByButton={(offset) => {
@@ -887,6 +946,7 @@ export function ArticleStructureEditor({
                 onCancelSlideEditing={onCancelSlideEditing}
                 onSaveSlide={onSaveSlide}
                 onBodyChange={onBodyChange}
+                onVideoToggle={handleVideoToggle}
               />
             ))
           ) : (

@@ -97,7 +97,7 @@ fn normalized_indexes_round_trip_a_project() {
         )
         .await
         .expect("create project bundle through production service");
-        let loaded = load_project_from_indexes(&pool, "project-1")
+        let loaded = load_project_from_indexes(&pool, "project-1", None)
             .await
             .expect("load normalized project");
         assert_eq!(loaded["articles"][0]["title"], "Notes");
@@ -493,7 +493,7 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
         assert_eq!(summary["summary"]["articleCompleted"], 2);
         assert_eq!(summary["summary"]["resumeStep"], "crop");
 
-        let loaded = load_project_from_indexes(&pool, "p")
+        let loaded = load_project_from_indexes(&pool, "p", None)
             .await
             .expect("load project");
         assert_eq!(loaded["articles"][0]["slides"][0]["ocr"]["rawText"], "");

@@ -2,8 +2,10 @@ import { appLocalDataDir, join } from '@tauri-apps/api/path'
 import {
   appLocalPathExists,
   ensureAppLocalDirectory,
+  readAppLocalDirectory,
   removeAppLocalPath,
 } from '../tauri/filesystem'
+import type { MediaProject } from '../../types/project'
 
 function assertId(value: string, label: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error(`不正な${label}です。`)
@@ -175,4 +177,52 @@ export async function removeArticleAssetDirectory(projectId: string, articleId: 
   assertId(articleId, '記事ID')
   const path = projectAssetDirectory(projectId, `articles/${articleId}`)
   if (await appLocalPathExists(path)) await removeAppLocalPath(path)
+}
+
+export async function removeArticleCurrentRunDirectory(projectId: string, articleId: string) {
+  const path = articleAssetDirectory(projectId, articleId, 'runs/current')
+  if (await appLocalPathExists(path)) await removeAppLocalPath(path)
+}
+
+export async function resetTranscriptionAudioChunks(
+  projectId: string,
+  articleId: string,
+  provider: 'local' | 'openai',
+) {
+  const path = articleAssetDirectory(projectId, articleId, `runs/current/audio/${provider}`)
+  if (await appLocalPathExists(path)) await removeAppLocalPath(path)
+}
+
+export async function pruneSlideAssets(projectId: string, articleId: string, slideCount: number) {
+  const directory = articleAssetDirectory(projectId, articleId, 'runs/current/slides')
+  if (!(await appLocalPathExists(directory))) return
+  const expected = new Set(
+    Array.from(
+      { length: slideCount },
+      (_, index) => `slide-${String(index + 1).padStart(3, '0')}.jpg`,
+    ),
+  )
+  const entries = await readAppLocalDirectory(directory)
+  await Promise.all(
+    entries
+      .filter(
+        (entry) => entry.isFile && /^slide-\d+\.jpg$/.test(entry.name) && !expected.has(entry.name),
+      )
+      .map((entry) => removeAppLocalPath(`${directory}/${entry.name}`)),
+  )
+}
+
+export async function cleanupProjectDerivedAssets(project: MediaProject, detailArticleId?: string) {
+  const activeArticle = project.articles.find(
+    (article) => article.id === (detailArticleId ?? project.activeArticleId),
+  )
+  if (!activeArticle) return
+  await pruneSlideAssets(project.id, activeArticle.id, activeArticle.slides.length)
+  if (activeArticle.transcription) return
+  await Promise.all(
+    ['runs/current/audio', 'runs/current/transcript'].map(async (directory) => {
+      const path = articleAssetDirectory(project.id, activeArticle.id, directory)
+      if (await appLocalPathExists(path)) await removeAppLocalPath(path)
+    }),
+  )
 }

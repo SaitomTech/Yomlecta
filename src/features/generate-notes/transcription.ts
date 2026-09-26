@@ -1,7 +1,11 @@
 import { UserFacingError, withUserFacingError } from '../../lib/errors'
 import { extractAudio, extractAudioChunkForOpenAi } from '../../lib/media/ffmpeg'
 import { transcribeOpenAiAudio } from '../../lib/openai/openai'
-import { getAudioAssetPath, getTranscriptionAudioChunkPath } from '../../lib/storage/projectAssets'
+import {
+  getAudioAssetPath,
+  getTranscriptionAudioChunkPath,
+  resetTranscriptionAudioChunks,
+} from '../../lib/storage/projectAssets'
 import { fileExists, getFileSize } from '../../lib/tauri/filesystem'
 import { runAppleSpeech } from '../../lib/speech/appleSpeech'
 import {
@@ -68,7 +72,8 @@ type OpenAiTranscriptionProvider = {
 
 const MAX_OPENAI_AUDIO_BYTES = 25_000_000
 const MIN_OPENAI_CHUNK_MS = 1000
-const MAX_OPENAI_CONCURRENT_REQUESTS = 8
+const MAX_OPENAI_CONCURRENT_REQUESTS = 4
+const MAX_OPENAI_CHUNK_DURATION_MS = 15 * 60 * 1000
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
@@ -183,25 +188,11 @@ async function runAppleTranscription({
 function createOpenAiAudioRanges(project: MediaProject) {
   const context = getActiveArticleSourceContext(project)
   const durationMs = Math.max(1, context.range.endMs - context.range.startMs)
-  const slides = project.slides.toSorted((first, second) => first.startMs - second.startMs)
-  if (slides.length === 0) return [{ startMs: 0, endMs: durationMs }]
-
   const ranges: ChunkRange[] = []
-  let cursorMs = 0
-  for (const slide of slides) {
-    const rangeStartMs = Math.max(cursorMs, Math.max(0, Math.min(durationMs, slide.startMs)))
-    const rangeEndMs = Math.max(rangeStartMs, Math.min(durationMs, slide.endMs))
-    if (rangeStartMs > cursorMs) {
-      ranges.push({ startMs: cursorMs, endMs: rangeStartMs })
-    }
-    if (rangeEndMs > rangeStartMs) {
-      ranges.push({ startMs: rangeStartMs, endMs: rangeEndMs })
-      cursorMs = rangeEndMs
-    }
+  for (let startMs = 0; startMs < durationMs; startMs += MAX_OPENAI_CHUNK_DURATION_MS) {
+    ranges.push({ startMs, endMs: Math.min(durationMs, startMs + MAX_OPENAI_CHUNK_DURATION_MS) })
   }
-  if (cursorMs < durationMs) ranges.push({ startMs: cursorMs, endMs: durationMs })
-
-  return ranges.length > 0 ? ranges : [{ startMs: 0, endMs: durationMs }]
+  return ranges
 }
 
 async function runLocalTranscription({
@@ -253,6 +244,7 @@ async function runLocalTranscription({
   throwIfAborted(signal)
   onStage?.('transcribing')
   onProgress?.(null)
+  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'local')
   const rawTranscript = await withUserFacingError(
     '音声を文字起こしできませんでした。アプリを再起動して、再試行してください。',
     () =>
@@ -486,6 +478,7 @@ export async function runTranscription(input: RunTranscriptionInput): Promise<Tr
     return path
   })
 
+  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'openai')
   const ranges = createOpenAiAudioRanges(project)
   const chunks: PreparedChunk[] = []
   onStage?.('preparing-chunks')

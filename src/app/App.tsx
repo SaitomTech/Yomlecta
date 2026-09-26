@@ -22,8 +22,8 @@ import {
   saveArticleOutputLanguage,
   saveArticleTitle,
   saveArticleTranslation,
-  saveOcr,
-  saveSlideContent,
+  saveOcrBatch,
+  saveSlideContentBatch,
   saveSlideDetection,
   saveSlideResultEdits,
   saveTranscription,
@@ -253,7 +253,8 @@ function App() {
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current) return
-      const next = activateArticle(current, articleId)
+      const loaded = await loadProject(current.id, articleId)
+      const next = activateArticle(loaded, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
       const opened = markProjectOpened(next, article?.workflow.lastVisitedStep ?? 'detect-slides')
       const saved = await persistProjectWorkflow(opened)
@@ -321,7 +322,7 @@ function App() {
   const handleOpenArticleDetail = async (item: ArticleListItem) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
-      const loaded = await loadProject(item.projectId)
+      const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       setProjectState(next)
       if (requestId === navigationRequestRef.current) {
@@ -333,7 +334,7 @@ function App() {
   const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
-      const loaded = await loadProject(item.projectId)
+      const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       const article = next.articles.find((candidate) => candidate.id === item.articleId)
       const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
@@ -456,21 +457,25 @@ function App() {
       if (next) setProjectState(next)
     })
   }
-  const handleOcrSlideCompleted = async (slideId: string, ocr: SlideOcrResult) => {
+  const handleOcrSlideCompleted = async (
+    results: Array<{ slideId: string; ocr: SlideOcrResult }>,
+  ) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
-      const next = await saveOcr(current, slideId, ocr)
+      const next = await saveOcrBatch(current, results)
       if (next) setProjectState(next)
     })
   }
-  const handleContentSlideCompleted = async (slideId: string, result: ContentProcessingResult) => {
+  const handleContentSlideCompleted = async (
+    results: Array<{ slideId: string; result: ContentProcessingResult }>,
+  ) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
-      const next = await saveSlideContent(current, slideId, result)
+      const next = await saveSlideContentBatch(current, results)
       if (next) setProjectState(next)
     })
   }

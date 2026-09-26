@@ -1,13 +1,13 @@
 import { Save, X } from 'lucide-react'
 import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { SegmentVideoPlayer } from '../../../components/SegmentVideoPlayer'
-import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
 import type { ArticleOutputLanguage, SlideData } from '../../../types/project'
 import { articleLanguageLabel, resolveArticleLanguageVisibility } from '../articleLanguage'
 
 type ArticleSectionEditorProps = {
   slide: SlideData
-  videoPath: string
+  videoSrc: string | null
+  videoOpen: boolean
   body: string
   sourceLanguage: string
   outputLanguage: ArticleOutputLanguage
@@ -22,13 +22,11 @@ type ArticleSectionEditorProps = {
   onCancel: () => void
   onSave: () => void
   onBodyChange: (body: string) => void
+  onVideoToggle: (open: boolean) => void
 }
 
-function SegmentVideoPreview({ slide, videoPath }: { slide: SlideData; videoPath: string }) {
-  const videoSource = useVideoSourceUrl(videoPath)
-  return (
-    <SegmentVideoPlayer slide={slide} videoSrc={videoSource.src} className="w-full max-w-[420px]" />
-  )
+function SegmentVideoPreview({ slide, videoSrc }: { slide: SlideData; videoSrc: string | null }) {
+  return <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} className="w-full max-w-[420px]" />
 }
 
 function SourceLanguageLabel({ language }: { language: string }) {
@@ -157,11 +155,25 @@ function TranslatedBody({
   )
 }
 
-function OriginalData({ slide, videoPath }: { slide: SlideData; videoPath: string }) {
+function OriginalData({
+  slide,
+  videoSrc,
+  videoOpen,
+  onVideoToggle,
+}: {
+  slide: SlideData
+  videoSrc: string | null
+  videoOpen: boolean
+  onVideoToggle: (open: boolean) => void
+}) {
   const rawTranscript = slide.transcript?.raw.trim() || 'この区間に発話はありません。'
   const ocrText = slide.ocr?.rawText.trim() || 'OCR結果はありません。'
   return (
-    <details className="mt-5 border-t border-[#e0e8e3] pt-3">
+    <details
+      className="mt-5 border-t border-[#e0e8e3] pt-3"
+      open={videoOpen}
+      onToggle={(event) => onVideoToggle(event.currentTarget.open)}
+    >
       <summary className="cursor-pointer text-xs font-semibold text-[#71807b] outline-none marker:text-[#1d6b50] focus-visible:text-[#1d6b50]">
         元データを確認
       </summary>
@@ -170,7 +182,7 @@ function OriginalData({ slide, videoPath }: { slide: SlideData; videoPath: strin
           <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#71807b]">
             区間動画
           </p>
-          <SegmentVideoPreview slide={slide} videoPath={videoPath} />
+          {videoOpen && <SegmentVideoPreview slide={slide} videoSrc={videoSrc} />}
         </div>
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#71807b]">
@@ -191,7 +203,8 @@ function OriginalData({ slide, videoPath }: { slide: SlideData; videoPath: strin
 
 export function ArticleSectionEditor({
   slide,
-  videoPath,
+  videoSrc,
+  videoOpen,
   body,
   sourceLanguage,
   outputLanguage,
@@ -206,6 +219,7 @@ export function ArticleSectionEditor({
   onCancel,
   onSave,
   onBodyChange,
+  onVideoToggle,
 }: ArticleSectionEditorProps) {
   const visibility = resolveArticleLanguageVisibility({
     outputLanguage,
@@ -259,7 +273,12 @@ export function ArticleSectionEditor({
             )}
           </div>
         </div>
-        <OriginalData slide={slide} videoPath={videoPath} />
+        <OriginalData
+          slide={slide}
+          videoSrc={videoSrc}
+          videoOpen={videoOpen}
+          onVideoToggle={onVideoToggle}
+        />
       </div>
     </article>
   )

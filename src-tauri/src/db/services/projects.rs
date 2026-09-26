@@ -871,15 +871,21 @@ pub async fn db_delete_video(
 pub async fn db_load_project(
     state: State<'_, DbState>,
     project_id: String,
+    article_id: Option<String>,
 ) -> Result<Value, String> {
     validate_id(&project_id, "プロジェクトID")?;
-    let project = load_project_from_indexes(&state.pool, &project_id).await?;
+    if let Some(article_id) = article_id.as_deref() {
+        validate_id(article_id, "記事ID")?;
+    }
+    let project =
+        load_project_from_indexes(&state.pool, &project_id, article_id.as_deref()).await?;
     let revision: i64 = sqlx::query_scalar("SELECT revision FROM projects WHERE id = ?")
         .bind(&project_id)
         .fetch_one(&state.pool)
         .await
         .map_err(|error| format!("プロジェクトrevisionを読めませんでした: {error}"))?;
-    let revision_snapshot = load_revision_snapshot(&state.pool, &project_id).await?;
+    let revision_snapshot =
+        load_revision_snapshot(&state.pool, &project_id, article_id.as_deref()).await?;
     Ok(json!({
         "project": project,
         "revision": revision,

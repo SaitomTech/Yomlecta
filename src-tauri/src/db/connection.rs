@@ -52,10 +52,12 @@ async fn reconcile_missing_assets(
     pool: &SqlitePool,
     app_data_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let rows = sqlx::query("SELECT id, project_id, relative_path, byte_size FROM assets")
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("assetの整合性を確認できませんでした: {error}"))?;
+    let rows =
+        sqlx::query("SELECT id, project_id, relative_path, byte_size, missing_at FROM assets")
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("assetの整合性を確認できませんでした: {error}"))?;
+    let mut updates = Vec::new();
     for row in rows {
         let id: String = row.try_get("id").map_err(|error| error.to_string())?;
         let project_id: String = row
@@ -68,39 +70,47 @@ async fn reconcile_missing_assets(
         let stored_size: i64 = row
             .try_get("byte_size")
             .map_err(|error| error.to_string())?;
+        let stored_missing_at: Option<String> = row
+            .try_get("missing_at")
+            .map_err(|error| error.to_string())?;
         let absolute_path = resolve_asset_path(app_data_dir, &project_id, &relative_path);
-        if absolute_path.is_file() {
-            let current_size = i64::try_from(
-                fs::metadata(&absolute_path)
-                    .map_err(|error| format!("assetのメタデータを確認できませんでした: {error}"))?
-                    .len(),
-            )
-            .map_err(|_| format!("assetのサイズが大きすぎます: {}", absolute_path.display()))?;
-            if stored_size == current_size {
-                sqlx::query("UPDATE assets SET missing_at = NULL WHERE id = ?")
-                    .bind(id)
-                    .execute(pool)
-                    .await
-                    .map_err(|error| format!("asset状態を更新できませんでした: {error}"))?;
+        if let Ok(file_metadata) = fs::metadata(&absolute_path) {
+            let current_size = i64::try_from(file_metadata.len())
+                .map_err(|_| format!("assetのサイズが大きすぎます: {}", absolute_path.display()))?;
+            if stored_size == current_size && stored_missing_at.is_none() {
                 continue;
             }
         }
         let metadata = inspect_asset(app_data_dir, &project_id, &relative_path)?;
+        if stored_size == metadata.byte_size
+            && stored_missing_at.is_some() == metadata.missing_at.is_some()
+        {
+            continue;
+        }
+        updates.push((id, metadata.byte_size, metadata.missing_at.is_some()));
+    }
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("asset状態更新transactionを開始できませんでした: {error}"))?;
+    for (id, byte_size, missing) in updates {
         sqlx::query(
             "UPDATE assets SET byte_size = ?, sha256 = NULL, missing_at = CASE
              WHEN ? = 1 THEN COALESCE(missing_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
              ELSE NULL END WHERE id = ?",
         )
-        .bind(metadata.byte_size)
-        .bind(if metadata.missing_at.is_some() {
-            1_i64
-        } else {
-            0_i64
-        })
+        .bind(byte_size)
+        .bind(if missing { 1_i64 } else { 0_i64 })
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| format!("asset状態を更新できませんでした: {error}"))?;
     }
+    tx.commit()
+        .await
+        .map_err(|error| format!("asset状態更新をcommitできませんでした: {error}"))?;
     Ok(())
 }

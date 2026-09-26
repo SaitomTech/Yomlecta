@@ -13,7 +13,6 @@ import type {
   ArticleSummary,
   ArticleTranslation,
   ArticleTranslationLanguage,
-  ContentProcessingResult,
   MediaProject,
 } from '../../types/project'
 import { ArticleSummaryCard } from './components/ArticleSummaryCard'
@@ -231,9 +230,12 @@ export function ArticleReviewPage({
   const [switchingArticleId, setSwitchingArticleId] = useState<string | null>(null)
   const [batchStage, setBatchStage] = useState<BatchStage>('idle')
 
-  const handleContentSlideCompleted = async (slideId: string, result: ContentProcessingResult) => {
-    await onContentSlideCompleted(slideId, result)
-    setSavedBodies((current) => ({ ...current, [slideId]: result.article.body }))
+  const handleContentSlideCompleted: ContentProcessingSlideCompleted = async (results) => {
+    await onContentSlideCompleted(results)
+    setSavedBodies((current) => ({
+      ...current,
+      ...Object.fromEntries(results.map(({ slideId, result }) => [slideId, result.article.body])),
+    }))
   }
 
   const processing = useContentProcessing(

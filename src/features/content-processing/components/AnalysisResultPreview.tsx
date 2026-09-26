@@ -140,7 +140,17 @@ function SlidePane({ slide }: { slide: SlideData }) {
   )
 }
 
-function VideoPane({ slide, videoSrc }: { slide: SlideData; videoSrc: string | null }) {
+function VideoPane({
+  slide,
+  videoSrc,
+  active,
+  onToggle,
+}: {
+  slide: SlideData
+  videoSrc: string | null
+  active: boolean
+  onToggle: () => void
+}) {
   return (
     <section
       className="flex min-h-0 flex-col bg-[#fbfcfa]"
@@ -154,7 +164,26 @@ function VideoPane({ slide, videoSrc }: { slide: SlideData; videoSrc: string | n
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 pt-1 pb-5">
         <div className="w-full max-w-[600px]">
-          <SegmentVideoPreview slide={slide} videoSrc={videoSrc} />
+          {active ? (
+            <>
+              <SegmentVideoPreview slide={slide} videoSrc={videoSrc} />
+              <button
+                className="mt-3 text-xs font-semibold text-[#71807b] hover:text-[#1d6b50]"
+                type="button"
+                onClick={onToggle}
+              >
+                動画を閉じる
+              </button>
+            </>
+          ) : (
+            <button
+              className="rounded-[9px] border border-[#b7cbc0] bg-[#f7faf7] px-4 py-3 text-xs font-semibold text-[#1d6b50] transition hover:border-[#1d6b50] hover:bg-[#e2eee8]"
+              type="button"
+              onClick={onToggle}
+            >
+              区間動画を読み込む
+            </button>
+          )}
         </div>
       </div>
     </section>
@@ -178,6 +207,7 @@ export function AnalysisResultPreview({
 }: AnalysisResultPreviewProps) {
   const hasAnyResult = slides.some((slide) => slide.ocr || slide.transcript)
   const videoSource = useVideoSourceUrl(videoPath)
+  const [activeVideoSlideId, setActiveVideoSlideId] = useState<string | null>(null)
   const [editingSlideId, setEditingSlideId] = useState<string | null>(null)
   const [draft, setDraft] = useState<SlideResultEdits | null>(null)
   const [savingSlideId, setSavingSlideId] = useState<string | null>(null)
@@ -324,7 +354,14 @@ export function AnalysisResultPreview({
                     />
                   </div>
                   <div className="border-b border-[#d8e1dc] md:col-start-1 md:row-start-2 md:border-r-2 md:border-r-[#d8e1dc]">
-                    <VideoPane slide={slide} videoSrc={videoSource.src} />
+                    <VideoPane
+                      slide={slide}
+                      videoSrc={videoSource.src}
+                      active={activeVideoSlideId === slide.id}
+                      onToggle={() =>
+                        setActiveVideoSlideId((current) => (current === slide.id ? null : slide.id))
+                      }
+                    />
                   </div>
                   <div className="md:col-start-2 md:row-start-2">
                     <ResultPane
