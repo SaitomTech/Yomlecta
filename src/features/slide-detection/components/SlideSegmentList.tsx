@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { formatTimestamp } from '../../../lib/time'
 import type { SlideBoundary, SlideData } from '../../../types/project'
+import { slideRangeKey } from '../utils'
 
 type SlideSegmentListProps = {
   boundaries: SlideBoundary[]
@@ -11,6 +12,8 @@ type SlideSegmentListProps = {
   activeSlideIndex: number
   onSelectSlide: (index: number) => void
   onRemoveBoundary: (boundaryId: string) => void
+  disabled?: boolean
+  preparingRanges?: Record<string, boolean>
 }
 
 export function SlideSegmentList({
@@ -20,6 +23,8 @@ export function SlideSegmentList({
   activeSlideIndex,
   onSelectSlide,
   onRemoveBoundary,
+  disabled = false,
+  preparingRanges = {},
 }: SlideSegmentListProps) {
   const slideRefs = useRef<Array<HTMLDivElement | null>>([])
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -49,7 +54,7 @@ export function SlideSegmentList({
     <section className="min-w-0 lg:sticky lg:top-6" aria-label="スライド区間の一覧">
       {boundaries.length === 0 && (
         <p className="mb-3 text-xs text-[#71807b]">
-          大きな画面変化は検出されませんでした。動画全体を1つのスライド区間として扱います。
+          境界はまだありません。タイムラインをダブルクリックして追加できます。
         </p>
       )}
 
@@ -77,7 +82,10 @@ export function SlideSegmentList({
                   aria-label={`Slide ${slideNumber}を動画で確認`}
                   aria-pressed={index === activeSlideIndex}
                 >
-                  <SlideThumbnail slide={slide} />
+                  <SlideThumbnail
+                    slide={slide}
+                    isPreparing={Boolean(preparingRanges[slideRangeKey(slide)])}
+                  />
 
                   <div className="px-3 pb-3 pt-2">
                     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -92,7 +100,7 @@ export function SlideSegmentList({
                       <span className={boundary ? 'text-[#1d6b50]' : undefined}>
                         {boundary?.source ?? 'start'}
                       </span>
-                      {boundary && (
+                      {boundary?.source === 'auto' && (
                         <>
                           <span>·</span>
                           <span className="normal-case tracking-normal">
@@ -110,6 +118,7 @@ export function SlideSegmentList({
                       className="rounded p-1 text-[#9aa6a1] transition hover:bg-[#fff0ec] hover:text-[#b6533a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6533a]/30"
                       type="button"
                       onClick={() => onRemoveBoundary(boundary.id)}
+                      disabled={disabled}
                       aria-label={`${formatTimestamp(boundary.timestampMs)}の境界を削除`}
                     >
                       <Trash2 size={13} />

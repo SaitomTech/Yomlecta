@@ -107,10 +107,6 @@ export async function removeProjectVideoRangeThumbnail(
   ).catch(() => undefined)
 }
 
-export async function prepareSlideAssetDirectory(projectId: string, articleId: string) {
-  return prepareArticleAssetDirectory(projectId, articleId, 'runs/current/slides')
-}
-
 export async function prepareProjectSourceAssetDirectory(projectId: string) {
   return prepareProjectAssetDirectory(projectId, 'source')
 }
@@ -135,10 +131,75 @@ export async function removeProjectSourceAssetDirectory(projectId: string) {
   await removeAppLocalPath(projectAssetDirectory(projectId, 'source')).catch(() => undefined)
 }
 
-export async function getSlideAssetPath(projectId: string, articleId: string, slideIndex: number) {
+function slideRunDirectory(projectId: string, articleId: string, runId: string) {
+  assertId(runId, 'スライド画像run ID')
+  return articleAssetDirectory(projectId, articleId, `runs/slides/${runId}`)
+}
+
+export async function getSlideRunAssetPath(
+  projectId: string,
+  articleId: string,
+  runId: string,
+  slideIndex: number,
+) {
   assertNonnegativeIndex(slideIndex, 'スライド番号')
-  const directory = await prepareSlideAssetDirectory(projectId, articleId)
+  const directory = await prepareRelativeDirectory(slideRunDirectory(projectId, articleId, runId))
   return join(directory, `slide-${String(slideIndex + 1).padStart(3, '0')}.jpg`)
+}
+
+export async function removeSlideRunAssets(projectId: string, articleId: string, runId: string) {
+  const path = slideRunDirectory(projectId, articleId, runId)
+  if (await appLocalPathExists(path)) await removeAppLocalPath(path)
+}
+
+export async function pruneSlideAssetRuns(
+  projectId: string,
+  articleId: string,
+  activeRunId?: string,
+) {
+  if (activeRunId) assertId(activeRunId, 'スライド画像run ID')
+  const runsDirectory = articleAssetDirectory(projectId, articleId, 'runs/slides')
+  if (await appLocalPathExists(runsDirectory)) {
+    const entries = await readAppLocalDirectory(runsDirectory)
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory && entry.name !== activeRunId)
+        .map((entry) => removeAppLocalPath(`${runsDirectory}/${entry.name}`)),
+    )
+  }
+
+  if (activeRunId) {
+    const legacyDirectory = articleAssetDirectory(projectId, articleId, 'runs/current/slides')
+    if (await appLocalPathExists(legacyDirectory)) await removeAppLocalPath(legacyDirectory)
+  }
+}
+
+export async function getSlidePreviewAssetPath(
+  projectId: string,
+  articleId: string,
+  previewId: string,
+  rangeKey: string,
+) {
+  assertId(articleId, '記事ID')
+  assertId(previewId, 'プレビューID')
+  assertFilePart(rangeKey, '区間ID')
+  const directory = await prepareArticleAssetDirectory(
+    projectId,
+    articleId,
+    `temp/slide-previews/${previewId}`,
+  )
+  return join(directory, `${rangeKey}.jpg`)
+}
+
+export async function removeSlidePreviewAssets(
+  projectId: string,
+  articleId: string,
+  previewId: string,
+) {
+  assertId(articleId, '記事ID')
+  assertId(previewId, 'プレビューID')
+  const path = articleAssetDirectory(projectId, articleId, `temp/slide-previews/${previewId}`)
+  if (await appLocalPathExists(path)) await removeAppLocalPath(path)
 }
 
 export async function getAudioAssetPath(projectId: string, articleId: string) {
@@ -179,8 +240,8 @@ export async function removeArticleAssetDirectory(projectId: string, articleId: 
   if (await appLocalPathExists(path)) await removeAppLocalPath(path)
 }
 
-export async function removeArticleCurrentRunDirectory(projectId: string, articleId: string) {
-  const path = articleAssetDirectory(projectId, articleId, 'runs/current')
+export async function removeArticleRunDirectories(projectId: string, articleId: string) {
+  const path = articleAssetDirectory(projectId, articleId, 'runs')
   if (await appLocalPathExists(path)) await removeAppLocalPath(path)
 }
 
@@ -218,6 +279,23 @@ export async function cleanupProjectDerivedAssets(project: MediaProject, detailA
   )
   if (!activeArticle) return
   await pruneSlideAssets(project.id, activeArticle.id, activeArticle.slides.length)
+  const slideRunIds = new Set(
+    activeArticle.slides.flatMap((slide) => {
+      const match = slide.image.representativeFramePath?.match(
+        /[/\\]runs[/\\]slides[/\\]([a-zA-Z0-9_-]+)[/\\]slide-\d+\.jpg$/,
+      )
+      return match ? [match[1]] : []
+    }),
+  )
+  if (slideRunIds.size <= 1) {
+    await pruneSlideAssetRuns(project.id, activeArticle.id, slideRunIds.values().next().value)
+  }
+  const previewDirectory = articleAssetDirectory(
+    project.id,
+    activeArticle.id,
+    'temp/slide-previews',
+  )
+  if (await appLocalPathExists(previewDirectory)) await removeAppLocalPath(previewDirectory)
   if (activeArticle.transcription) return
   await Promise.all(
     ['runs/current/audio', 'runs/current/transcript'].map(async (directory) => {

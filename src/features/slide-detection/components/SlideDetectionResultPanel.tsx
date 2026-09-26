@@ -12,6 +12,8 @@ type SlideDetectionResultPanelProps = {
   onChange: (boundaries: SlideBoundary[]) => void
   durationMs?: number
   timeOffsetMs?: number
+  disabled?: boolean
+  preparingRanges?: Record<string, boolean>
 }
 
 export function SlideDetectionResultPanel({
@@ -21,6 +23,8 @@ export function SlideDetectionResultPanel({
   onChange,
   durationMs: rangeDurationMs,
   timeOffsetMs = 0,
+  disabled = false,
+  preparingRanges,
 }: SlideDetectionResultPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
@@ -94,11 +98,11 @@ export function SlideDetectionResultPanel({
   return (
     <section
       className="mt-10 border-t border-[#d8e1dc] pt-8"
-      aria-labelledby="analysis-result-heading"
+      aria-labelledby="slide-segments-heading"
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <h2 id="analysis-result-heading" className="text-[21px] font-bold tracking-[-0.05em]">
-          解析結果
+        <h2 id="slide-segments-heading" className="text-[21px] font-bold tracking-[-0.05em]">
+          スライド区間の確認・調整
         </h2>
         <button
           className={`inline-flex items-center gap-1.5 rounded-[9px] border px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 ${followPlayback ? 'border-[#b7cbc0] bg-[#e2eee8] text-[#1d6b50] hover:border-[#1d6b50]' : 'border-[#d8e1dc] bg-[#fbfcfa] text-[#71807b] hover:border-[#b7cbc0] hover:text-[#1d6b50]'}`}
@@ -135,6 +139,7 @@ export function SlideDetectionResultPanel({
             activeSlideIndex={activeSlideIndex}
             onChange={onChange}
             onSeek={handleSeek}
+            disabled={disabled}
           />
         </SlideDetectionVideo>
 
@@ -145,6 +150,8 @@ export function SlideDetectionResultPanel({
           activeSlideIndex={activeSlideIndex}
           onSelectSlide={handleSelectSlide}
           onRemoveBoundary={handleRemoveBoundary}
+          disabled={disabled}
+          preparingRanges={preparingRanges}
         />
       </div>
     </section>

@@ -1,13 +1,14 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { ImageOff } from 'lucide-react'
+import { ImageOff, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import type { SlideData } from '../types/project'
 
 type SlideThumbnailProps = {
   slide: SlideData
+  isPreparing?: boolean
 }
 
-export function SlideThumbnail({ slide }: SlideThumbnailProps) {
+export function SlideThumbnail({ slide, isPreparing = false }: SlideThumbnailProps) {
   const [hasError, setHasError] = useState(false)
   const imagePath = slide.image.representativeFramePath
   const imageSrc = imagePath && !hasError ? convertFileSrc(imagePath) : null
@@ -24,10 +25,17 @@ export function SlideThumbnail({ slide }: SlideThumbnailProps) {
         />
       ) : (
         <div
-          className="flex h-full items-center justify-center text-[#9aa6a1]"
-          aria-label="代表フレームなし"
+          className="flex h-full flex-col items-center justify-center gap-1 text-[#9aa6a1]"
+          aria-label={isPreparing ? '代表フレームを作成中' : '代表フレームなし'}
         >
-          <ImageOff size={18} strokeWidth={1.5} />
+          {isPreparing ? (
+            <>
+              <LoaderCircle className="animate-spin" size={18} strokeWidth={1.5} />
+              <span className="text-[9px]">画像を作成中…</span>
+            </>
+          ) : (
+            <ImageOff size={18} strokeWidth={1.5} />
+          )}
         </div>
       )}
     </div>

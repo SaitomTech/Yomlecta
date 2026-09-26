@@ -12,6 +12,7 @@ type SlideDetectionTimelineProps = {
   activeSlideIndex: number
   onChange: (boundaries: SlideBoundary[]) => void
   onSeek: (timestampMs: number) => void
+  disabled?: boolean
 }
 
 export function SlideDetectionTimeline({
@@ -22,6 +23,7 @@ export function SlideDetectionTimeline({
   activeSlideIndex,
   onChange,
   onSeek,
+  disabled = false,
 }: SlideDetectionTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null)
   const [draggingBoundaryId, setDraggingBoundaryId] = useState<string | null>(null)
@@ -46,6 +48,7 @@ export function SlideDetectionTimeline({
 
   const moveBoundary = useCallback(
     (boundaryId: string, clientX: number) => {
+      if (disabled) return
       const timestampMs = timestampAtClientX(clientX)
       const index = boundaries.findIndex((boundary) => boundary.id === boundaryId)
       if (timestampMs === null || index < 0) return
@@ -66,11 +69,12 @@ export function SlideDetectionTimeline({
         ),
       )
     },
-    [boundaries, durationMs, timestampAtClientX, updateBoundaries],
+    [boundaries, disabled, durationMs, timestampAtClientX, updateBoundaries],
   )
 
   const handleTimelineDoubleClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
+      if (disabled) return
       const timestampMs = timestampAtClientX(event.clientX)
       if (
         timestampMs === null ||
@@ -95,7 +99,7 @@ export function SlideDetectionTimeline({
         },
       ])
     },
-    [boundaries, durationMs, timestampAtClientX, updateBoundaries],
+    [boundaries, disabled, durationMs, timestampAtClientX, updateBoundaries],
   )
 
   return (
@@ -110,7 +114,7 @@ export function SlideDetectionTimeline({
           if (timestampMs !== null) onSeek(timestampMs)
         }}
         role="group"
-        aria-label="検出結果のタイムライン。ドラッグで動画を移動、ダブルクリックで境界を追加"
+        aria-label="スライド区間のタイムライン。クリックで動画を移動、ダブルクリックで境界を追加"
       >
         <div className="pointer-events-none absolute inset-x-0 top-7 h-2 overflow-hidden rounded-full bg-[#e2eee8]">
           {slides.map((slide, index) => (
@@ -156,6 +160,7 @@ export function SlideDetectionTimeline({
             key={boundary.id}
             style={{ left: `${timelinePosition(boundary.timestampMs, durationMs)}%` }}
             type="button"
+            disabled={disabled}
             title={`${formatTimestamp(boundary.timestampMs)} · distance ${boundary.distance}`}
             aria-label={`${formatTimestamp(boundary.timestampMs)}の境界を移動`}
             onPointerDown={(event) => {

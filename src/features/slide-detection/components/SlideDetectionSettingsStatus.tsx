@@ -10,6 +10,7 @@ type SlideDetectionSettingsStatusProps = {
   stageProgress: number | null
   error: string | null
   isSaving: boolean
+  isReviewDirty: boolean
   onThresholdChange: (value: number) => void
   onSampleIntervalChange: (value: number) => void
   onDetect: () => void | Promise<void>
@@ -24,6 +25,51 @@ const stageLabels: Record<SlideDetectionStage, string> = {
   completed: '検出結果を確認してください。',
 }
 
+function progressLabel(
+  isSaving: boolean,
+  isRunning: boolean,
+  isCompleted: boolean,
+  progress: number | null,
+) {
+  if (isSaving) return '保存中'
+  if (progress !== null) return `${Math.round(progress * 100)}%`
+  if (isRunning) return '処理中'
+  return isCompleted ? '完了' : '未開始'
+}
+
+function statusLabel(status: SlideDetectionStatus, isSaving: boolean) {
+  if (isSaving) return 'SAVING'
+  if (status === 'completed') return 'DETECTED'
+  if (status === 'error') return 'ERROR'
+  return status === 'running' ? 'ANALYZING' : 'READY'
+}
+
+function statusDescription(
+  stage: SlideDetectionStage,
+  isSaving: boolean,
+  isRunning: boolean,
+  isCompleted: boolean,
+) {
+  if (isSaving) return '区間と代表画像を保存中…'
+  if (isRunning) return stageLabels[stage]
+  return isCompleted ? stageLabels.completed : '自動検出はまだ開始されていません。'
+}
+
+function StatusIcon({
+  isSaving,
+  isCompleted,
+  hasError,
+}: {
+  isSaving: boolean
+  isCompleted: boolean
+  hasError: boolean
+}) {
+  if (isSaving) return <RefreshCw size={13} className="animate-spin" />
+  if (isCompleted) return <Check size={13} />
+  if (hasError) return <AlertTriangle size={13} />
+  return <ScanLine size={13} />
+}
+
 export function SlideDetectionSettingsStatus({
   threshold,
   sampleIntervalMs,
@@ -32,47 +78,42 @@ export function SlideDetectionSettingsStatus({
   stageProgress,
   error,
   isSaving,
+  isReviewDirty,
   onThresholdChange,
   onSampleIntervalChange,
   onDetect,
 }: SlideDetectionSettingsStatusProps) {
   const isRunning = status === 'running'
   const isCompleted = status === 'completed'
-  const progressLabel =
-    stageProgress === null
-      ? isRunning
-        ? '処理中'
-        : isCompleted
-          ? '完了'
-          : '未開始'
-      : `${Math.round(stageProgress * 100)}%`
-  const statusLabel = isCompleted
-    ? 'DETECTED'
-    : status === 'error'
-      ? 'ERROR'
-      : isRunning
-        ? 'ANALYZING'
-        : 'READY'
+  const hasError = status === 'error'
+  const currentProgressLabel = progressLabel(isSaving, isRunning, isCompleted, stageProgress)
+  const currentStatusLabel = statusLabel(status, isSaving)
+  const currentStatusDescription = statusDescription(stage, isSaving, isRunning, isCompleted)
+  const statusColor = isCompleted
+    ? 'text-[#1d6b50]'
+    : hasError
+      ? 'text-[#b6533a]'
+      : 'text-[#9a7a35]'
 
   return (
     <section aria-labelledby="analysis-status-heading">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 id="analysis-status-heading" className="text-[21px] font-bold tracking-[-0.05em]">
-          解析を実行
+          自動検出
         </h2>
         <button
           className="inline-flex items-center justify-center gap-2 rounded-[9px] border border-[#b7cbc0] bg-[#fbfcfa] px-4 py-3 text-xs font-semibold text-[#1d6b50] transition hover:border-[#1d6b50] hover:bg-[#e2eee8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
           onClick={() => void onDetect()}
-          disabled={isRunning || isSaving}
+          disabled={isRunning || isSaving || isReviewDirty}
         >
           <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
-          {isRunning ? '解析中…' : isCompleted ? '再検出' : '解析開始'}
+          {isRunning ? '自動検出中…' : isCompleted ? '自動で再検出' : '自動検出を開始'}
         </button>
       </div>
 
       <div className="mt-6">
-        <p className="text-[13px] font-semibold text-[#18211f]">設定</p>
+        <p className="text-[13px] font-semibold text-[#18211f]">自動検出の設定</p>
       </div>
 
       <div className="mt-3 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">
@@ -90,7 +131,7 @@ export function SlideDetectionSettingsStatus({
               step="1"
               value={threshold}
               onChange={(event) => onThresholdChange(Number(event.target.value))}
-              disabled={isRunning}
+              disabled={isRunning || isSaving}
               aria-label="スライド変化のしきい値"
             />
             <span className="mt-1 block text-[10px] text-[#9aa6a1]">
@@ -115,7 +156,7 @@ export function SlideDetectionSettingsStatus({
               step="100"
               value={sampleIntervalMs}
               onChange={(event) => onSampleIntervalChange(Number(event.target.value))}
-              disabled={isRunning}
+              disabled={isRunning || isSaving}
               aria-label="フレームを確認する間隔"
             />
             <span className="mt-1 block text-[10px] text-[#9aa6a1]">
@@ -129,36 +170,28 @@ export function SlideDetectionSettingsStatus({
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <p className="text-[13px] font-semibold text-[#18211f]">解析状況</p>
+              <p className="text-[13px] font-semibold text-[#18211f]">自動検出の状況</p>
               <div
-                className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] ${isCompleted ? 'text-[#1d6b50]' : status === 'error' ? 'text-[#b6533a]' : 'text-[#9a7a35]'}`}
+                className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] ${statusColor}`}
               >
-                {isCompleted ? (
-                  <Check size={13} />
-                ) : status === 'error' ? (
-                  <AlertTriangle size={13} />
-                ) : (
-                  <ScanLine size={13} />
-                )}
-                {statusLabel}
+                <StatusIcon isSaving={isSaving} isCompleted={isCompleted} hasError={hasError} />
+                {currentStatusLabel}
               </div>
             </div>
-            <p className="mt-1 text-xs text-[#71807b]">
-              {isRunning
-                ? stageLabels[stage]
-                : isCompleted
-                  ? stageLabels.completed
-                  : '解析はまだ開始されていません。'}
-            </p>
+            <p className="mt-1 text-xs text-[#71807b]">{currentStatusDescription}</p>
           </div>
-          <span className="font-mono text-[11px] tabular-nums text-[#1d6b50]">{progressLabel}</span>
+          <span className="font-mono text-[11px] tabular-nums text-[#1d6b50]">
+            {currentProgressLabel}
+          </span>
         </div>
 
         <div
           className="mt-4 h-1 overflow-hidden rounded-full bg-[#e2eee8]"
-          aria-label={isRunning ? stageLabels[stage] : '検出の進捗'}
+          aria-label={
+            isSaving ? '区間と代表画像を保存中' : isRunning ? stageLabels[stage] : '検出の進捗'
+          }
         >
-          {isRunning && stageProgress === null ? (
+          {isSaving || (isRunning && stageProgress === null) ? (
             <div className="h-full w-1/3 rounded-full bg-[#1d6b50] animate-pulse" />
           ) : (
             <div
@@ -177,9 +210,10 @@ export function SlideDetectionSettingsStatus({
               className="inline-flex shrink-0 items-center gap-1.5 font-semibold text-[#9d422d] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6533a]/30"
               type="button"
               onClick={() => void onDetect()}
+              disabled={isRunning || isSaving || isReviewDirty}
             >
               <RefreshCw size={13} />
-              再試行
+              自動検出を再試行
             </button>
           </div>
         )}

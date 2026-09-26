@@ -12,3 +12,7 @@ export type SlideDetectionOutput = {
   result: SlideDetectionResult
   slides: SlideData[]
 }
+
+export type PendingSlideDetectionOutput = SlideDetectionOutput & {
+  assetRunId: string
+}

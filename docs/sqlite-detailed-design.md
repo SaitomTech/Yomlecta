@@ -158,7 +158,7 @@ projectの更新には`expected_revision`を指定できる。現在値と違え
 projects/<project-id>/
   videos/<video-id>/original.<ext>
   videos/<video-id>/thumbnail.jpg
-  articles/<article-id>/runs/current/slides/slide-001.jpg
+  articles/<article-id>/runs/slides/<run-id>/slide-001.jpg
   articles/<article-id>/runs/current/audio/source-16k.wav
 ```
 

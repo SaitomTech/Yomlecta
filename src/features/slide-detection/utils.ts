@@ -8,3 +8,7 @@ export function timelinePosition(timestampMs: number, durationMs: number) {
 export function slideDuration(slide: SlideData) {
   return Math.max(0, slide.endMs - slide.startMs)
 }
+
+export function slideRangeKey(slide: Pick<SlideData, 'startMs' | 'endMs'>) {
+  return `${Math.round(slide.startMs)}-${Math.round(slide.endMs)}`
+}

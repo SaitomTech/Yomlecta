@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { runSlideDetection } from '../detection'
 import type { MediaProject } from '../../../types/project'
-import type { SlideDetectionOutput, SlideDetectionStage } from '../types'
+import type { PendingSlideDetectionOutput, SlideDetectionStage } from '../types'
 
 export type SlideDetectionStatus = 'idle' | 'running' | 'completed' | 'error'
 
@@ -12,16 +12,16 @@ function hasRepresentativeFrames(project: MediaProject) {
   )
 }
 
-function persistedOutput(project: MediaProject): SlideDetectionOutput | null {
-  if (!project.slideDetection || !hasRepresentativeFrames(project)) return null
-  return {
-    result: project.slideDetection,
-    slides: project.slides,
-  }
+function hasPersistedAutomaticDetection(project: MediaProject) {
+  return Boolean(
+    project.slideDetection &&
+    project.slideDetection.framesAnalyzed > 0 &&
+    hasRepresentativeFrames(project),
+  )
 }
 
 type UseSlideDetectionOptions = {
-  onCompleted?: (output: SlideDetectionOutput) => void | Promise<void>
+  onCompleted: (output: PendingSlideDetectionOutput) => void | Promise<void>
 }
 
 export type SlideDetectionParameters = {
@@ -31,10 +31,9 @@ export type SlideDetectionParameters = {
 
 export function useSlideDetection(
   project: MediaProject,
-  { onCompleted }: UseSlideDetectionOptions = {},
+  { onCompleted }: UseSlideDetectionOptions,
 ) {
-  const [output, setOutput] = useState<SlideDetectionOutput | null>(() => persistedOutput(project))
-  const hasPersistedResult = output !== null
+  const hasPersistedResult = hasPersistedAutomaticDetection(project)
   const [status, setStatus] = useState<SlideDetectionStatus>(
     hasPersistedResult ? 'completed' : 'idle',
   )
@@ -49,7 +48,6 @@ export function useSlideDetection(
       setStatus('running')
       setStage('preparing')
       setStageProgress(null)
-      setOutput(null)
       setError(null)
 
       try {
@@ -65,15 +63,16 @@ export function useSlideDetection(
         })
         setStage('saving')
         setStageProgress(null)
-        await onCompleted?.(nextOutput)
-        setOutput(nextOutput)
+        await onCompleted(nextOutput)
         setStage('completed')
         setStageProgress(1)
         setStatus('completed')
       } catch (detectionError) {
         console.error(detectionError)
         setStatus('error')
-        setError('スライドを検出できませんでした。動画とsidecarの状態を確認してください。')
+        const detail =
+          detectionError instanceof Error ? detectionError.message : String(detectionError)
+        setError(`スライドを検出できませんでした。${detail}`)
       }
     },
     [onCompleted, project],
@@ -83,7 +82,6 @@ export function useSlideDetection(
     status,
     stage,
     stageProgress,
-    output,
     error,
     detect,
   }

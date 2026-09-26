@@ -4,7 +4,11 @@ import {
   type FrameHash,
 } from '../../lib/media/ffmpeg'
 import { hammingDistance } from '../../lib/media/dhash'
-import { getSlideAssetPath } from '../../lib/storage/projectAssets'
+import {
+  getSlideRunAssetPath,
+  pruneSlideAssetRuns,
+  removeSlideRunAssets,
+} from '../../lib/storage/projectAssets'
 import {
   requireActiveArticleId,
   type MediaProject,
@@ -12,7 +16,11 @@ import {
   type SlideData,
 } from '../../types/project'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
-import type { SlideDetectionOutput, SlideDetectionStage } from './types'
+import type {
+  PendingSlideDetectionOutput,
+  SlideDetectionOutput,
+  SlideDetectionStage,
+} from './types'
 
 export const MINIMUM_BOUNDARY_GAP_MS = 1500
 
@@ -65,14 +73,14 @@ export function detectSlideBoundaries({
 export function buildSlideData(
   boundaries: SlideBoundary[],
   durationMs: number,
-  existingSlides: SlideData[] = [],
+  slideIdPrefix: string,
 ): SlideData[] {
   const starts = [0, ...boundaries.map((boundary) => boundary.timestampMs)]
   return starts.map((startMs, index) => {
     const endMs = index < starts.length - 1 ? starts[index + 1] : durationMs
     const boundary = index > 0 ? boundaries[index - 1] : undefined
     return {
-      id: `slide-${index + 1}`,
+      id: `${slideIdPrefix}-${index + 1}`,
       index,
       startMs,
       endMs: Math.max(startMs, endMs),
@@ -80,7 +88,7 @@ export function buildSlideData(
         source: boundary?.source ?? 'auto',
         distance: boundary?.distance,
       },
-      image: existingSlides[index]?.image ?? {},
+      image: {},
     }
   })
 }
@@ -91,37 +99,124 @@ function representativeTimestamp(startMs: number, endMs: number) {
   return startMs + Math.min(Math.round(segmentDurationMs / 2), segmentDurationMs - 200)
 }
 
+export async function extractRepresentativeFrameForSlide(
+  project: MediaProject,
+  slide: SlideData,
+  outputPath: string,
+  signal?: AbortSignal,
+) {
+  const context = getActiveArticleSourceContext(project)
+  return extractRepresentativeFrame({
+    path: context.source.path,
+    crop: context.crop,
+    perspectiveCrop: context.perspectiveCrop,
+    metadata: context.source.metadata,
+    timestampMs: context.range.startMs + representativeTimestamp(slide.startMs, slide.endMs),
+    outputPath,
+    signal,
+  })
+}
+
 async function addRepresentativeFrames(
   project: MediaProject,
   slides: SlideData[],
   onProgress?: (progress: number) => void,
+  failOnError = false,
 ) {
-  const context = getActiveArticleSourceContext(project)
   const articleId = requireActiveArticleId(project)
+  const assetRunId = crypto.randomUUID()
   const completed: SlideData[] = []
-  // Keep ffmpeg sidecars sequential so long videos do not spawn dozens of encoders at once.
-  for (let index = 0; index < slides.length; index += 1) {
-    const slide = slides[index]
-    try {
-      const outputPath = await getSlideAssetPath(project.id, articleId, index)
-      await extractRepresentativeFrame({
-        path: context.source.path,
-        crop: context.crop,
-        perspectiveCrop: context.perspectiveCrop,
-        metadata: context.source.metadata,
-        timestampMs: context.range.startMs + representativeTimestamp(slide.startMs, slide.endMs),
-        outputPath,
-      })
-      completed.push({ ...slide, image: { representativeFramePath: outputPath } })
-    } catch (error) {
-      console.error(`Slide ${index + 1}の代表フレームを作成できませんでした`, error)
-      completed.push(slide)
-    } finally {
-      onProgress?.((index + 1) / Math.max(slides.length, 1))
+  try {
+    // Keep ffmpeg sidecars sequential so long videos do not spawn dozens of encoders at once.
+    for (let index = 0; index < slides.length; index += 1) {
+      const slide = slides[index]
+      try {
+        const outputPath = await getSlideRunAssetPath(project.id, articleId, assetRunId, index)
+        await extractRepresentativeFrameForSlide(project, slide, outputPath)
+        completed.push({ ...slide, image: { representativeFramePath: outputPath } })
+      } catch (error) {
+        console.error(`Slide ${index + 1}の代表フレームを作成できませんでした`, error)
+        if (failOnError) {
+          const detail = error instanceof Error ? error.message : String(error)
+          throw new Error(`Slide ${index + 1}の代表画像を作成できませんでした: ${detail}`)
+        }
+        completed.push(slide)
+      } finally {
+        onProgress?.((index + 1) / Math.max(slides.length, 1))
+      }
     }
+  } catch (error) {
+    await removeSlideRunAssets(project.id, articleId, assetRunId).catch((cleanupError) => {
+      console.warn('失敗した代表画像候補を削除できませんでした。', cleanupError)
+    })
+    throw error
   }
 
-  return completed
+  return { slides: completed, assetRunId }
+}
+
+export async function commitSlideDetectionOutput(
+  project: MediaProject,
+  pending: PendingSlideDetectionOutput,
+  persist: (output: SlideDetectionOutput) => void | Promise<void>,
+) {
+  const articleId = requireActiveArticleId(project)
+  try {
+    const output = { result: pending.result, slides: pending.slides }
+    await persist(output)
+    await pruneSlideAssetRuns(project.id, articleId, pending.assetRunId).catch((cleanupError) => {
+      console.warn('以前の代表画像を削除できませんでした。', cleanupError)
+    })
+    return output
+  } catch (error) {
+    try {
+      await removeSlideRunAssets(project.id, articleId, pending.assetRunId)
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'スライド区間の保存失敗後に代表画像を片付けられませんでした。',
+      )
+    }
+    throw error
+  }
+}
+
+type CreateManualSlideDetectionOutputInput = {
+  project: MediaProject
+  boundaries: SlideBoundary[]
+  threshold: number
+  sampleIntervalMs: number
+}
+
+export async function createManualSlideDetectionOutput({
+  project,
+  boundaries,
+  threshold,
+  sampleIntervalMs,
+}: CreateManualSlideDetectionOutputInput): Promise<PendingSlideDetectionOutput> {
+  const context = getActiveArticleSourceContext(project)
+  const durationMs = context.range.endMs - context.range.startMs
+  const sortedBoundaries = boundaries.toSorted(
+    (first, second) => first.timestampMs - second.timestampMs,
+  )
+  const pending = await addRepresentativeFrames(
+    project,
+    buildSlideData(sortedBoundaries, durationMs, `slide-${requireActiveArticleId(project)}`),
+    undefined,
+    true,
+  )
+
+  return {
+    result: {
+      sampleIntervalMs,
+      threshold,
+      framesAnalyzed: project.slideDetection?.framesAnalyzed ?? 0,
+      boundaries: sortedBoundaries,
+      detectedAt: project.slideDetection?.detectedAt ?? new Date().toISOString(),
+    },
+    slides: pending.slides,
+    assetRunId: pending.assetRunId,
+  }
 }
 
 type RunSlideDetectionInput = {
@@ -138,7 +233,7 @@ export async function runSlideDetection({
   sampleIntervalMs: sampleIntervalOverride,
   onProgress,
   onStage,
-}: RunSlideDetectionInput): Promise<SlideDetectionOutput> {
+}: RunSlideDetectionInput): Promise<PendingSlideDetectionOutput> {
   const context = getActiveArticleSourceContext(project)
   const durationMs = context.range.endMs - context.range.startMs
   const { sampleIntervalMs: configuredSampleIntervalMs, threshold: configuredThreshold } =
@@ -158,9 +253,9 @@ export async function runSlideDetection({
   onStage?.('comparing')
   const boundaries = detectSlideBoundaries({ frames, threshold })
   onStage?.('extracting')
-  const slides = await addRepresentativeFrames(
+  const pending = await addRepresentativeFrames(
     project,
-    buildSlideData(boundaries, durationMs),
+    buildSlideData(boundaries, durationMs, `slide-${requireActiveArticleId(project)}`),
     onProgress,
   )
 
@@ -172,6 +267,7 @@ export async function runSlideDetection({
       boundaries,
       detectedAt: new Date().toISOString(),
     },
-    slides,
+    slides: pending.slides,
+    assetRunId: pending.assetRunId,
   }
 }

@@ -40,7 +40,7 @@ import type {
   TranscriptionResult,
   VideoTrimRange,
 } from '../../types/project'
-import { pruneSlideAssets, removeArticleCurrentRunDirectory } from '../storage/projectAssets'
+import { removeArticleRunDirectories } from '../storage/projectAssets'
 
 function activeArticle(project: MediaProject) {
   if (!project.activeArticleId) return null
@@ -129,7 +129,7 @@ export async function saveArticleSource(
   const synced = syncedArticle(updated)
   if (!synced) return null
   await updateArticleSource(synced.next, synced.article)
-  await removeArticleCurrentRunDirectory(synced.next.id, synced.article.id).catch((error) =>
+  await removeArticleRunDirectories(synced.next.id, synced.article.id).catch((error) =>
     console.warn('古い記事解析ファイルを削除できませんでした。', error),
   )
   return synced.next
@@ -140,11 +140,6 @@ export async function saveSlideDetection(project: MediaProject, output: SlideDet
   if (updated === project) return null
   const next = syncActiveArticle(updated)
   await commitSlideDetection(next, next.slideDetection ?? output.result, next.slides)
-  if (next.activeArticleId) {
-    await pruneSlideAssets(next.id, next.activeArticleId, next.slides.length).catch((error) =>
-      console.warn('古いスライド画像を削除できませんでした。', error),
-    )
-  }
   return next
 }
 
