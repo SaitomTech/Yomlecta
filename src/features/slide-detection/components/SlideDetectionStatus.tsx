@@ -1,18 +1,14 @@
 import { AlertTriangle, Check, RefreshCw, ScanLine } from 'lucide-react'
-import type { SlideDetectionStatus } from '../hooks/useSlideDetection'
+import type { SlideDetectionStatus as DetectionStatus } from '../hooks/useSlideDetection'
 import type { SlideDetectionStage } from '../types'
 
-type SlideDetectionSettingsStatusProps = {
-  threshold: number
-  sampleIntervalMs: number
-  status: SlideDetectionStatus
+type SlideDetectionStatusProps = {
+  status: DetectionStatus
   stage: SlideDetectionStage
   stageProgress: number | null
   error: string | null
   isSaving: boolean
   isReviewDirty: boolean
-  onThresholdChange: (value: number) => void
-  onSampleIntervalChange: (value: number) => void
   onDetect: () => void | Promise<void>
 }
 
@@ -20,6 +16,7 @@ const stageLabels: Record<SlideDetectionStage, string> = {
   preparing: '解析の準備中…',
   sampling: 'フレームを読み込み中…',
   comparing: 'フレームの変化を比較中…',
+  classifying: '映像区間を分類中…',
   extracting: '代表画像を作成中…',
   saving: '検出結果を保存中…',
   completed: '検出結果を確認してください。',
@@ -37,7 +34,7 @@ function progressLabel(
   return isCompleted ? '完了' : '未開始'
 }
 
-function statusLabel(status: SlideDetectionStatus, isSaving: boolean) {
+function statusLabel(status: DetectionStatus, isSaving: boolean) {
   if (isSaving) return 'SAVING'
   if (status === 'completed') return 'DETECTED'
   if (status === 'error') return 'ERROR'
@@ -70,19 +67,15 @@ function StatusIcon({
   return <ScanLine size={13} />
 }
 
-export function SlideDetectionSettingsStatus({
-  threshold,
-  sampleIntervalMs,
+export function SlideDetectionStatus({
   status,
   stage,
   stageProgress,
   error,
   isSaving,
   isReviewDirty,
-  onThresholdChange,
-  onSampleIntervalChange,
   onDetect,
-}: SlideDetectionSettingsStatusProps) {
+}: SlideDetectionStatusProps) {
   const isRunning = status === 'running'
   const isCompleted = status === 'completed'
   const hasError = status === 'error'
@@ -110,60 +103,6 @@ export function SlideDetectionSettingsStatus({
           <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
           {isRunning ? '自動検出中…' : isCompleted ? '自動で再検出' : '自動検出を開始'}
         </button>
-      </div>
-
-      <div className="mt-6">
-        <p className="text-[13px] font-semibold text-[#18211f]">自動検出の設定</p>
-      </div>
-
-      <div className="mt-3 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">
-        <div className="grid gap-5 md:grid-cols-2">
-          <label className="block text-xs text-[#71807b]">
-            <span className="flex items-center justify-between gap-3">
-              <span>しきい値</span>
-              <span className="font-mono text-[#1d6b50]">{threshold}</span>
-            </span>
-            <input
-              className="mt-3 w-full accent-[#1d6b50]"
-              type="range"
-              min="4"
-              max="32"
-              step="1"
-              value={threshold}
-              onChange={(event) => onThresholdChange(Number(event.target.value))}
-              disabled={isRunning || isSaving}
-              aria-label="スライド変化のしきい値"
-            />
-            <span className="mt-1 block text-[10px] text-[#9aa6a1]">
-              小さい変化も拾う ← → 大きな変化だけ
-            </span>
-          </label>
-
-          <label className="block text-xs text-[#71807b]">
-            <span className="flex items-center justify-between gap-3">
-              <span>インターバル</span>
-              <span className="font-mono text-[#1d6b50]">
-                {sampleIntervalMs >= 1000
-                  ? `${(sampleIntervalMs / 1000).toFixed(1)}秒`
-                  : `${sampleIntervalMs}ms`}
-              </span>
-            </span>
-            <input
-              className="mt-3 w-full accent-[#1d6b50]"
-              type="range"
-              min="100"
-              max="2000"
-              step="100"
-              value={sampleIntervalMs}
-              onChange={(event) => onSampleIntervalChange(Number(event.target.value))}
-              disabled={isRunning || isSaving}
-              aria-label="フレームを確認する間隔"
-            />
-            <span className="mt-1 block text-[10px] text-[#9aa6a1]">
-              短いほど細かく検出、長いほど速く解析
-            </span>
-          </label>
-        </div>
       </div>
 
       <div className="mt-8 border-t border-[#e0e8e3] pt-6">

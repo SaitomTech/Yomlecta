@@ -4,6 +4,7 @@ export type SlideDetectionStage =
   | 'preparing'
   | 'sampling'
   | 'comparing'
+  | 'classifying'
   | 'extracting'
   | 'saving'
   | 'completed'

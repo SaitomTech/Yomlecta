@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type MouseEvent } from 'react'
-import type { SlideBoundary, SlideData } from '../../../types/project'
+import { effectiveVisualKind, type SlideBoundary, type SlideData } from '../../../types/project'
 import { MINIMUM_BOUNDARY_GAP_MS } from '../detection'
 import { formatTimestamp } from '../../../lib/time'
 import { slideDuration, timelinePosition } from '../utils'
@@ -119,7 +119,7 @@ export function SlideDetectionTimeline({
         <div className="pointer-events-none absolute inset-x-0 top-7 h-2 overflow-hidden rounded-full bg-[#e2eee8]">
           {slides.map((slide, index) => (
             <div
-              className={`absolute inset-y-0 transition-[filter,box-shadow] ${index % 2 === 0 ? 'bg-[#7fb39c]' : 'bg-[#aacdbb]'} ${index === activeSlideIndex ? 'brightness-90 shadow-[inset_0_0_0_1px_rgba(23,77,60,0.6)]' : ''}`}
+              className={`absolute inset-y-0 transition-[filter,box-shadow] ${effectiveVisualKind(slide) === 'non-slide' ? 'bg-[#8496c8]' : effectiveVisualKind(slide) === 'unknown' ? 'bg-[#d6b868]' : index % 2 === 0 ? 'bg-[#7fb39c]' : 'bg-[#aacdbb]'} ${index === activeSlideIndex ? 'brightness-90 shadow-[inset_0_0_0_1px_rgba(23,77,60,0.6)]' : ''}`}
               key={slide.id}
               style={{
                 left: `${timelinePosition(slide.startMs, durationMs)}%`,

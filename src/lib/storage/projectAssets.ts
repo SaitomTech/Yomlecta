@@ -127,6 +127,26 @@ export async function removeCropDetectionDirectory(projectId: string) {
   )
 }
 
+export async function prepareVisualClassificationDirectory(
+  projectId: string,
+  articleId: string,
+  runId: string,
+) {
+  assertId(runId, '視覚分類run ID')
+  return prepareArticleAssetDirectory(projectId, articleId, `temp/visual-classification/${runId}`)
+}
+
+export async function removeVisualClassificationDirectory(
+  projectId: string,
+  articleId: string,
+  runId: string,
+) {
+  assertId(runId, '視覚分類run ID')
+  await removeAppLocalPath(
+    articleAssetDirectory(projectId, articleId, `temp/visual-classification/${runId}`),
+  ).catch(() => undefined)
+}
+
 export async function removeProjectSourceAssetDirectory(projectId: string) {
   await removeAppLocalPath(projectAssetDirectory(projectId, 'source')).catch(() => undefined)
 }

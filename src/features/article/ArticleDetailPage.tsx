@@ -12,6 +12,7 @@ import {
 import { useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useVideoSourceUrl } from '../../lib/media/useVideoSourceUrl'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import { formatTimestamp } from '../../lib/time'
 import { useDialogA11y } from '../../lib/ui/useDialogA11y'
 import type {
@@ -189,7 +190,7 @@ export function ArticleDetailPage({
   const status = getArticleStatus(item)
   const summary = project.article?.summary
   const sections = article?.article?.sections?.sections ?? []
-  const slides = article?.slides ?? []
+  const slides = article ? articleBlockViews(article.slides, article.articleBlocks) : []
   const outputLanguage = getArticleOutputLanguage(project)
   const translation = getCurrentTranslationForOutputLanguage(project, outputLanguage)
   const sourceLanguage = getArticleSourceLanguage(project, translation)
@@ -413,9 +414,11 @@ export function ArticleDetailPage({
                           </div>
                         )}
                         <article className="py-2 pb-[18px]">
-                          <div className="grid items-start gap-8 min-[601px]:grid-cols-2">
-                            <figure className="relative m-0">
-                              {slide.image.representativeFramePath && (
+                          <div
+                            className={`grid items-start gap-8 ${slide.image.representativeFramePath ? 'min-[601px]:grid-cols-2' : ''}`}
+                          >
+                            {slide.image.representativeFramePath && (
+                              <figure className="relative m-0">
                                 <button
                                   className="group relative block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left"
                                   type="button"
@@ -435,12 +438,17 @@ export function ArticleDetailPage({
                                     <Maximize2 size={12} aria-hidden="true" /> 拡大
                                   </span>
                                 </button>
-                              )}
-                              <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
-                                {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
-                              </figcaption>
-                            </figure>
+                                <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
+                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                </figcaption>
+                              </figure>
+                            )}
                             <div className="content min-w-0 text-[#35443e]">
+                              {!slide.image.representativeFramePath && (
+                                <p className="mb-3 font-mono text-[11px] text-[#71807b]">
+                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                </p>
+                              )}
                               <ArticleSlideBody
                                 sourceBody={slide.transcript?.articleBody ?? ''}
                                 translatedBody={translation?.bodies[slide.id]}

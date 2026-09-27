@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/react'
 import { Fragment, useRef, useState } from 'react'
 import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
+import { articleBlockViews } from '../../../lib/pipeline/articleBlocks'
 import type {
   ArticleSection,
   ArticleSections,
@@ -59,7 +60,7 @@ type ArticleStructureEditorProps = {
 }
 
 function articleSlidesFor(project: MediaProject) {
-  return project.slides
+  return articleBlockViews(project.slides, project.articleBlocks)
     .filter((slide) => Boolean(slide.transcript))
     .sort((first, second) => first.index - second.index)
 }
@@ -79,7 +80,7 @@ function createSectionId() {
 }
 
 function sortSlideIdsByProjectOrder(slideIds: string[], project: MediaProject) {
-  const slideOrder = new Map(project.slides.map((slide) => [slide.id, slide.index]))
+  const slideOrder = new Map(articleSlidesFor(project).map((slide) => [slide.id, slide.index]))
   return [...slideIds].sort(
     (first, second) =>
       (slideOrder.get(first) ?? Number.MAX_SAFE_INTEGER) -

@@ -2,7 +2,12 @@ import { Trash2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { formatTimestamp } from '../../../lib/time'
-import type { SlideBoundary, SlideData } from '../../../types/project'
+import {
+  effectiveVisualKind,
+  type SlideBoundary,
+  type SlideData,
+  type VisualSegmentKind,
+} from '../../../types/project'
 import { slideRangeKey } from '../utils'
 
 type SlideSegmentListProps = {
@@ -12,6 +17,7 @@ type SlideSegmentListProps = {
   activeSlideIndex: number
   onSelectSlide: (index: number) => void
   onRemoveBoundary: (boundaryId: string) => void
+  onKindChange: (segmentId: string, kind: VisualSegmentKind) => void
   disabled?: boolean
   preparingRanges?: Record<string, boolean>
 }
@@ -23,6 +29,7 @@ export function SlideSegmentList({
   activeSlideIndex,
   onSelectSlide,
   onRemoveBoundary,
+  onKindChange,
   disabled = false,
   preparingRanges = {},
 }: SlideSegmentListProps) {
@@ -66,6 +73,18 @@ export function SlideSegmentList({
           {slides.map((slide, index) => {
             const boundary = index > 0 ? boundaries[index - 1] : undefined
             const slideNumber = String(slide.index + 1).padStart(2, '0')
+            const effectiveKind = effectiveVisualKind(slide)
+            const kindLabel =
+              effectiveKind === 'slide'
+                ? slide.personLayout === 'outside-crop' || slide.personLayout === 'both'
+                  ? 'スライド＋人物'
+                  : 'スライド'
+                : effectiveKind === 'non-slide'
+                  ? slide.classification?.evidence.humanPresenceRatio ||
+                    slide.classification?.evidence.facePresenceRatio
+                    ? '人物映像'
+                    : 'その他映像'
+                  : '要確認'
 
             return (
               <div
@@ -79,7 +98,7 @@ export function SlideSegmentList({
                   className="block w-full text-left transition-colors hover:bg-[#f1f6f2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1d6b50]/30"
                   type="button"
                   onClick={() => onSelectSlide(index)}
-                  aria-label={`Slide ${slideNumber}を動画で確認`}
+                  aria-label={`区間 ${slideNumber}を動画で確認`}
                   aria-pressed={index === activeSlideIndex}
                 >
                   <SlideThumbnail
@@ -90,12 +109,15 @@ export function SlideSegmentList({
                   <div className="px-3 pb-3 pt-2">
                     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <span className="text-xs font-semibold text-[#18211f]">
-                        Slide {slideNumber}
+                        区間 {slideNumber}
                       </span>
                       <span className="font-mono text-[10px] text-[#1d6b50]">
                         {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
                       </span>
                     </div>
+                    <span className="mt-2 inline-flex rounded-full bg-[#e7eee9] px-2 py-0.5 text-[10px] font-semibold text-[#496158]">
+                      {kindLabel}
+                    </span>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-[0.06em] text-[#9aa6a1]">
                       <span className={boundary ? 'text-[#1d6b50]' : undefined}>
                         {boundary?.source ?? 'start'}
@@ -112,8 +134,23 @@ export function SlideSegmentList({
                   </div>
                 </button>
 
-                {boundary && (
-                  <div className="flex justify-end border-t border-[#d8e1dc] px-3 py-1.5">
+                <div className="flex items-center justify-between gap-2 border-t border-[#d8e1dc] px-3 py-1.5">
+                  <label className="flex items-center gap-2 text-[10px] font-semibold text-[#71807b]">
+                    種別
+                    <select
+                      className="rounded border border-[#c8d6cf] bg-white px-2 py-1 text-[11px] text-[#18211f]"
+                      value={effectiveKind}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        onKindChange(slide.id, event.currentTarget.value as VisualSegmentKind)
+                      }
+                    >
+                      <option value="slide">スライド</option>
+                      <option value="non-slide">非スライド映像</option>
+                      <option value="unknown">不明</option>
+                    </select>
+                  </label>
+                  {boundary && (
                     <button
                       className="rounded p-1 text-[#9aa6a1] transition hover:bg-[#fff0ec] hover:text-[#b6533a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6533a]/30"
                       type="button"
@@ -123,8 +160,8 @@ export function SlideSegmentList({
                     >
                       <Trash2 size={13} />
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )
           })}

@@ -139,6 +139,7 @@ export async function createArticleFromRange(
     ...(requestedPerspectiveCrop ? { perspectiveCrop: requestedPerspectiveCrop } : {}),
     settings: DEFAULT_SETTINGS,
     slides: [],
+    articleBlocks: [],
     workflow: {
       lastVisitedStep: 'crop',
       maxReachedStep: 'crop',

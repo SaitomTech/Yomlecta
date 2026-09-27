@@ -103,7 +103,7 @@ export function ArticleSummaryCard({
               文書全体の要約
             </h2>
             <p className="mt-1 text-xs leading-5 text-[#71807b]">
-              生成済みのSlide本文全体から、伝えたいことと重要ポイントを整理します。
+              発話がある区間の生成済み本文から、伝えたいことと重要ポイントを整理します。
             </p>
           </div>
           <button
@@ -118,7 +118,7 @@ export function ArticleSummaryCard({
         </div>
         {!generation.hasAllArticleBodies && (
           <p className="mt-4 rounded-[8px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-xs leading-5 text-[#8b6a2b]">
-            Slide本文をすべて生成すると、文書全体の要約を作成できます。
+            発話がある区間の本文を生成すると、文書全体の要約を作成できます。無音区間の本文は不要です。
           </p>
         )}
         <div className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">

@@ -2,6 +2,7 @@ use super::assets::inspect_asset;
 use super::repositories::{load_project_from_indexes, load_project_summary};
 use super::services::documents::{update_article_title, update_article_workflow};
 use super::services::projects::create_project_bundle;
+use super::services::validate_run_kind;
 use super::DbState;
 use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -9,6 +10,11 @@ use std::{
     fs,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[test]
+fn visual_segmentation_is_a_valid_analysis_kind() {
+    assert!(validate_run_kind("visual_segmentation").is_ok());
+}
 
 #[test]
 fn normalized_indexes_round_trip_a_project() {
@@ -23,7 +29,7 @@ fn normalized_indexes_round_trip_a_project() {
             .await
             .expect("apply migrations");
         let project = json!({
-            "version": 11,
+            "version": 12,
             "id": "project-1",
             "title": "Test project",
             "videos": [{
@@ -97,18 +103,68 @@ fn normalized_indexes_round_trip_a_project() {
         )
         .await
         .expect("create project bundle through production service");
+        sqlx::query(
+            "INSERT INTO analysis_runs (id, article_id, kind, result_json, started_at)
+             VALUES ('visual-run', 'article-1', 'visual_segmentation', '{}', '2026-09-19T00:00:00.000Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert visual segmentation run");
+        sqlx::query(
+            "INSERT INTO visual_segments
+             (id, article_id, run_id, position, start_ms, end_ms, auto_kind, person_layout,
+              detection_json, classification_json)
+             VALUES ('segment-1', 'article-1', 'visual-run', 0, 0, 1000, 'slide', 'none',
+                     '{\"source\":\"auto\"}', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert visual segment");
+        sqlx::query(
+            "INSERT INTO article_blocks (id, article_id, position, image_segment_id, transcript_json)
+             VALUES ('segment-1', 'article-1', 0, 'segment-1',
+                     '{\"raw\":\"hello\",\"articleBody\":\"本文\",\"model\":\"whisper\"}')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert article block");
+        sqlx::query(
+            "INSERT INTO article_block_segments
+             (block_id, segment_id, position)
+             VALUES ('segment-1', 'segment-1', 0)",
+        )
+        .execute(&pool)
+        .await
+        .expect("assign visual segment to article block");
+        sqlx::query(
+            "INSERT INTO article_material_selections (article_id, visual_run_id)
+             VALUES ('article-1', 'visual-run')",
+        )
+        .execute(&pool)
+        .await
+        .expect("select visual run");
         let loaded = load_project_from_indexes(&pool, "project-1", None)
             .await
             .expect("load normalized project");
         assert_eq!(loaded["articles"][0]["title"], "Notes");
         assert_eq!(loaded["videos"][0]["media"]["path"], "/tmp/lecture.mp4");
+        assert_eq!(loaded["articles"][0]["slides"][0]["id"], "segment-1");
+        assert_eq!(loaded["articles"][0]["slides"][0]["autoKind"], "slide");
+        assert_eq!(
+            loaded["articles"][0]["articleBlocks"][0]["visualSegmentIds"],
+            json!(["segment-1"])
+        );
+        assert_eq!(
+            loaded["articles"][0]["articleBlocks"][0]["transcript"]["raw"],
+            "hello"
+        );
         let summary = load_project_summary(&pool, "project-1")
             .await
             .expect("load project summary");
         assert_eq!(summary["kind"], "project");
-        assert_eq!(summary["summary"]["slideCount"], 0);
+        assert_eq!(summary["summary"]["slideCount"], 1);
         assert_eq!(summary["summary"]["ocrCompleted"], 0);
-        assert_eq!(summary["summary"]["articleCompleted"], 0);
+        assert_eq!(summary["summary"]["articleCompleted"], 1);
         fs::remove_dir_all(root).expect("cleanup app data directory");
     });
 }
@@ -406,7 +462,7 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
             .expect("insert document");
         sqlx::query(
             "INSERT INTO analysis_runs (id, article_id, kind, result_json, started_at)
-             VALUES ('detection', 'a', 'slide_detection', ?, 'created')",
+             VALUES ('detection', 'a', 'visual_segmentation', ?, 'created')",
         )
         .bind(
             serde_json::to_string(&json!({"sampleIntervalMs": 500, "threshold": 1}))
@@ -416,7 +472,7 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
         .await
         .expect("insert detection run");
         sqlx::query(
-            "INSERT INTO article_material_selections (article_id, slide_run_id)
+            "INSERT INTO article_material_selections (article_id, visual_run_id)
              VALUES ('a', 'detection')",
         )
         .execute(&pool)
@@ -430,20 +486,40 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
             json!({}),
         ];
         for (index, transcript) in transcripts.iter().enumerate() {
+            let segment_id = format!("s{}", index + 1);
             sqlx::query(
-                "INSERT INTO slides (id, article_id, run_id, position, start_ms, end_ms,
-                 detection_json, image_asset_id, transcript_json)
-                 VALUES (?, 'a', 'detection', ?, ?, ?, '{}', ?, ?)",
+                "INSERT INTO visual_segments (id, article_id, run_id, position, start_ms, end_ms,
+                 auto_kind, person_layout, detection_json, representative_asset_id)
+                 VALUES (?, 'a', 'detection', ?, ?, ?, 'slide', 'none', '{}', ?)",
             )
-            .bind(format!("s{}", index + 1))
+            .bind(&segment_id)
             .bind(index as i64)
             .bind((index * 250) as i64)
             .bind(((index + 1) * 250) as i64)
             .bind(format!("image-{}", index + 1))
-            .bind(serde_json::to_string(transcript).expect("serialize transcript"))
             .execute(&pool)
             .await
             .expect("insert slide");
+            sqlx::query(
+                "INSERT INTO article_blocks (id, article_id, position, image_segment_id, transcript_json)
+                 VALUES (?, 'a', ?, ?, ?)",
+            )
+            .bind(&segment_id)
+            .bind(index as i64)
+            .bind(&segment_id)
+            .bind(serde_json::to_string(transcript).expect("serialize transcript"))
+            .execute(&pool)
+            .await
+            .expect("insert article block");
+            sqlx::query(
+                "INSERT INTO article_block_segments (block_id, segment_id, position)
+                 VALUES (?, ?, 0)",
+            )
+            .bind(&segment_id)
+            .bind(&segment_id)
+            .execute(&pool)
+            .await
+            .expect("assign segment to article block");
         }
 
         let ocr_rows = [
@@ -462,7 +538,7 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
         ];
         for (id, slide_id, raw_text, edited_text, metadata_text, created_at) in ocr_rows {
             sqlx::query(
-                "INSERT INTO ocr_results (id, article_id, slide_id, raw_text, edited_text, metadata_json, created_at)
+                "INSERT INTO ocr_results (id, article_id, segment_id, raw_text, edited_text, metadata_json, created_at)
                  VALUES (?, 'a', ?, ?, ?, ?, ?)",
             )
             .bind(id)
@@ -476,7 +552,7 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
             .expect("insert OCR result");
         }
         for (slide_id, ocr_id) in [("s1", "ocr-1"), ("s2", "ocr-2"), ("s3", "ocr-3")] {
-            sqlx::query("INSERT INTO slide_ocr_selections (slide_id, ocr_result_id) VALUES (?, ?)")
+            sqlx::query("INSERT INTO visual_segment_ocr_selections (segment_id, ocr_result_id) VALUES (?, ?)")
                 .bind(slide_id)
                 .bind(ocr_id)
                 .execute(&pool)

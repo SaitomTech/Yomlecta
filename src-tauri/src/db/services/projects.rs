@@ -455,17 +455,17 @@ pub async fn db_update_article_content(
     project_id: String,
     project_updated_at: String,
     article: Value,
-    slides: Value,
-    expected_slide_revisions: Value,
+    article_blocks: Value,
+    expected_block_revisions: Value,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
     expected_document_revision: Option<i64>,
 ) -> Result<Value, String> {
     validate_id(&project_id, "プロジェクトID")?;
-    let slide_values = slides
+    let block_values = article_blocks
         .as_array()
-        .ok_or_else(|| "スライド配列がありません。".to_string())?;
-    let revision_map = expected_slide_revisions.as_object();
+        .ok_or_else(|| "記事ブロック配列がありません。".to_string())?;
+    let revision_map = expected_block_revisions.as_object();
     let mut tx = state
         .pool
         .begin()
@@ -517,19 +517,20 @@ pub async fn db_update_article_content(
             ));
         }
     }
-    let mut slide_revisions = Vec::with_capacity(slide_values.len());
-    for slide in slide_values {
-        let slide_id = value_string(slide, "id")?;
-        let current: i64 =
-            sqlx::query_scalar("SELECT revision FROM slides WHERE id = ? AND article_id = ?")
-                .bind(slide_id)
-                .bind(article_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|error| format!("スライドrevisionを読めませんでした: {error}"))?
-                .ok_or_else(|| format!("NOT_FOUND: スライドが見つかりません: {slide_id}"))?;
+    let mut slide_revisions = Vec::with_capacity(block_values.len());
+    for block in block_values {
+        let block_id = value_string(block, "id")?;
+        let current: i64 = sqlx::query_scalar(
+            "SELECT revision FROM visual_segments WHERE id = ? AND article_id = ?",
+        )
+        .bind(block_id)
+        .bind(article_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("記事ブロック表示区間のrevisionを読めませんでした: {error}"))?
+        .ok_or_else(|| format!("NOT_FOUND: 記事ブロックの表示区間が見つかりません: {block_id}"))?;
         if let Some(expected) = revision_map
-            .and_then(|map| map.get(slide_id))
+            .and_then(|map| map.get(block_id))
             .and_then(Value::as_i64)
         {
             if expected != current {
@@ -538,10 +539,14 @@ pub async fn db_update_article_content(
                 ));
             }
         }
-        sqlx::query("UPDATE slides SET transcript_json = ?, revision = ? WHERE id = ? AND article_id = ? AND revision = ?")
-            .bind(json_text(slide.get("transcript"))?).bind(current + 1).bind(slide_id).bind(article_id).bind(current).execute(&mut *tx).await
-            .map_err(|error| format!("スライド本文を更新できませんでした: {error}"))?;
-        slide_revisions.push(json!({ "id": slide_id, "revision": current + 1 }));
+        let updated = sqlx::query("UPDATE article_blocks SET transcript_json = ?, revision = revision + 1 WHERE id = ? AND article_id = ?")
+            .bind(json_text(block.get("transcript"))?).bind(block_id).bind(article_id).execute(&mut *tx).await
+            .map_err(|error| format!("記事ブロック本文を更新できませんでした: {error}"))?;
+        require_rows_affected(&updated, "記事ブロック")?;
+        sqlx::query("UPDATE visual_segments SET revision = ? WHERE id = ? AND article_id = ? AND revision = ?")
+            .bind(current + 1).bind(block_id).bind(article_id).bind(current).execute(&mut *tx).await
+            .map_err(|error| format!("映像区間revisionを更新できませんでした: {error}"))?;
+        slide_revisions.push(json!({ "id": block_id, "revision": current + 1 }));
     }
     sqlx::query("UPDATE articles SET title = ?, source_range_json = ?, crop_json = ?, perspective_crop_json = ?, settings_json = ?, workflow_json = ?, updated_at = ?, revision = ? WHERE id = ? AND revision = ?")
         .bind(value_string(&article, "title")?).bind(json_value(&article, "sourceRange", json!({ "startMs": 0, "endMs": 1 }))?).bind(json_text(article.get("crop"))?).bind(json_text(article.get("perspectiveCrop"))?).bind(json_value(&article, "settings", json!({}))?).bind(json_value(&article, "workflow", json!({}))?).bind(value_string(&article, "updatedAt")?).bind(article_revision + 1).bind(article_id).bind(article_revision).execute(&mut *tx).await
@@ -648,24 +653,29 @@ pub async fn db_update_article_source(
     }
 
     let old_slide_asset_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT image_asset_id FROM slides WHERE article_id = ? AND image_asset_id IS NOT NULL",
+        "SELECT representative_asset_id FROM visual_segments WHERE article_id = ? AND representative_asset_id IS NOT NULL",
     )
     .bind(&article_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(|error| format!("旧スライドassetを確認できませんでした: {error}"))?;
     let old_slide_ids: Vec<String> =
-        sqlx::query_scalar("SELECT id FROM slides WHERE article_id = ?")
+        sqlx::query_scalar("SELECT id FROM visual_segments WHERE article_id = ?")
             .bind(&article_id)
             .fetch_all(&mut *tx)
             .await
             .map_err(|error| format!("旧スライドIDを確認できませんでした: {error}"))?;
-    sqlx::query("DELETE FROM slide_ocr_selections WHERE slide_id IN (SELECT id FROM slides WHERE article_id = ?)")
+    sqlx::query("DELETE FROM visual_segment_ocr_selections WHERE segment_id IN (SELECT id FROM visual_segments WHERE article_id = ?)")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
         .map_err(|error| format!("OCR採用結果を初期化できませんでした: {error}"))?;
-    sqlx::query("DELETE FROM slides WHERE article_id = ?")
+    sqlx::query("DELETE FROM article_blocks WHERE article_id = ?")
+        .bind(&article_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("記事ブロックを初期化できませんでした: {error}"))?;
+    sqlx::query("DELETE FROM visual_segments WHERE article_id = ?")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
@@ -678,7 +688,7 @@ pub async fn db_update_article_source(
             .await
             .map_err(|error| format!("旧スライドassetを削除できませんでした: {error}"))?;
     }
-    sqlx::query("UPDATE article_material_selections SET slide_run_id = NULL, transcription_run_id = NULL WHERE article_id = ?")
+    sqlx::query("UPDATE article_material_selections SET visual_run_id = NULL, transcription_run_id = NULL WHERE article_id = ?")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
@@ -752,7 +762,7 @@ pub async fn db_delete_article(
     if owner.as_deref() != Some(project_id.as_str()) {
         return Err("NOT_FOUND: 記事が見つかりません。".to_string());
     }
-    sqlx::query("DELETE FROM slide_ocr_selections WHERE slide_id IN (SELECT id FROM slides WHERE article_id = ?)")
+    sqlx::query("DELETE FROM visual_segment_ocr_selections WHERE segment_id IN (SELECT id FROM visual_segments WHERE article_id = ?)")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
@@ -1177,7 +1187,7 @@ pub async fn db_delete_project(
         state.pool.begin().await.map_err(|error| {
             format!("プロジェクト削除transactionを開始できませんでした: {error}")
         })?;
-    sqlx::query("DELETE FROM slide_ocr_selections WHERE slide_id IN (SELECT s.id FROM slides s JOIN articles a ON a.id = s.article_id WHERE a.project_id = ?)")
+    sqlx::query("DELETE FROM visual_segment_ocr_selections WHERE segment_id IN (SELECT s.id FROM visual_segments s JOIN articles a ON a.id = s.article_id WHERE a.project_id = ?)")
         .bind(&project_id)
         .execute(&mut *tx)
         .await

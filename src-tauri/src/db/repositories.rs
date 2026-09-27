@@ -5,8 +5,8 @@ use sqlx::{Row, SqlitePool};
 use std::path::Path;
 
 const OCR_ID_FOR_SLIDE_SQL: &str = "COALESCE(
-    (SELECT ocr_result_id FROM slide_ocr_selections WHERE slide_id = {slide_id}),
-    (SELECT id FROM ocr_results WHERE slide_id = {slide_id} ORDER BY created_at DESC, id DESC LIMIT 1)
+    (SELECT ocr_result_id FROM visual_segment_ocr_selections WHERE segment_id = {slide_id}),
+    (SELECT id FROM ocr_results WHERE segment_id = {slide_id} ORDER BY created_at DESC, id DESC LIMIT 1)
 )";
 const JS_TRIM_CHARACTERS: &str =
     "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D}\u{0020}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}";
@@ -172,6 +172,7 @@ pub(crate) async fn load_project_from_indexes(
                 "sourceRange": source_range,
                 "settings": settings,
                 "slides": [],
+                "articleBlocks": [],
                 "workflow": workflow,
                 "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
                 "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
@@ -194,8 +195,8 @@ pub(crate) async fn load_project_from_indexes(
 
         let detection_raw = sqlx::query_scalar::<_, Option<String>>(
             "SELECT r.result_json FROM analysis_runs r
-             LEFT JOIN article_material_selections m ON m.slide_run_id = r.id
-             WHERE r.article_id = ? AND r.kind = 'slide_detection'
+             LEFT JOIN article_material_selections m ON m.visual_run_id = r.id
+             WHERE r.article_id = ? AND r.kind IN ('visual_segmentation', 'slide_detection')
                AND (m.article_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM article_material_selections WHERE article_id = ?))
              ORDER BY CASE WHEN m.article_id IS NOT NULL THEN 0 ELSE 1 END, r.started_at DESC LIMIT 1",
         )
@@ -228,23 +229,31 @@ pub(crate) async fn load_project_from_indexes(
             .map_err(|error| format!("文字起こし結果JSONが壊れています: {error}"))?;
 
         let slide_rows = sqlx::query(
-            "SELECT s.id, s.position, s.start_ms, s.end_ms, s.detection_json, s.transcript_json, s.revision,
+            "SELECT s.id, s.position, s.start_ms, s.end_ms, s.auto_kind, s.override_kind,
+                    s.override_updated_at, s.person_layout, s.detection_json, s.classification_json,
+                    s.revision, b.transcript_json,
                     a.relative_path AS image_path,
                     (SELECT COALESCE(o.edited_text, o.raw_text) FROM ocr_results o
                      WHERE o.id = COALESCE(
-                       (SELECT sel.ocr_result_id FROM slide_ocr_selections sel WHERE sel.slide_id = s.id),
-                       (SELECT latest.id FROM ocr_results latest WHERE latest.slide_id = s.id
+                       (SELECT sel.ocr_result_id FROM visual_segment_ocr_selections sel WHERE sel.segment_id = s.id),
+                       (SELECT latest.id FROM ocr_results latest WHERE latest.segment_id = s.id
                         ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
                      )) AS ocr_effective_text,
                     (SELECT o.metadata_json FROM ocr_results o
                      WHERE o.id = COALESCE(
-                       (SELECT sel.ocr_result_id FROM slide_ocr_selections sel WHERE sel.slide_id = s.id),
-                       (SELECT latest.id FROM ocr_results latest WHERE latest.slide_id = s.id
+                       (SELECT sel.ocr_result_id FROM visual_segment_ocr_selections sel WHERE sel.segment_id = s.id),
+                       (SELECT latest.id FROM ocr_results latest WHERE latest.segment_id = s.id
                         ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
                      )) AS ocr_metadata_json
-             FROM slides s LEFT JOIN assets a ON a.id = s.image_asset_id
+             FROM visual_segments s
+             LEFT JOIN assets a ON a.id = s.representative_asset_id
+             LEFT JOIN article_blocks b ON b.article_id = s.article_id AND
+               COALESCE(b.image_segment_id, (
+                 SELECT bs.segment_id FROM article_block_segments bs
+                 WHERE bs.block_id = b.id ORDER BY bs.position LIMIT 1
+               )) = s.id
              WHERE s.article_id = ? AND s.run_id = COALESCE(
-               (SELECT slide_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)
+               (SELECT visual_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)
              ORDER BY s.position",
         )
         .bind(&article_id)
@@ -265,9 +274,34 @@ pub(crate) async fn load_project_from_indexes(
                 "index": row.try_get::<i64, _>("position").map_err(|error| error.to_string())?,
                 "startMs": row.try_get::<i64, _>("start_ms").map_err(|error| error.to_string())?,
                 "endMs": row.try_get::<i64, _>("end_ms").map_err(|error| error.to_string())?,
+                "autoKind": row.try_get::<String, _>("auto_kind").map_err(|error| error.to_string())?,
+                "personLayout": row.try_get::<String, _>("person_layout").map_err(|error| error.to_string())?,
                 "detection": detection,
                 "image": {}
             });
+            if let Some(kind) = row
+                .try_get::<Option<String>, _>("override_kind")
+                .map_err(|error| error.to_string())?
+            {
+                slide["overrideKind"] = json!(kind);
+            }
+            if let Some(updated_at) = row
+                .try_get::<Option<String>, _>("override_updated_at")
+                .map_err(|error| error.to_string())?
+            {
+                slide["overrideUpdatedAt"] = json!(updated_at);
+            }
+            let classification_raw: String = row
+                .try_get("classification_json")
+                .map_err(|error| error.to_string())?;
+            let classification: Value = serde_json::from_str(&classification_raw)
+                .map_err(|error| format!("映像分類JSONが壊れています: {error}"))?;
+            if classification
+                .as_object()
+                .is_some_and(|value| !value.is_empty())
+            {
+                slide["classification"] = classification;
+            }
             if let Some(path) = row
                 .try_get::<Option<String>, _>("image_path")
                 .map_err(|error| error.to_string())?
@@ -302,6 +336,54 @@ pub(crate) async fn load_project_from_indexes(
             }
             slides.push(slide);
         }
+        let block_rows = sqlx::query(
+            "SELECT b.id, b.position, b.image_segment_id, b.transcript_json,
+                    MIN(s.start_ms) AS start_ms, MAX(s.end_ms) AS end_ms
+             FROM article_blocks b
+             JOIN article_block_segments bs ON bs.block_id = b.id
+             JOIN visual_segments s ON s.id = bs.segment_id
+             WHERE b.article_id = ?
+             GROUP BY b.id, b.position, b.image_segment_id, b.transcript_json
+             ORDER BY b.position",
+        )
+        .bind(&article_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("記事ブロックを読めませんでした: {error}"))?;
+        let mut article_blocks = Vec::new();
+        for block_row in block_rows {
+            let block_id: String = block_row.try_get("id").map_err(|error| error.to_string())?;
+            let segment_ids: Vec<String> = sqlx::query_scalar(
+                "SELECT segment_id FROM article_block_segments WHERE block_id = ? ORDER BY position",
+            )
+            .bind(&block_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("記事ブロックの区間を読めませんでした: {error}"))?;
+            let mut block = json!({
+                "id": block_id,
+                "index": block_row.try_get::<i64, _>("position").map_err(|error| error.to_string())?,
+                "visualSegmentIds": segment_ids,
+                "startMs": block_row.try_get::<i64, _>("start_ms").map_err(|error| error.to_string())?,
+                "endMs": block_row.try_get::<i64, _>("end_ms").map_err(|error| error.to_string())?
+            });
+            if let Some(image_segment_id) = block_row
+                .try_get::<Option<String>, _>("image_segment_id")
+                .map_err(|error| error.to_string())?
+            {
+                block["imageSegmentId"] = json!(image_segment_id);
+            }
+            if let Some(raw) = block_row
+                .try_get::<Option<String>, _>("transcript_json")
+                .map_err(|error| error.to_string())?
+            {
+                if raw != "null" {
+                    block["transcript"] = serde_json::from_str(&raw)
+                        .map_err(|error| format!("記事ブロック本文JSONが壊れています: {error}"))?;
+                }
+            }
+            article_blocks.push(block);
+        }
         let article_data_raw = sqlx::query_scalar::<_, Option<String>>(
             "SELECT article_json FROM documents WHERE article_id = ? LIMIT 1",
         )
@@ -322,6 +404,7 @@ pub(crate) async fn load_project_from_indexes(
             "sourceRange": source_range,
             "settings": settings,
             "slides": slides,
+            "articleBlocks": article_blocks,
             "workflow": workflow,
             "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
             "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
@@ -401,7 +484,7 @@ pub(crate) async fn load_project_summary(
 
     let article = sqlx::query(
         "SELECT a.id, a.title, a.crop_json, a.workflow_json,
-                EXISTS(SELECT 1 FROM analysis_runs r WHERE r.article_id = a.id AND r.kind = 'slide_detection') AS has_detection
+                EXISTS(SELECT 1 FROM analysis_runs r WHERE r.article_id = a.id AND r.kind IN ('visual_segmentation', 'slide_detection')) AS has_detection
          FROM articles a
          WHERE a.project_id = ? AND a.id = COALESCE(
            (SELECT active_article_id FROM projects WHERE id = ?),
@@ -499,18 +582,22 @@ pub(crate) async fn load_project_summary(
         let ocr_id_expression = OCR_ID_FOR_SLIDE_SQL.replace("{slide_id}", "s.id");
         let stats_query = format!(
             "SELECT COUNT(s.id) AS slide_count,
-                    SUM(CASE WHEN s.image_asset_id IS NULL THEN 1 ELSE 0 END) AS missing_images,
+                    SUM(CASE WHEN s.representative_asset_id IS NULL THEN 1 ELSE 0 END) AS missing_images,
                     SUM(CASE WHEN TRIM(COALESCE(o.edited_text, o.raw_text, ''), ?) <> '' THEN 1 ELSE 0 END) AS ocr_completed,
-                    SUM(CASE WHEN TRIM(COALESCE(json_extract(s.transcript_json, '$.raw'), ''), ?) <> '' THEN 1 ELSE 0 END) AS article_target,
-                    SUM(CASE WHEN TRIM(COALESCE(json_extract(s.transcript_json, '$.articleBody'), ''), ?) <> '' THEN 1 ELSE 0 END) AS article_completed
-             FROM slides s
-             LEFT JOIN ocr_results o ON o.id = {ocr_id_expression} AND o.slide_id = s.id
+                    (SELECT COUNT(*) FROM article_blocks b WHERE b.article_id = ?
+                       AND TRIM(COALESCE(json_extract(b.transcript_json, '$.raw'), ''), ?) <> '') AS article_target,
+                    (SELECT COUNT(*) FROM article_blocks b WHERE b.article_id = ?
+                       AND TRIM(COALESCE(json_extract(b.transcript_json, '$.articleBody'), ''), ?) <> '') AS article_completed
+             FROM visual_segments s
+             LEFT JOIN ocr_results o ON o.id = {ocr_id_expression} AND o.segment_id = s.id
              WHERE s.article_id = ? AND s.run_id = COALESCE(
-               (SELECT slide_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)"
+               (SELECT visual_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)"
         );
         let stats = sqlx::query(&stats_query)
             .bind(JS_TRIM_CHARACTERS)
+            .bind(&article_id)
             .bind(JS_TRIM_CHARACTERS)
+            .bind(&article_id)
             .bind(JS_TRIM_CHARACTERS)
             .bind(&article_id)
             .bind(&article_id)
@@ -538,7 +625,11 @@ pub(crate) async fn load_project_summary(
             .unwrap_or_default();
         if thumbnail_path.is_none() {
             thumbnail_path = sqlx::query_scalar(
-                "SELECT a.relative_path FROM slides s JOIN assets a ON a.id = s.image_asset_id WHERE s.article_id = ? ORDER BY s.position LIMIT 1",
+                "SELECT a.relative_path FROM visual_segments s
+                 JOIN assets a ON a.id = s.representative_asset_id
+                 WHERE s.article_id = ?
+                 ORDER BY CASE COALESCE(s.override_kind, s.auto_kind)
+                   WHEN 'slide' THEN 0 WHEN 'unknown' THEN 1 ELSE 2 END, s.position LIMIT 1",
             )
             .bind(&article_id)
             .fetch_optional(pool)
@@ -600,7 +691,7 @@ pub(crate) async fn load_revision_snapshot(
     .await
     .map_err(|error| format!("document revisionを読めませんでした: {error}"))?;
     let slide_rows = sqlx::query(
-        "SELECT s.id, s.revision FROM slides s
+        "SELECT s.id, s.revision FROM visual_segments s
          JOIN articles a ON a.id = s.article_id
          WHERE a.project_id = ? AND a.id = COALESCE(
            ?, (SELECT active_article_id FROM projects WHERE id = ?)
@@ -615,13 +706,13 @@ pub(crate) async fn load_revision_snapshot(
     let ocr_rows = sqlx::query(
         "SELECT s.id AS id,
                 COALESCE(selected.revision, latest.revision) AS revision
-         FROM slides s
+         FROM visual_segments s
          JOIN articles a ON a.id = s.article_id
          LEFT JOIN ocr_results selected ON selected.id = (
-           SELECT ocr_result_id FROM slide_ocr_selections WHERE slide_id = s.id
+           SELECT ocr_result_id FROM visual_segment_ocr_selections WHERE segment_id = s.id
          )
          LEFT JOIN ocr_results latest ON latest.id = (
-           SELECT id FROM ocr_results WHERE slide_id = s.id ORDER BY created_at DESC, id DESC LIMIT 1
+           SELECT id FROM ocr_results WHERE segment_id = s.id ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE a.project_id = ? AND a.id = COALESCE(
            ?, (SELECT active_article_id FROM projects WHERE id = ?)

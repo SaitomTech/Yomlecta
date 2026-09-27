@@ -1,6 +1,6 @@
 import type { VideoExtension } from './media'
 
-export const PROJECT_VERSION = 11
+export const PROJECT_VERSION = 12
 
 export type ProjectStep = 'crop' | 'detect-slides' | 'generate-notes' | 'article-review' | 'export'
 export type ProjectWorkflow = {
@@ -93,6 +93,12 @@ export type SlideDetectionResult = {
   framesAnalyzed: number
   boundaries: SlideBoundary[]
   detectedAt: string
+  visualClassifier?: {
+    version: string
+    personDetection: 'face-and-human'
+    samplePolicy: 'adaptive-1-3-5' | 'adaptive-2-3-5'
+    frameWidth: number
+  }
 }
 export type TranscriptSegment = { id: string; startMs: number; endMs: number; text: string }
 export type TranscriptionKeywordChunk = { startMs: number; endMs: number; keywords: string[] }
@@ -196,11 +202,43 @@ export type ProjectSettings = {
   correction: boolean
   articleFormatting: boolean
 }
-export type SlideData = {
+export type VisualSegmentKind = 'slide' | 'non-slide' | 'unknown'
+export type PersonLayout = 'none' | 'inside-crop' | 'outside-crop' | 'both' | 'dominant'
+type VisualClassificationEvidence = {
+  samplesAnalyzed: number
+  /** Legacy evidence from visual classifier v9 and earlier. */
+  cropStableRatio?: number
+  cropLongestStableRunRatio?: number
+  cropLongestStableRunMs?: number
+  cropMotionMedian: number
+  textRegionCount?: number
+  textRegionAreaRatio?: number
+  facePresenceRatio: number
+  humanPresenceRatio: number
+  largestFaceAreaRatio: number
+  largestHumanAreaRatio: number
+  personOutsideCropRatio: number
+  personCenterMotionMedian: number
+  personAreaChangeMedian: number
+  personBoxIouMedian: number
+  faceLandmarkMotionMax?: number
+}
+export type VisualClassificationMetadata = {
+  confidence: number
+  classifierVersion: string
+  visionEngineVersion?: string
+  evidence: VisualClassificationEvidence
+}
+export type VisualSegment = {
   id: string
   index: number
   startMs: number
   endMs: number
+  autoKind: VisualSegmentKind
+  overrideKind?: VisualSegmentKind
+  overrideUpdatedAt?: string
+  personLayout: PersonLayout
+  classification?: VisualClassificationMetadata
   detection: { source: 'auto' | 'manual'; hash?: string; distance?: number }
   image: { representativeFramePath?: string }
   ocr?: SlideOcrResult
@@ -218,6 +256,21 @@ export type SlideData = {
     model: string
   }
 }
+/** @deprecated Transitional UI name. Persisted rows live in visual_segments. */
+export type SlideData = VisualSegment
+export type ArticleBlock = {
+  id: string
+  index: number
+  visualSegmentIds: string[]
+  imageSegmentId?: string
+  startMs: number
+  endMs: number
+  transcript?: VisualSegment['transcript']
+}
+
+export function effectiveVisualKind(segment: VisualSegment): VisualSegmentKind {
+  return segment.overrideKind ?? segment.autoKind
+}
 export type Article = {
   id: string
   title: string
@@ -228,6 +281,7 @@ export type Article = {
   perspectiveCrop?: PerspectiveCrop
   settings: ProjectSettings
   slides: SlideData[]
+  articleBlocks: ArticleBlock[]
   slideDetection?: SlideDetectionResult
   transcription?: TranscriptionResult
   article?: ArticleData
@@ -320,6 +374,7 @@ export type ArticleWorkspace = PersistedProject & {
   perspectiveCrop?: PerspectiveCrop
   settings: ProjectSettings
   slides: SlideData[]
+  articleBlocks: ArticleBlock[]
   slideDetection?: SlideDetectionResult
   transcription?: TranscriptionResult
   article?: ArticleData

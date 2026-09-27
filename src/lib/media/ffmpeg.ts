@@ -35,7 +35,7 @@ export type FrameHash = {
   averageLuma?: number
 }
 
-type SampleVideoFramesInput = {
+type SampleCropFramesInput = {
   path: string
   crop: CropRegion
   perspectiveCrop?: PerspectiveCrop
@@ -157,8 +157,8 @@ export function buildCropVideoFilter({
   return `perspective=${points}:sense=source,scale=${outputSize}:flags=${scaleFlags},setsar=1`
 }
 
-/** Samples 9x8 grayscale frames so slide detection does not need to materialize a cropped video. */
-export async function sampleVideoFrames({
+/** Samples the configured slide region for boundary detection and crop stability. */
+export async function sampleCropFrames({
   path,
   crop,
   perspectiveCrop,
@@ -166,7 +166,7 @@ export async function sampleVideoFrames({
   sampleIntervalMs,
   startMs = 0,
   endMs,
-}: SampleVideoFramesInput): Promise<FrameHash[]> {
+}: SampleCropFramesInput): Promise<FrameHash[]> {
   const frameWidth = 9
   const frameHeight = 8
   const frameSize = frameWidth * frameHeight
@@ -307,6 +307,9 @@ export async function extractCropDetectionFrame({
 
   return outputPath
 }
+
+/** Extracts a 640px-wide full-frame still for local visual classification. */
+export const extractFullFrame = extractCropDetectionFrame
 
 export async function extractAudio({
   path,

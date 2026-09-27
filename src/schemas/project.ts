@@ -126,6 +126,14 @@ const SlideDetectionResultSchema = z.strictObject({
   framesAnalyzed: z.number().int().nonnegative(),
   boundaries: z.array(SlideBoundarySchema),
   detectedAt: IsoDateSchema,
+  visualClassifier: z
+    .strictObject({
+      version: z.string().min(1),
+      personDetection: z.literal('face-and-human'),
+      samplePolicy: z.enum(['adaptive-1-3-5', 'adaptive-2-3-5']),
+      frameWidth: z.number().int().positive(),
+    })
+    .optional(),
 })
 
 const TranscriptSegmentSchema = z
@@ -215,12 +223,43 @@ const SlideTranscriptSchema = z.strictObject({
   model: z.string().min(1),
 })
 
+const VisualSegmentKindSchema = z.enum(['slide', 'non-slide', 'unknown'])
+const PersonLayoutSchema = z.enum(['none', 'inside-crop', 'outside-crop', 'both', 'dominant'])
+const VisualClassificationMetadataSchema = z.strictObject({
+  confidence: z.number().min(0).max(1),
+  classifierVersion: z.string().min(1),
+  visionEngineVersion: z.string().min(1).optional(),
+  evidence: z.strictObject({
+    samplesAnalyzed: z.number().int().nonnegative(),
+    cropStableRatio: z.number().min(0).max(1).optional(),
+    cropLongestStableRunRatio: z.number().min(0).max(1).optional(),
+    cropLongestStableRunMs: z.number().nonnegative().optional(),
+    cropMotionMedian: z.number().nonnegative(),
+    textRegionCount: z.number().int().nonnegative().optional(),
+    textRegionAreaRatio: z.number().min(0).max(1).optional(),
+    facePresenceRatio: z.number().min(0).max(1),
+    humanPresenceRatio: z.number().min(0).max(1),
+    largestFaceAreaRatio: z.number().min(0).max(1),
+    largestHumanAreaRatio: z.number().min(0).max(1),
+    personOutsideCropRatio: z.number().min(0).max(1),
+    personCenterMotionMedian: z.number().nonnegative().default(0),
+    personAreaChangeMedian: z.number().nonnegative().default(0),
+    personBoxIouMedian: z.number().min(0).max(1).default(1),
+    faceLandmarkMotionMax: z.number().nonnegative().optional(),
+  }),
+})
+
 const SlideDataSchema = z
   .strictObject({
     id: IdSchema,
     index: z.number().int().nonnegative(),
     startMs: z.number().nonnegative(),
     endMs: z.number().nonnegative(),
+    autoKind: VisualSegmentKindSchema.default('slide'),
+    overrideKind: VisualSegmentKindSchema.optional(),
+    overrideUpdatedAt: IsoDateSchema.optional(),
+    personLayout: PersonLayoutSchema.default('none'),
+    classification: VisualClassificationMetadataSchema.optional(),
     detection: z.strictObject({
       source: z.enum(['auto', 'manual']),
       hash: z.string().min(1).optional(),
@@ -232,6 +271,22 @@ const SlideDataSchema = z
   })
 
   .refine((slide) => slide.endMs >= slide.startMs, 'スライド区間が不正です。')
+
+const ArticleBlockSchema = z
+  .strictObject({
+    id: IdSchema,
+    index: z.number().int().nonnegative(),
+    visualSegmentIds: z.array(IdSchema).min(1),
+    imageSegmentId: IdSchema.optional(),
+    startMs: z.number().nonnegative(),
+    endMs: z.number().nonnegative(),
+    transcript: SlideTranscriptSchema.optional(),
+  })
+  .refine((block) => block.endMs >= block.startMs, '記事ブロック区間が不正です。')
+  .refine(
+    (block) => block.id === (block.imageSegmentId ?? block.visualSegmentIds[0]),
+    '記事ブロックIDが表示区間IDと一致しません。',
+  )
 
 const ArticleSummarySchema = z.strictObject({
   overview: z.string(),
@@ -309,6 +364,7 @@ const ArticleSchema = z.strictObject({
   perspectiveCrop: PerspectiveCropSchema.optional(),
   settings: ProjectSettingsSchema,
   slides: z.array(SlideDataSchema),
+  articleBlocks: z.array(ArticleBlockSchema).default([]),
   slideDetection: SlideDetectionResultSchema.optional(),
   transcription: TranscriptionResultSchema.optional(),
   article: ArticleDataSchema.optional(),
@@ -394,6 +450,7 @@ function workspaceFor(project: PersistedProject): MediaProject {
     perspectiveCrop: article?.perspectiveCrop,
     settings: article?.settings ?? DEFAULT_SETTINGS,
     slides: article?.slides ?? [],
+    articleBlocks: article?.articleBlocks ?? [],
     ...(article?.slideDetection ? { slideDetection: article.slideDetection } : {}),
     ...(article?.transcription ? { transcription: article.transcription } : {}),
     ...(article?.article ? { article: article.article } : {}),

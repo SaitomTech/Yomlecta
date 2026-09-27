@@ -24,11 +24,6 @@ type UseSlideDetectionOptions = {
   onCompleted: (output: PendingSlideDetectionOutput) => void | Promise<void>
 }
 
-export type SlideDetectionParameters = {
-  threshold?: number
-  sampleIntervalMs?: number
-}
-
 export function useSlideDetection(
   project: MediaProject,
   { onCompleted }: UseSlideDetectionOptions,
@@ -43,40 +38,35 @@ export function useSlideDetection(
   const [stageProgress, setStageProgress] = useState<number | null>(hasPersistedResult ? 1 : null)
   const [error, setError] = useState<string | null>(null)
 
-  const detect = useCallback(
-    async ({ threshold, sampleIntervalMs }: SlideDetectionParameters = {}) => {
-      setStatus('running')
-      setStage('preparing')
-      setStageProgress(null)
-      setError(null)
+  const detect = useCallback(async () => {
+    setStatus('running')
+    setStage('preparing')
+    setStageProgress(null)
+    setError(null)
 
-      try {
-        const nextOutput = await runSlideDetection({
-          project,
-          threshold,
-          sampleIntervalMs,
-          onStage: (nextStage) => {
-            setStage(nextStage)
-            setStageProgress(null)
-          },
-          onProgress: setStageProgress,
-        })
-        setStage('saving')
-        setStageProgress(null)
-        await onCompleted(nextOutput)
-        setStage('completed')
-        setStageProgress(1)
-        setStatus('completed')
-      } catch (detectionError) {
-        console.error(detectionError)
-        setStatus('error')
-        const detail =
-          detectionError instanceof Error ? detectionError.message : String(detectionError)
-        setError(`スライドを検出できませんでした。${detail}`)
-      }
-    },
-    [onCompleted, project],
-  )
+    try {
+      const nextOutput = await runSlideDetection({
+        project,
+        onStage: (nextStage) => {
+          setStage(nextStage)
+          setStageProgress(null)
+        },
+        onProgress: setStageProgress,
+      })
+      setStage('saving')
+      setStageProgress(null)
+      await onCompleted(nextOutput)
+      setStage('completed')
+      setStageProgress(1)
+      setStatus('completed')
+    } catch (detectionError) {
+      console.error(detectionError)
+      setStatus('error')
+      const detail =
+        detectionError instanceof Error ? detectionError.message : String(detectionError)
+      setError(`スライドを検出できませんでした。${detail}`)
+    }
+  }, [onCompleted, project])
 
   return {
     status,

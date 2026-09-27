@@ -27,6 +27,7 @@ import { useTranscription } from './hooks/useTranscription'
 import type { TranscriptionLanguage } from './transcription'
 import { ArticleNavigationBar } from '../article/components/ArticleNavigationBar'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 
 type GenerateNotesPageProps = {
   project: MediaProject
@@ -207,7 +208,7 @@ export function GenerateNotesPage({
             </section>
 
             <AnalysisResultPreview
-              slides={project.slides}
+              slides={articleBlockViews(project.slides, project.articleBlocks)}
               videoPath={sourceContext.source.path}
               onEdit={onOpenArticleReview}
               onSaveSlideResultEdits={onSaveSlideResultEdits}

@@ -12,6 +12,7 @@ import {
   type OcrModelId,
 } from '../../lib/ocr/modelManager'
 import { modelProgressRatio } from '../../lib/models/download'
+import { ocrEligibleSegments } from '../../lib/pipeline/articleBlocks'
 import type { MediaProject, SlideData, SlideOcrResult } from '../../types/project'
 
 const OCR_PROMPT_VERSION = 'text-recognition-v4'
@@ -150,7 +151,7 @@ export async function runOcr({
   force = false,
   modelId = DEFAULT_OCR_MODEL.id,
 }: RunOcrInput) {
-  const slides = project.slides
+  const slides = ocrEligibleSegments(project.slides, project.articleBlocks)
   if (slides.length === 0) {
     throw new UserFacingError('OCRするSlideがありません。先にスライド検出を実行してください。')
   }

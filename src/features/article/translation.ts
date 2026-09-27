@@ -10,12 +10,17 @@ import { withLlamaServer } from '../../lib/llama/server'
 import { modelProgressRatio } from '../../lib/models/download'
 import { generateOpenAiArticle, getOpenAiApiKeyStatus } from '../../lib/openai/openai'
 import { getErrorDetail, UserFacingError } from '../../lib/errors'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import {
   openAppleTranslation,
   translateBatchWithApple,
 } from '../../lib/translation/appleTranslation'
 import { hasCurrentArticleSections, hasCurrentArticleSummary } from './article'
-import { ARTICLE_LANGUAGES, articleLanguageLabel } from './articleLanguage'
+import {
+  ARTICLE_LANGUAGES,
+  articleLanguageLabel,
+  normalizeArticleLanguage,
+} from './articleLanguage'
 
 export const TRANSLATION_ENGINES = [
   {
@@ -47,11 +52,7 @@ export const TRANSLATION_LANGUAGES = ARTICLE_LANGUAGES
 type TranslationSegment = { id: string; text: string }
 
 export function normalizeLanguage(value: string | undefined) {
-  const normalized = value?.trim().replaceAll('_', '-').toLowerCase()
-  if (!normalized) return undefined
-  if (normalized === 'ja' || normalized.startsWith('ja-')) return 'ja'
-  if (normalized === 'en' || normalized.startsWith('en-')) return 'en'
-  return undefined
+  return normalizeArticleLanguage(value)
 }
 
 function sourceTitle(project: MediaProject) {
@@ -82,12 +83,13 @@ export function articleTranslationInputFingerprint(
 ) {
   const summary = currentSummary(project)
   const sections = currentSections(project)
+  const articleBlocks = articleBlockViews(project.slides, project.articleBlocks)
   return JSON.stringify([
-    'article-translation-v1',
+    'article-translation-v2-article-blocks',
     sourceLanguage ?? null,
     targetLanguage ?? null,
     sourceTitle(project),
-    project.slides.map((slide) => [slide.id, slide.transcript?.articleBody ?? '']),
+    articleBlocks.map((block) => [block.id, block.transcript?.articleBody ?? '']),
     summary ? [summary.overview, summary.mainMessage, summary.keyPoints, summary.keywords] : null,
     sections?.map((section) => [section.id, section.heading, section.slideIds]) ?? null,
   ])
@@ -135,9 +137,9 @@ export function getTranslationEngineId(translation?: ArticleTranslation): Transl
 
 function collectSegments(project: MediaProject) {
   const segments: TranslationSegment[] = [{ id: 'title', text: sourceTitle(project) }]
-  for (const slide of project.slides) {
-    const text = slide.transcript?.articleBody?.trim()
-    if (text) segments.push({ id: `body:${slide.id}`, text })
+  for (const block of articleBlockViews(project.slides, project.articleBlocks)) {
+    const text = block.transcript?.articleBody?.trim()
+    if (text) segments.push({ id: `body:${block.id}`, text })
   }
 
   const summary = currentSummary(project)
@@ -175,11 +177,12 @@ function assembleTranslation(
   const sections = currentSections(project)
   const title = translations.get('title')
   if (!title) throw new Error('記事タイトルを翻訳できませんでした。')
+  const articleBlocks = articleBlockViews(project.slides, project.articleBlocks)
 
   const bodies = Object.fromEntries(
-    project.slides.flatMap((slide) => {
-      const translated = translations.get(`body:${slide.id}`)
-      return translated !== undefined ? [[slide.id, translated]] : []
+    articleBlocks.flatMap((block) => {
+      const translated = translations.get(`body:${block.id}`)
+      return translated !== undefined ? [[block.id, translated]] : []
     }),
   )
 

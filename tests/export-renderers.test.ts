@@ -64,3 +64,17 @@ test('stale export assets are limited to managed slide image files', () => {
     ),
   ).toEqual(['slide-001.jpg'])
 })
+
+test('image-less article blocks render as text without a broken image', () => {
+  const document = englishDocument()
+  document.sections[0] = {
+    ...document.sections[0],
+    imagePath: '',
+    sourceImagePath: '',
+    body: 'Spoken explanation',
+  }
+
+  expect(renderMarkdown(document)).not.toContain('![')
+  expect(renderHtml(document)).not.toContain('<img src=""')
+  expect(renderHtml(document)).toContain('Spoken explanation')
+})

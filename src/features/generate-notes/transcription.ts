@@ -16,7 +16,8 @@ import {
 } from '../../lib/transcription/transcriptionModel'
 import { ensureWhisperModel } from '../../lib/whisper/modelManager'
 import { runWhisper } from '../../lib/whisper/whisper'
-import { normalizeTranscriptSegments } from '../../lib/pipeline/assignTranscriptToSlides'
+import { normalizeTranscriptSegments } from '../../lib/pipeline/normalizeTranscriptSegments'
+import { transcriptionRangesForArticleBlocks } from '../../lib/pipeline/articleBlocks'
 import { buildOpenAiTranscriptionContext } from '../../lib/pipeline/transcriptionContext'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import {
@@ -74,6 +75,8 @@ const MAX_OPENAI_AUDIO_BYTES = 25_000_000
 const MIN_OPENAI_CHUNK_MS = 1000
 const MAX_OPENAI_CONCURRENT_REQUESTS = 4
 const MAX_OPENAI_CHUNK_DURATION_MS = 15 * 60 * 1000
+const TARGET_OPENAI_CHUNK_DURATION_MS = 60 * 1000
+const TRANSCRIPTION_PIPELINE_VERSION = 'transcription-v2-bounded-article-ranges'
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
@@ -106,6 +109,7 @@ function inputFingerprint(project: MediaProject, modelId: TranscriptionModelId, 
     JSON.stringify(context.perspectiveCrop ?? null),
     modelId,
     language,
+    TRANSCRIPTION_PIPELINE_VERSION,
   ].join(':')
   return modelId === OPENAI_TRANSCRIBE_MODEL.id
     ? `${baseFingerprint}:${ocrContextFingerprint}`
@@ -188,11 +192,12 @@ async function runAppleTranscription({
 function createOpenAiAudioRanges(project: MediaProject) {
   const context = getActiveArticleSourceContext(project)
   const durationMs = Math.max(1, context.range.endMs - context.range.startMs)
-  const ranges: ChunkRange[] = []
-  for (let startMs = 0; startMs < durationMs; startMs += MAX_OPENAI_CHUNK_DURATION_MS) {
-    ranges.push({ startMs, endMs: Math.min(durationMs, startMs + MAX_OPENAI_CHUNK_DURATION_MS) })
-  }
-  return ranges
+  return transcriptionRangesForArticleBlocks(
+    durationMs,
+    project.articleBlocks,
+    MAX_OPENAI_CHUNK_DURATION_MS,
+    TARGET_OPENAI_CHUNK_DURATION_MS,
+  )
 }
 
 async function runLocalTranscription({

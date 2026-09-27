@@ -47,7 +47,7 @@ function sectionsStatusUi(
   } else if (generation.hasAllArticleBodies) {
     message = '記事の確認・編集で、セクションの追加・見出し編集・区切りの調整ができます。'
   } else {
-    message = '先に本文を生成してください。'
+    message = '発話がある区間の本文を先に生成してください。無音区間の本文は不要です。'
   }
 
   const progress =

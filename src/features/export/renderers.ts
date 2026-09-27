@@ -262,16 +262,23 @@ function renderSlideHtml(slide: ExportSection, sourceLanguage: string) {
     body && translations.length
       ? `<p class="translation-label">${escapeHtml(articleLanguageLabel(sourceLanguage))}</p>`
       : ''
+  const figure = slide.imagePath
+    ? [
+        '              <figure class="slide-figure">',
+        `                <button class="image-preview-trigger" type="button" data-preview-image="${escapeHtml(slide.imagePath)}" aria-label="${labels.enlargeImage}">`,
+        `                  <img src="${escapeHtml(slide.imagePath)}" alt="${labels.representativeImage}">`,
+        `                  <span class="image-preview-hint" aria-hidden="true">${labels.enlarge}</span>`,
+        '                </button>',
+        `                <figcaption class="slide-time">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</figcaption>`,
+        '              </figure>',
+      ]
+    : [
+        `              <p class="slide-time">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</p>`,
+      ]
   return [
     '          <article class="slide-section">',
     '            <div class="section-content">',
-    '              <figure class="slide-figure">',
-    `                <button class="image-preview-trigger" type="button" data-preview-image="${escapeHtml(slide.imagePath)}" aria-label="${labels.enlargeImage}">`,
-    `                  <img src="${escapeHtml(slide.imagePath)}" alt="${labels.representativeImage}">`,
-    `                  <span class="image-preview-hint" aria-hidden="true">${labels.enlarge}</span>`,
-    '                </button>',
-    `                <figcaption class="slide-time">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</figcaption>`,
-    '              </figure>',
+    ...figure,
     `              <div class="content" lang="${escapeHtml(sourceLanguage)}">${sourceLabel}${body}${translations.length ? `\n${translations.join('\n')}` : ''}</div>`,
     '            </div>',
     '          </article>',
@@ -523,8 +530,7 @@ export function renderMarkdown(document: ExportDocument) {
             return [
               `### ${slideLabel} · ${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}`,
               '',
-              `![${slideLabel}](${slide.imagePath})`,
-              '',
+              ...(slide.imagePath ? [`![${slideLabel}](${slide.imagePath})`, ''] : []),
               slide.body.trim() || labels.noSpeech,
               ...slide.translations.flatMap((translation) =>
                 translation.body.trim()
@@ -580,8 +586,7 @@ export function renderMarkdown(document: ExportDocument) {
       return [
         `## ${slideLabel} · ${formatTimestamp(section.startMs)} — ${formatTimestamp(section.endMs)}`,
         '',
-        `![${slideLabel}](${section.imagePath})`,
-        '',
+        ...(section.imagePath ? [`![${slideLabel}](${section.imagePath})`, ''] : []),
         body,
         ...section.translations.flatMap((translation) =>
           translation.body.trim()

@@ -59,7 +59,7 @@ export async function saveArticleDraft(project: MediaProject, draft: ArticleDraf
   if (updated === project) return project
   const synced = syncedArticle(updated)
   if (!synced) return null
-  await updateArticleContent(synced.next, synced.article, synced.next.slides)
+  await updateArticleContent(synced.next, synced.article, synced.next.articleBlocks)
   return synced.next
 }
 
@@ -147,7 +147,7 @@ export async function saveTranscription(project: MediaProject, transcription: Tr
   const updated = updateProjectTranscription(project, transcription)
   if (updated === project) return null
   const next = syncActiveArticle(updated)
-  await commitTranscription(next, next.transcription ?? transcription, next.slides)
+  await commitTranscription(next, next.transcription ?? transcription)
   return next
 }
 

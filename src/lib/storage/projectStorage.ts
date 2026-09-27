@@ -1,6 +1,7 @@
 import { parseMediaProject } from '../../schemas/project'
 import type {
   Article,
+  ArticleBlock,
   ArticleData,
   MediaProject,
   ProjectVideo,
@@ -167,11 +168,11 @@ export async function updateArticleWorkflow(project: MediaProject, article: Arti
 export async function updateArticleContent(
   project: MediaProject,
   article: Article,
-  slides: SlideData[],
+  articleBlocks: ArticleBlock[],
 ) {
   await initializeProjectStorage()
-  const expectedSlideRevisions = Object.fromEntries(
-    slides.map((slide) => [slide.id, slideRevisions.get(slide.id) ?? 0]),
+  const expectedBlockRevisions = Object.fromEntries(
+    articleBlocks.map((block) => [block.id, slideRevisions.get(block.id) ?? 0]),
   )
   const result = await invoke<{
     projectRevision: number
@@ -182,8 +183,8 @@ export async function updateArticleContent(
     projectId: project.id,
     projectUpdatedAt: project.updatedAt,
     article,
-    slides,
-    expectedSlideRevisions,
+    articleBlocks,
+    expectedBlockRevisions,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(article.id),
     expectedDocumentRevision: documentRevisions.get(article.id),
@@ -291,6 +292,7 @@ export async function commitSlideDetection(
     runId: runId(),
     result: detectionResult,
     slides,
+    articleBlocks: project.articleBlocks,
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
     activeArticleId: project.activeArticleId,
@@ -308,7 +310,6 @@ export async function commitSlideDetection(
 export async function commitTranscription(
   project: MediaProject,
   transcription: TranscriptionResult,
-  slides: SlideData[],
 ) {
   await initializeProjectStorage()
   const articleId = project.activeArticleId
@@ -323,7 +324,7 @@ export async function commitTranscription(
     articleId,
     runId: runId(),
     transcription,
-    slides,
+    articleBlocks: project.articleBlocks,
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
     activeArticleId: project.activeArticleId,

@@ -5,7 +5,12 @@ import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
 import type { WorkflowStep } from '../../lib/workflow'
-import { requireActiveArticleId, type MediaProject, type SlideBoundary } from '../../types/project'
+import {
+  requireActiveArticleId,
+  type MediaProject,
+  type SlideBoundary,
+  type VisualSegmentKind,
+} from '../../types/project'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import { ArticleNavigationBar } from '../article/components/ArticleNavigationBar'
 import { useSlideDetection } from './hooks/useSlideDetection'
@@ -16,7 +21,7 @@ import {
   createManualSlideDetectionOutput,
 } from './detection'
 import { SlideDetectionResultPanel } from './components/SlideDetectionResultPanel'
-import { SlideDetectionSettingsStatus } from './components/SlideDetectionSettingsStatus'
+import { SlideDetectionStatus } from './components/SlideDetectionStatus'
 import type { PendingSlideDetectionOutput, SlideDetectionOutput } from './types'
 import { slideRangeKey } from './utils'
 
@@ -44,17 +49,12 @@ export function SlideDetectionPage({
   const sourceContext = getActiveArticleSourceContext(project)
   const source = sourceContext.source
   const durationMs = sourceContext.range.endMs - sourceContext.range.startMs
-  const slideIdPrefix = `slide-${requireActiveArticleId(project)}`
+  const slideIdPrefix = `segment-${requireActiveArticleId(project)}`
   const [reviewBoundaries, setReviewBoundaries] = useState<SlideBoundary[]>(
     () => project.slideDetection?.boundaries ?? [],
   )
-  const [threshold, setThreshold] = useState(
-    project.slideDetection?.threshold ?? project.settings.slideDetection.threshold,
-  )
-  const [sampleIntervalMs, setSampleIntervalMs] = useState(
-    project.slideDetection?.sampleIntervalMs ?? project.settings.slideDetection.sampleIntervalMs,
-  )
   const [hasUnsavedReview, setHasUnsavedReview] = useState(false)
+  const [kindOverrides, setKindOverrides] = useState<Record<string, VisualSegmentKind>>({})
   const [savedOutput, setSavedOutput] = useState<SlideDetectionOutput | null>(() =>
     project.slideDetection ? { result: project.slideDetection, slides: project.slides } : null,
   )
@@ -72,9 +72,24 @@ export function SlideDetectionPage({
         const savedSlide = savedSlides.find(
           (candidate) => slideRangeKey(candidate) === slideRangeKey(slide),
         )
-        return savedSlide ? { ...slide, image: savedSlide.image } : slide
+        const inherited = savedSlide
+          ? {
+              ...slide,
+              autoKind: savedSlide.autoKind,
+              personLayout: savedSlide.personLayout,
+              classification: savedSlide.classification,
+              overrideKind: savedSlide.overrideKind,
+              overrideUpdatedAt: savedSlide.overrideUpdatedAt,
+              detection: { ...slide.detection, hash: savedSlide.detection.hash },
+              image: savedSlide.image,
+            }
+          : slide
+        const overrideKind = kindOverrides[slideRangeKey(slide)]
+        return overrideKind
+          ? { ...inherited, overrideKind, overrideUpdatedAt: new Date().toISOString() }
+          : inherited
       }),
-    [durationMs, reviewBoundaries, savedSlides, slideIdPrefix],
+    [durationMs, kindOverrides, reviewBoundaries, savedSlides, slideIdPrefix],
   )
   const { pathsByRange, preparingRanges, discardPreviews } = useSlideBoundaryPreviews(
     project,
@@ -95,8 +110,7 @@ export function SlideDetectionPage({
   const applySavedOutput = useCallback((output: SlideDetectionOutput) => {
     setSavedOutput(output)
     setReviewBoundaries(output.result.boundaries)
-    setThreshold(output.result.threshold)
-    setSampleIntervalMs(output.result.sampleIntervalMs)
+    setKindOverrides({})
     setHasUnsavedReview(false)
   }, [])
 
@@ -137,6 +151,17 @@ export function SlideDetectionPage({
     setReviewSaveError(null)
   }, [])
 
+  const handleKindChange = useCallback(
+    (segmentId: string, kind: VisualSegmentKind) => {
+      const segment = slides.find((candidate) => candidate.id === segmentId)
+      if (!segment) return
+      setKindOverrides((current) => ({ ...current, [slideRangeKey(segment)]: kind }))
+      setHasUnsavedReview(true)
+      setReviewSaveError(null)
+    },
+    [slides],
+  )
+
   const saveReview = async () => {
     if (!hasUnsavedReview && canContinue) return
     setIsSavingReview(true)
@@ -148,8 +173,10 @@ export function SlideDetectionPage({
       const pendingOutput = await createManualSlideDetectionOutput({
         project,
         boundaries: reviewBoundaries,
-        threshold,
-        sampleIntervalMs,
+        threshold: savedOutput?.result.threshold ?? project.settings.slideDetection.threshold,
+        sampleIntervalMs:
+          savedOutput?.result.sampleIntervalMs ?? project.settings.slideDetection.sampleIntervalMs,
+        segments: slides,
       })
       const nextOutput = await commitSlideDetectionOutput(project, pendingOutput, onCompleted)
       setReviewSaveError(cleanupWarning)
@@ -165,6 +192,7 @@ export function SlideDetectionPage({
 
   const cancelReview = async () => {
     setReviewBoundaries(savedOutput?.result.boundaries ?? [])
+    setKindOverrides({})
     setHasUnsavedReview(false)
     setReviewSaveError(
       await discardPreviewsWithWarning(
@@ -174,7 +202,7 @@ export function SlideDetectionPage({
     )
   }
 
-  const handleDetect = () => detection.detect({ threshold, sampleIntervalMs })
+  const handleDetect = () => detection.detect()
 
   return (
     <main className="flex min-h-[calc(100svh-76px)] flex-col bg-[#f4f7f4] font-[Avenir_Next,Hiragino_Sans,Yu_Gothic,system-ui,sans-serif] text-[18px] leading-[1.45] tracking-[0.18px] text-[#18211f]">
@@ -207,17 +235,13 @@ export function SlideDetectionPage({
           />
 
           <div className="p-5 md:p-7">
-            <SlideDetectionSettingsStatus
-              threshold={threshold}
-              sampleIntervalMs={sampleIntervalMs}
+            <SlideDetectionStatus
               status={detection.status}
               stage={detection.stage}
               stageProgress={detection.stageProgress}
               error={detection.error}
               isSaving={isSavingReview}
               isReviewDirty={hasUnsavedReview}
-              onThresholdChange={setThreshold}
-              onSampleIntervalChange={setSampleIntervalMs}
               onDetect={handleDetect}
             />
 
@@ -227,6 +251,7 @@ export function SlideDetectionPage({
                 boundaries={reviewBoundaries}
                 slides={slides}
                 onChange={updateReviewBoundaries}
+                onKindChange={handleKindChange}
                 preparingRanges={preparingRanges}
                 durationMs={durationMs}
                 timeOffsetMs={sourceContext.range.startMs}

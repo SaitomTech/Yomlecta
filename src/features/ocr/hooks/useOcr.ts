@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getErrorDetail, getUserErrorMessage } from '../../../lib/errors'
 import { DEFAULT_OCR_MODEL, type OcrModelId } from '../../../lib/ocr/modelManager'
+import { ocrEligibleSegments } from '../../../lib/pipeline/articleBlocks'
 import type { MediaProject } from '../../../types/project'
 import {
   ocrInputFingerprint,
@@ -22,17 +23,18 @@ export function useOcr(
   useEffect(() => {
     projectRef.current = project
   }, [project])
-  const initialCompleted = project.slides.filter(
+  const eligibleSlides = ocrEligibleSegments(project.slides, project.articleBlocks)
+  const initialCompleted = eligibleSlides.filter(
     (slide) => slide.ocr?.inputFingerprint === ocrInputFingerprint(slide, modelId),
   ).length
   const [status, setStatus] = useState<OcrStatus>(
-    initialCompleted === project.slides.length && project.slides.length > 0 ? 'completed' : 'idle',
+    initialCompleted === eligibleSlides.length && eligibleSlides.length > 0 ? 'completed' : 'idle',
   )
   const [stage, setStage] = useState<OcrStage>('preparing-model')
   const [progress, setProgress] = useState<OcrProgress>({
     completed: initialCompleted,
-    total: project.slides.length,
-    stageProgress: initialCompleted === project.slides.length ? 1 : null,
+    total: eligibleSlides.length,
+    stageProgress: initialCompleted === eligibleSlides.length ? 1 : null,
   })
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)

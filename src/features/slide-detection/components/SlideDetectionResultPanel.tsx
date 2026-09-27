@@ -1,6 +1,6 @@
 import { Link2, Link2Off } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type SyntheticEvent } from 'react'
-import type { SlideBoundary, SlideData } from '../../../types/project'
+import type { SlideBoundary, SlideData, VisualSegmentKind } from '../../../types/project'
 import { SlideDetectionTimeline } from './SlideDetectionTimeline'
 import { SlideDetectionVideo } from './SlideDetectionVideo'
 import { SlideSegmentList } from './SlideSegmentList'
@@ -10,6 +10,7 @@ type SlideDetectionResultPanelProps = {
   boundaries: SlideBoundary[]
   slides: SlideData[]
   onChange: (boundaries: SlideBoundary[]) => void
+  onKindChange: (segmentId: string, kind: VisualSegmentKind) => void
   durationMs?: number
   timeOffsetMs?: number
   disabled?: boolean
@@ -21,6 +22,7 @@ export function SlideDetectionResultPanel({
   boundaries,
   slides,
   onChange,
+  onKindChange,
   durationMs: rangeDurationMs,
   timeOffsetMs = 0,
   disabled = false,
@@ -150,6 +152,7 @@ export function SlideDetectionResultPanel({
           activeSlideIndex={activeSlideIndex}
           onSelectSlide={handleSelectSlide}
           onRemoveBoundary={handleRemoveBoundary}
+          onKindChange={onKindChange}
           disabled={disabled}
           preparingRanges={preparingRanges}
         />

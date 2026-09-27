@@ -74,16 +74,16 @@ Rustの起動処理で次を一度だけ行う。
 
 ### 3.2 解析結果
 
-| command                     | 保存するもの                                                          |
-| --------------------------- | --------------------------------------------------------------------- |
-| `db_commit_slide_detection` | 検出run、スライド集合、代表画像asset、採用slide run                   |
-| `db_commit_transcription`   | 文字起こしrun、発話segment、各スライドへの割当、採用transcription run |
-| `db_commit_ocr`             | OCR run、raw結果、blocks、スライドごとの採用OCR                       |
-| `db_commit_slide_content`   | スライド本文生成runと本文付きtranscript                               |
-| `db_update_slide_results`   | 発話と採用OCRのユーザー編集を同一transactionで保存                    |
-| `db_update_document`        | 要約・章構成・手動原稿編集、および要約/章生成run                      |
+| command                     | 保存するもの                                                            |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `db_commit_slide_detection` | 視覚区間run、映像区間、記事ブロック、代表画像asset、採用visual run      |
+| `db_commit_transcription`   | 文字起こしrun、発話segment、記事ブロックへの割当、採用transcription run |
+| `db_commit_ocr`             | OCR run、raw結果、blocks、映像区間ごとの採用OCR                         |
+| `db_commit_slide_content`   | 記事ブロック本文生成runと本文付きtranscript                             |
+| `db_update_slide_results`   | 記事ブロック発話と採用OCRのユーザー編集を同一transactionで保存          |
+| `db_update_document`        | 要約・章構成・手動原稿編集、および要約/章生成run                        |
 
-解析commitは対象articleの所属と開始時の`expected_revision`を検証する。別記事のslide、別runの結果、別projectのassetを参照できない。入力やスライドがcommit後に変わっていれば`REVISION_CONFLICT`で結果を採用せず、古い処理が新しい編集を上書きしない。
+解析commitは対象articleの所属と開始時の`expected_revision`を検証する。別記事の映像区間、別runの結果、別projectのassetを参照できない。入力や映像区間がcommit後に変わっていれば`REVISION_CONFLICT`で結果を採用せず、古い処理が新しい編集を上書きしない。
 
 通常の画面保存はプロジェクト全体保存commandを経由しない。記事metadataとproject更新は操作単位のcommandで確定し、本文と採用OCRの編集も複数の低水準commandをUIから連続して呼ばずtransactionへまとめる。
 
@@ -103,22 +103,24 @@ Rustの起動処理で次を一度だけ行う。
 
 ### 4.2 解析
 
-`analysis_runs`は完了した解析runの`article_id`、kind、result、記録時刻を持つ。解析開始・終了を別行で管理せず、入力snapshotやconfigの未使用コピーも保存しない。kindは次の6種類。
+`analysis_runs`は完了した解析runの`article_id`、kind、result、記録時刻を持つ。解析開始・終了を別行で管理せず、入力snapshotやconfigの未使用コピーも保存しない。kindは次の7種類。旧データの`slide_detection`は読取互換用に残す。
 
 ```text
-slide_detection / transcription / ocr
+slide_detection / visual_segmentation / transcription / ocr
 body_generation / summary_generation / chapter_generation
 ```
 
-`slides`は採用中のslide runのスライド集合を保持し、detection、代表画像asset、スライドへ割り当てたtranscript JSONを持つ。検出の再実行は現在のslide行をtransactionで置き換え、run履歴とresult JSONは残す。
+`visual_segments`は採用中の映像区間集合を保持する。時間範囲、`slide / non-slide / unknown`の自動分類と手動上書き、人物レイアウト、分類根拠、detection、確認用の代表画像assetを持つ。本文や発話は持たない。検出の再実行は現在の区間行をtransactionで置き換え、run履歴とresult JSONは残す。
 
-文字起こしのsegmentsは採用runの`analysis_runs.result_json`に保持する。現行UIは発話単位の検索・編集を行わないため、別のsegmentテーブルは持たない。`ocr_results`はraw text、ユーザー補正`edited_text`、OCR結果全体のmetadata JSON、revisionを保持し、`slide_ocr_selections`がスライドごとの採用結果を指す。
+`article_blocks`は記事本文の単位を保持し、発話と生成本文を含むtranscript JSON、記事に表示する画像の`image_segment_id`を持つ。`article_block_segments`が1つ以上の映像区間を記事ブロックへ割り当てる。非スライド区間は前後のスライドと同じ記事ブロックへ統合でき、全編が非スライドの場合だけ画像なしのブロックになる。
 
-`article_material_selections`は記事ごとの採用slide runとtranscription runを明示する。最新時刻から採用結果を推測しない。
+文字起こしのsegmentsは採用runの`analysis_runs.result_json`に保持する。現行UIは発話単位の検索・編集を行わないため、別の発話segmentテーブルは持たない。`ocr_results`はraw text、ユーザー補正`edited_text`、OCR結果全体のmetadata JSON、revisionを保持し、`visual_segment_ocr_selections`が映像区間ごとの採用結果を指す。OCR対象は記事ブロックの画像に採用された`slide`または`unknown`区間に限定する。
+
+`article_material_selections`は記事ごとの採用visual runとtranscription runを明示する。最新時刻から採用結果を推測しない。
 
 ### 4.3 原稿
 
-`documents`は記事と1対1で、要約・章構成を含むUI向けarticle JSONとdocument revisionを保持する。現行UIの本文単位はスライドtranscriptの`articleBody`であり、本文の生成・編集結果は`slides.transcript_json`、要約と章構成は`documents.article_json`に保存する。document固有の別IDや作成時刻は持たず、`article_id`を主キーにする。
+`documents`は記事と1対1で、要約・章構成を含むUI向けarticle JSONとdocument revisionを保持する。本文の生成・編集結果は`article_blocks.transcript_json`、要約と章構成は`documents.article_json`に保存する。document固有の別IDや作成時刻は持たず、`article_id`を主キーにする。
 
 ## 5. 画面操作からDBまで
 
@@ -146,7 +148,7 @@ body_generation / summary_generation / chapter_generation
 
 ## 6. 競合とrevision
 
-projectの更新には`expected_revision`を指定できる。現在値と違えば`REVISION_CONFLICT`を返し、行を変更しない。article、document、slide、OCR結果のrevisionを保存時に検証する。
+projectの更新には`expected_revision`を指定できる。現在値と違えば`REVISION_CONFLICT`を返し、行を変更しない。article、document、visual segment、OCR結果のrevisionを保存時に検証する。
 
 現行UIの完了callbackは専用commit commandが入力情報と成功runを同一transactionで記録する。解析開始・終了を別commandで管理する経路は持たない。
 

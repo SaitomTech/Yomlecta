@@ -30,6 +30,7 @@ import {
 import type { ContentProcessingSlideCompleted } from '../content-processing/contentProcessing'
 import { useContentProcessing } from '../content-processing/hooks/useContentProcessing'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import { hasCurrentArticleSections } from './article'
 import { getTranslationEngineId, normalizeLanguage, type TranslationEngineId } from './translation'
 import { getArticleOutputLanguage, getCurrentTranslationForOutputLanguage } from './outputLanguage'
@@ -169,7 +170,9 @@ export function ArticleReviewPage({
   maxReachedStep,
   onStepClick,
 }: ArticleReviewPageProps) {
-  const articleSlides = project.slides.filter((slide) => Boolean(slide.transcript))
+  const articleSlides = articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
+    Boolean(slide.transcript),
+  )
   const currentArticleSections = getCurrentArticleSections(project)
   const { outputLanguage, outputTranslation } = useMemo(() => {
     const language = getArticleOutputLanguage(project)

@@ -231,8 +231,10 @@ export function ArticleSectionEditor({
   return (
     <article className="overflow-hidden rounded-[12px] border border-[#d8e1dc] bg-[#fbfcfa]">
       <div className="p-4 md:p-5">
-        <div className="grid gap-5 md:grid-cols-[minmax(220px,0.9fr)_minmax(0,1.4fr)]">
-          <SlideThumbnail slide={slide} />
+        <div
+          className={`grid gap-5 ${slide.image.representativeFramePath ? 'md:grid-cols-[minmax(220px,0.9fr)_minmax(0,1.4fr)]' : ''}`}
+        >
+          {slide.image.representativeFramePath && <SlideThumbnail slide={slide} />}
           <div className="min-w-0">
             {visibility.showSource && editing && (
               <SourceBodyEditor

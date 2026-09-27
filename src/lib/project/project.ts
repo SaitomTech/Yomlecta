@@ -1,7 +1,10 @@
+import { normalizeTranscriptSegments } from '../pipeline/normalizeTranscriptSegments'
 import {
-  assignTranscriptToSlides,
-  normalizeTranscriptSegments,
-} from '../pipeline/assignTranscriptToSlides'
+  articleBlockHostSegmentId,
+  applyArticleBlocksToSegments,
+  assignTranscriptToArticleBlocks,
+  buildArticleBlocks,
+} from '../pipeline/articleBlocks'
 import {
   PROJECT_VERSION,
   getActiveArticle,
@@ -56,22 +59,8 @@ function sameSlideDetection(first: SlideDetectionResult | undefined, second: Sli
 }
 
 function sameSlideStructure(first: SlideData[], second: SlideData[]) {
-  return sameValue(
-    first.map(({ id, index, startMs, endMs, detection }) => ({
-      id,
-      index,
-      startMs,
-      endMs,
-      detection,
-    })),
-    second.map(({ id, index, startMs, endMs, detection }) => ({
-      id,
-      index,
-      startMs,
-      endMs,
-      detection,
-    })),
-  )
+  const comparable = ({ transcript: _transcript, ocr: _ocr, ...segment }: SlideData) => segment
+  return sameValue(first.map(comparable), second.map(comparable))
 }
 
 function articleToWorkspace(project: MediaProject, article: Article): MediaProject {
@@ -84,6 +73,7 @@ function articleToWorkspace(project: MediaProject, article: Article): MediaProje
     perspectiveCrop: article.perspectiveCrop,
     settings: article.settings,
     slides: article.slides,
+    articleBlocks: article.articleBlocks,
     slideDetection: article.slideDetection,
     transcription: article.transcription,
     article: article.article,
@@ -121,6 +111,7 @@ export function syncActiveArticle(project: MediaProject): MediaProject {
     title: nextTitle,
     settings: project.settings,
     slides: project.slides,
+    articleBlocks: project.articleBlocks,
     slideDetection: project.slideDetection,
     transcription: project.transcription,
     article: project.article,
@@ -158,6 +149,7 @@ export function createEmptyProject(title: string, projectId = crypto.randomUUID(
     source: placeholder,
     settings: DEFAULT_SETTINGS,
     slides: [],
+    articleBlocks: [],
     workflow: {
       lastVisitedStep: 'detect-slides',
       maxReachedStep: 'detect-slides',
@@ -189,6 +181,7 @@ export function updateProjectArticleSourceSettings(
     crop: nextCrop,
     ...(perspectiveCrop ? { perspectiveCrop } : { perspectiveCrop: undefined }),
     slides: [],
+    articleBlocks: [],
     slideDetection: undefined,
     transcription: undefined,
     article: undefined,
@@ -255,9 +248,15 @@ export function updateProjectSlideDetection(
   result: SlideDetectionResult,
   slides: SlideData[],
 ): MediaProject {
-  const nextSlides = project.transcription
-    ? assignTranscriptToSlides(slides, project.transcription.segments, project.transcription.model)
-    : slides
+  const proposedBlocks = buildArticleBlocks(slides, project.articleBlocks)
+  const nextBlocks = project.transcription
+    ? assignTranscriptToArticleBlocks(
+        proposedBlocks,
+        project.transcription.segments,
+        project.transcription.model,
+      )
+    : proposedBlocks
+  const nextSlides = applyArticleBlocksToSegments(slides, nextBlocks)
   const nextSettings = {
     ...project.settings,
     slideDetection: { sampleIntervalMs: result.sampleIntervalMs, threshold: result.threshold },
@@ -265,6 +264,7 @@ export function updateProjectSlideDetection(
   if (
     sameSlideDetection(project.slideDetection, result) &&
     sameSlideStructure(project.slides, nextSlides) &&
+    sameValue(project.articleBlocks, nextBlocks) &&
     sameValue(project.settings, nextSettings)
   )
     return project
@@ -272,6 +272,7 @@ export function updateProjectSlideDetection(
     ...project,
     slideDetection: result,
     slides: nextSlides,
+    articleBlocks: nextBlocks,
     settings: nextSettings,
     workflow: workflowWithReachableStep(project, 'generate-notes', 'detect-slides'),
     updatedAt: new Date().toISOString(),
@@ -286,7 +287,12 @@ export function updateProjectTranscription(
     ...transcription,
     segments: normalizeTranscriptSegments(transcription.segments),
   }
-  const nextSlides = assignTranscriptToSlides(project.slides, normalized.segments, normalized.model)
+  const nextBlocks = assignTranscriptToArticleBlocks(
+    buildArticleBlocks(project.slides, project.articleBlocks),
+    normalized.segments,
+    normalized.model,
+  )
+  const nextSlides = applyArticleBlocksToSegments(project.slides, nextBlocks)
   if (
     project.transcription?.inputFingerprint === normalized.inputFingerprint &&
     project.transcription.model === normalized.model &&
@@ -297,6 +303,7 @@ export function updateProjectTranscription(
     ...project,
     transcription: normalized,
     slides: nextSlides,
+    articleBlocks: nextBlocks,
     workflow: workflowWithReachableStep(project, 'generate-notes', 'generate-notes'),
     updatedAt: new Date().toISOString(),
   }
@@ -314,6 +321,9 @@ export function updateProjectSlideOcr(
   const nextTranscript = currentSlide.transcript
     ? { raw: currentSlide.transcript.raw, model: currentSlide.transcript.model }
     : undefined
+  const nextBlocks = project.articleBlocks.map((block) =>
+    articleBlockHostSegmentId(block) === slideId ? { ...block, transcript: nextTranscript } : block,
+  )
   return {
     ...project,
     slides: project.slides.map((slide) =>
@@ -325,6 +335,7 @@ export function updateProjectSlideOcr(
           }
         : slide,
     ),
+    articleBlocks: nextBlocks,
     workflow: workflowWithReachableStep(project, 'generate-notes', 'generate-notes'),
     updatedAt: new Date().toISOString(),
   }
@@ -364,6 +375,11 @@ export function updateProjectSlideContent(
         transcript: nextTranscript,
       }
     }),
+    articleBlocks: project.articleBlocks.map((block) =>
+      articleBlockHostSegmentId(block) === slideId
+        ? { ...block, transcript: nextTranscript }
+        : block,
+    ),
     workflow: workflowWithReachableStep(project, 'article-review', 'generate-notes'),
     updatedAt: new Date().toISOString(),
   }
@@ -392,6 +408,11 @@ export function updateProjectSlideResultEdits(
             transcript: nextTranscript,
           }
         : slide,
+    ),
+    articleBlocks: project.articleBlocks.map((block) =>
+      articleBlockHostSegmentId(block) === slideId
+        ? { ...block, transcript: nextTranscript }
+        : block,
     ),
     workflow: workflowWithReachableStep(project, 'generate-notes', 'generate-notes'),
     updatedAt: new Date().toISOString(),
@@ -422,10 +443,17 @@ export function updateProjectArticleDraft(
       return slide
     return { ...slide, transcript: { ...slide.transcript, articleBody: body } }
   })
+  const nextBlocks = project.articleBlocks.map((block) => {
+    const body = draft.bodies[articleBlockHostSegmentId(block)]
+    if (body === undefined || !block.transcript || body === block.transcript.articleBody)
+      return block
+    return { ...block, transcript: { ...block.transcript, articleBody: body } }
+  })
   if (
     sameValue(project.article, nextArticle) &&
     sameValue(project.articles, nextArticles) &&
-    sameValue(project.slides, nextSlides)
+    sameValue(project.slides, nextSlides) &&
+    sameValue(project.articleBlocks, nextBlocks)
   )
     return project
   return {
@@ -433,6 +461,7 @@ export function updateProjectArticleDraft(
     articles: nextArticles,
     article: nextArticle,
     slides: nextSlides,
+    articleBlocks: nextBlocks,
     workflow: workflowWithReachableStep(
       project,
       getWorkflowStepIndex(project.workflow.maxReachedStep) >= getWorkflowStepIndex('export')

@@ -14,6 +14,7 @@ import { hasCurrentArticleSections, hasCurrentArticleSummary } from '../article/
 import {
   getActiveArticle,
   getActiveMediaSource,
+  effectiveVisualKind,
   type ArticleSection,
   type ArticleOutputLanguage,
   type ArticleSummary,
@@ -22,6 +23,7 @@ import {
   type MediaProject,
 } from '../../types/project'
 import { getActiveArticleDuration } from '../../lib/project/articleSource'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import {
   getArticleSourceLanguage,
   getCurrentTranslationForOutputLanguage,
@@ -202,11 +204,14 @@ function buildExportDocument(
   project: MediaProject,
   imagePathFor: (sourceImagePath: string, index: number) => string,
 ): ExportDocument {
-  if (project.slides.length === 0) {
+  const articleSlides = articleBlockViews(project.slides, project.articleBlocks)
+  if (articleSlides.length === 0) {
     throw new Error('書き出すSlideがありません。先にスライド検出を実行してください。')
   }
 
-  const missingImageSlide = project.slides.find((slide) => !slide.image.representativeFramePath)
+  const missingImageSlide = articleSlides.find(
+    (slide) => effectiveVisualKind(slide) !== 'non-slide' && !slide.image.representativeFramePath,
+  )
   if (missingImageSlide) {
     throw new Error(
       `Slide ${missingImageSlide.index + 1}の代表画像がありません。スライド検出をもう一度実行してください。`,
@@ -250,12 +255,14 @@ function buildExportDocument(
       translation,
       language,
     )
-  const sections = project.slides.map((slide) => ({
+  const sections = articleSlides.map((slide) => ({
     id: slide.id,
     index: slide.index,
     startMs: slide.startMs,
     endMs: slide.endMs,
-    imagePath: imagePathFor(slide.image.representativeFramePath ?? '', slide.index),
+    imagePath: slide.image.representativeFramePath
+      ? imagePathFor(slide.image.representativeFramePath, slide.index)
+      : '',
     sourceImagePath: slide.image.representativeFramePath ?? '',
     ocrText: slide.ocr?.rawText ?? '',
     transcriptRaw: slide.transcript?.raw ?? '',
@@ -338,7 +345,8 @@ export async function exportProject(
     project,
     (_sourceImagePath, index) => `./assets/${imageFilename(index)}`,
   )
-  const total = document.sections.length + EXPORT_OPTIONS.length
+  const imageSections = document.sections.filter((section) => section.sourceImagePath)
+  const total = imageSections.length + EXPORT_OPTIONS.length
   let completed = 0
   const report = (stage: ExportProgress['stage']) => onProgress?.({ stage, completed, total })
 
@@ -350,7 +358,7 @@ export async function exportProject(
   const [previousAssetManifest, assets] = await Promise.all([
     readExportAssetManifest(assetManifestPath),
     Promise.all(
-      document.sections.map(async (section) => ({
+      imageSections.map(async (section) => ({
         filename: imageFilename(section.index),
         path: await join(assetsDirectory, imageFilename(section.index)),
       })),
@@ -360,7 +368,7 @@ export async function exportProject(
   report('copying-images')
   const nextAssetManifest: ExportAssetManifest = {}
   await Promise.all(
-    document.sections.map(async (section, sectionIndex) => {
+    imageSections.map(async (section, sectionIndex) => {
       const filename = assets[sectionIndex].filename
       const destinationPath = assets[sectionIndex].path
       const sourceFingerprint = {

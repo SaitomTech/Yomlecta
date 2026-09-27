@@ -3,6 +3,7 @@ import { withUserFacingError, UserFacingError } from '../../lib/errors'
 import type { ContentProcessingResult, MediaProject } from '../../types/project'
 import { hasCurrentArticle } from '../article/article'
 import { createArticleGenerator } from './articleGenerator'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 
 export type ContentProcessingStage = 'preparing-model' | 'processing'
 
@@ -81,8 +82,13 @@ export async function runContentProcessing({
   signal,
   force = false,
 }: RunContentProcessingInput) {
-  const generator = createArticleGenerator(getArticleModel(modelId))
-  const targetSlides = project.slides.filter((slide) => slide.transcript?.raw.trim())
+  const generator = createArticleGenerator(
+    getArticleModel(modelId),
+    project.transcription?.language,
+  )
+  const targetSlides = articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
+    slide.transcript?.raw.trim(),
+  )
   if (targetSlides.length === 0) {
     throw new UserFacingError('処理する文字起こしがありません。先に文字起こしを実行してください。')
   }
