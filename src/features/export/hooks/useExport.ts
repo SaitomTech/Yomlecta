@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { getErrorDetail } from '../../../lib/errors'
 import type { MediaProject } from '../../../types/project'
 import {
   downloadAllExportFiles,
@@ -10,6 +11,20 @@ import {
 } from '../export'
 
 type ExportStatus = 'idle' | 'running' | 'completed' | 'error'
+
+function exportErrorMessage(error: unknown) {
+  const detail = getErrorDetail(error, '')
+  if (detail) return detail
+  if (error && typeof error === 'object') {
+    try {
+      const serialized = JSON.stringify(error)
+      if (serialized && serialized !== '{}') return serialized
+    } catch {
+      // Keep the user-facing fallback for non-serializable error objects.
+    }
+  }
+  return '書き出しに失敗しました。'
+}
 
 export function useExport(project: MediaProject, initialResult: ExportResult | null = null) {
   const [status, setStatus] = useState<ExportStatus>('idle')
@@ -42,7 +57,7 @@ export function useExport(project: MediaProject, initialResult: ExportResult | n
     } catch (exportError) {
       console.error(exportError)
       setStatus('error')
-      setError(exportError instanceof Error ? exportError.message : '書き出しに失敗しました。')
+      setError(exportErrorMessage(exportError))
       return null
     } finally {
       isGenerating.current = false

@@ -333,22 +333,25 @@ function App() {
 
   const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
-    await enqueueProjectOperation(async () => {
+    const { saved, step } = await enqueueProjectOperation(async () => {
       const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       const article = next.articles.find((candidate) => candidate.id === item.articleId)
       const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
-      const opened = markProjectOpened(next, step)
-      const saved = await persistProjectWorkflow(opened)
+      const marked = markProjectOpened(next, step)
+      const saved = await persistProjectWorkflow(marked)
       setProjectState(saved)
-      if (requestId === navigationRequestRef.current) {
-        setRoute({
-          kind: 'article',
-          articleId: item.articleId,
-          step,
-        })
-      }
+      return { saved, step }
     })
+    if (step === 'export' && requestId === navigationRequestRef.current)
+      await regenerateArticleExport(saved)
+    if (requestId === navigationRequestRef.current) {
+      setRoute({
+        kind: 'article',
+        articleId: item.articleId,
+        step,
+      })
+    }
   }
 
   const handleBackToHome = () => {

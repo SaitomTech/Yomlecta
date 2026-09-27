@@ -191,6 +191,8 @@
         { "path": "$APPLOCALDATA/projects" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
+        { "path": "$APPLOCALDATA/projects/*/exports/.asset-manifest.json" },
+        { "path": "$APPLOCALDATA/projects/*/articles/*/exports/.asset-manifest.json" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
         { "path": "$APPLOCALDATA/projects/*/.trash/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash/**/*" }
@@ -202,6 +204,8 @@
         { "path": "$APPLOCALDATA/projects" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
+        { "path": "$APPLOCALDATA/projects/*/exports/.asset-manifest.json" },
+        { "path": "$APPLOCALDATA/projects/*/articles/*/exports/.asset-manifest.json" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
         { "path": "$APPLOCALDATA/projects/*/.trash/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash/**/*" },
