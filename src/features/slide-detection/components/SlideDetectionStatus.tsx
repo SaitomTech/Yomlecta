@@ -105,7 +105,7 @@ export function SlideDetectionStatus({
         </button>
       </div>
 
-      <div className="mt-8 border-t border-[#e0e8e3] pt-6">
+      <div className="mt-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">

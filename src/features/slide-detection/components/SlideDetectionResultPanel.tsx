@@ -98,10 +98,7 @@ export function SlideDetectionResultPanel({
   )
 
   return (
-    <section
-      className="mt-10 border-t border-[#d8e1dc] pt-8"
-      aria-labelledby="slide-segments-heading"
-    >
+    <section className="mt-10 pt-8" aria-labelledby="slide-segments-heading">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h2 id="slide-segments-heading" className="text-[21px] font-bold tracking-[-0.05em]">
           スライド区間の確認・調整
