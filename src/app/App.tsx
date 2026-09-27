@@ -19,9 +19,11 @@ import {
   saveArticleSections,
   saveArticleSource,
   saveArticleSummary,
+  saveArticleOutputLanguage,
   saveArticleTitle,
-  saveOcr,
-  saveSlideContent,
+  saveArticleTranslation,
+  saveOcrBatch,
+  saveSlideContentBatch,
   saveSlideDetection,
   saveSlideResultEdits,
   saveTranscription,
@@ -54,7 +56,9 @@ import type { YoutubeImportOptions, YoutubeImportRequest } from '../features/imp
 import type { YoutubeDownloadInput } from '../lib/youtube/types'
 import type {
   ArticleDraft,
+  ArticleOutputLanguage,
   ArticleSummary,
+  ArticleTranslation,
   ContentProcessingResult,
   CropRegion,
   ArticleSections,
@@ -249,7 +253,8 @@ function App() {
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current) return
-      const next = activateArticle(current, articleId)
+      const loaded = await loadProject(current.id, articleId)
+      const next = activateArticle(loaded, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
       const opened = markProjectOpened(next, article?.workflow.lastVisitedStep ?? 'detect-slides')
       const saved = await persistProjectWorkflow(opened)
@@ -317,7 +322,7 @@ function App() {
   const handleOpenArticleDetail = async (item: ArticleListItem) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
-      const loaded = await loadProject(item.projectId)
+      const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       setProjectState(next)
       if (requestId === navigationRequestRef.current) {
@@ -328,22 +333,25 @@ function App() {
 
   const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
-    await enqueueProjectOperation(async () => {
-      const loaded = await loadProject(item.projectId)
+    const { saved, step } = await enqueueProjectOperation(async () => {
+      const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       const article = next.articles.find((candidate) => candidate.id === item.articleId)
       const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
-      const opened = markProjectOpened(next, step)
-      const saved = await persistProjectWorkflow(opened)
+      const marked = markProjectOpened(next, step)
+      const saved = await persistProjectWorkflow(marked)
       setProjectState(saved)
-      if (requestId === navigationRequestRef.current) {
-        setRoute({
-          kind: 'article',
-          articleId: item.articleId,
-          step,
-        })
-      }
+      return { saved, step }
     })
+    if (step === 'export' && requestId === navigationRequestRef.current)
+      await regenerateArticleExport(saved)
+    if (requestId === navigationRequestRef.current) {
+      setRoute({
+        kind: 'article',
+        articleId: item.articleId,
+        step,
+      })
+    }
   }
 
   const handleBackToHome = () => {
@@ -452,21 +460,25 @@ function App() {
       if (next) setProjectState(next)
     })
   }
-  const handleOcrSlideCompleted = async (slideId: string, ocr: SlideOcrResult) => {
+  const handleOcrSlideCompleted = async (
+    results: Array<{ slideId: string; ocr: SlideOcrResult }>,
+  ) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
-      const next = await saveOcr(current, slideId, ocr)
+      const next = await saveOcrBatch(current, results)
       if (next) setProjectState(next)
     })
   }
-  const handleContentSlideCompleted = async (slideId: string, result: ContentProcessingResult) => {
+  const handleContentSlideCompleted = async (
+    results: Array<{ slideId: string; result: ContentProcessingResult }>,
+  ) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return
-      const next = await saveSlideContent(current, slideId, result)
+      const next = await saveSlideContentBatch(current, results)
       if (next) setProjectState(next)
     })
   }
@@ -521,6 +533,28 @@ function App() {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleSummary(current, summary)
+      if (next) setProjectState(next)
+      return next
+    })
+    await regenerateArticleExport(saved)
+  }
+  const handleSaveArticleTranslation = async (translation: ArticleTranslation) => {
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleTranslation(current, translation)
+      if (next) setProjectState(next)
+      return next
+    })
+    await regenerateArticleExport(saved)
+  }
+  const handleSaveArticleOutputLanguage = async (outputLanguage: ArticleOutputLanguage) => {
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    const saved = await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
+      const next = await saveArticleOutputLanguage(current, outputLanguage)
       if (next) setProjectState(next)
       return next
     })
@@ -649,6 +683,8 @@ function App() {
           getCurrentProject={() => projectRef.current}
           onSave={handleSaveArticle}
           onSaveSummary={handleSaveArticleSummary}
+          onSaveTranslation={handleSaveArticleTranslation}
+          onSaveOutputLanguage={handleSaveArticleOutputLanguage}
           onExport={() => void handleProjectStep('export')}
           onBackToProject={handleOpenProjects}
           onOpenArticle={handleOpenArticle}

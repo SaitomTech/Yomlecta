@@ -6,6 +6,7 @@ use super::super::services::{
 use super::super::{id_from, json_text, json_value, validate_id, value_i64, value_string, DbState};
 use serde_json::{json, Value};
 use sqlx::Row;
+use std::collections::HashSet;
 use tauri::State;
 
 #[tauri::command]
@@ -15,6 +16,7 @@ pub async fn db_commit_slide_detection(
     run_id: String,
     result: Value,
     slides: Value,
+    article_blocks: Value,
     article: Value,
     project_title: String,
     active_article_id: Option<String>,
@@ -27,6 +29,9 @@ pub async fn db_commit_slide_detection(
     let slides = slides
         .as_array()
         .ok_or_else(|| "スライド結果が配列ではありません。".to_string())?;
+    let article_blocks = article_blocks
+        .as_array()
+        .ok_or_else(|| "記事ブロックが配列ではありません。".to_string())?;
     let mut tx = state
         .pool
         .begin()
@@ -41,18 +46,23 @@ pub async fn db_commit_slide_detection(
         .await
         .map_err(|error| format!("記事のプロジェクトを読めませんでした: {error}"))?;
     let old_slide_asset_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT image_asset_id FROM slides WHERE article_id = ? AND image_asset_id IS NOT NULL",
+        "SELECT representative_asset_id FROM visual_segments WHERE article_id = ? AND representative_asset_id IS NOT NULL",
     )
     .bind(&article_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(|error| format!("旧スライドassetを確認できませんでした: {error}"))?;
-    sqlx::query("DELETE FROM slide_ocr_selections WHERE slide_id IN (SELECT id FROM slides WHERE article_id = ?)")
+    sqlx::query("DELETE FROM visual_segment_ocr_selections WHERE segment_id IN (SELECT id FROM visual_segments WHERE article_id = ?)")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
         .map_err(|error| format!("OCR採用結果を初期化できませんでした: {error}"))?;
-    sqlx::query("DELETE FROM slides WHERE article_id = ?")
+    sqlx::query("DELETE FROM article_blocks WHERE article_id = ?")
+        .bind(&article_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("以前の記事ブロックを置き換えられませんでした: {error}"))?;
+    sqlx::query("DELETE FROM visual_segments WHERE article_id = ?")
         .bind(&article_id)
         .execute(&mut *tx)
         .await
@@ -61,7 +71,7 @@ pub async fn db_commit_slide_detection(
         &mut tx,
         &run_id,
         &article_id,
-        "slide_detection",
+        "visual_segmentation",
         Some(&result),
     )
     .await?;
@@ -87,8 +97,11 @@ pub async fn db_commit_slide_detection(
             None
         };
         sqlx::query(
-            "INSERT INTO slides (id, article_id, run_id, position, start_ms, end_ms, detection_json, image_asset_id, transcript_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO visual_segments
+             (id, article_id, run_id, position, start_ms, end_ms, auto_kind, override_kind,
+              override_updated_at, person_layout, detection_json, classification_json,
+              representative_asset_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(slide_id)
         .bind(&article_id)
@@ -96,17 +109,78 @@ pub async fn db_commit_slide_detection(
         .bind(position as i64)
         .bind(value_i64(slide, "startMs", 0))
         .bind(value_i64(slide, "endMs", 0))
+        .bind(
+            slide
+                .get("autoKind")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+        )
+        .bind(slide.get("overrideKind").and_then(Value::as_str))
+        .bind(slide.get("overrideUpdatedAt").and_then(Value::as_str))
+        .bind(
+            slide
+                .get("personLayout")
+                .and_then(Value::as_str)
+                .unwrap_or("none"),
+        )
         .bind(json_value(slide, "detection", json!({}))?)
+        .bind(json_value(slide, "classification", json!({}))?)
         .bind(image_asset_id)
-        .bind(json_text(slide.get("transcript"))?)
         .execute(&mut *tx)
         .await
         .map_err(|error| format!("スライドを保存できませんでした: {error}"))?;
     }
+    for (position, block) in article_blocks.iter().enumerate() {
+        let block_id = value_string(block, "id")?;
+        validate_id(block_id, "記事ブロックID")?;
+        sqlx::query(
+            "INSERT INTO article_blocks
+             (id, article_id, position, image_segment_id, transcript_json)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(block_id)
+        .bind(&article_id)
+        .bind(position as i64)
+        .bind(block.get("imageSegmentId").and_then(Value::as_str))
+        .bind(json_text(block.get("transcript"))?)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("記事ブロックを保存できませんでした: {error}"))?;
+
+        let segment_ids = block
+            .get("visualSegmentIds")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "記事ブロックのvisualSegmentIdsがありません。".to_string())?;
+        let host_segment_id = block
+            .get("imageSegmentId")
+            .and_then(Value::as_str)
+            .or_else(|| segment_ids.first().and_then(Value::as_str))
+            .ok_or_else(|| "記事ブロックの表示区間IDがありません。".to_string())?;
+        if host_segment_id != block_id {
+            return Err(format!(
+                "VALIDATION_ERROR: 記事ブロックIDが表示区間IDと一致しません: {block_id}"
+            ));
+        }
+        for (segment_position, segment_id) in segment_ids.iter().enumerate() {
+            let segment_id = segment_id
+                .as_str()
+                .ok_or_else(|| "映像区間IDが文字列ではありません。".to_string())?;
+            sqlx::query(
+                "INSERT INTO article_block_segments
+                 (block_id, segment_id, position) VALUES (?, ?, ?)",
+            )
+            .bind(block_id)
+            .bind(segment_id)
+            .bind(segment_position as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("記事ブロックの区間割当を保存できませんでした: {error}"))?;
+        }
+    }
     sqlx::query(
-        "INSERT INTO article_material_selections (article_id, slide_run_id, transcription_run_id)
+        "INSERT INTO article_material_selections (article_id, visual_run_id, transcription_run_id)
          VALUES (?, ?, (SELECT transcription_run_id FROM article_material_selections WHERE article_id = ?))
-         ON CONFLICT(article_id) DO UPDATE SET slide_run_id = excluded.slide_run_id",
+         ON CONFLICT(article_id) DO UPDATE SET visual_run_id = excluded.visual_run_id",
     )
     .bind(&article_id)
     .bind(&run_id)
@@ -115,7 +189,7 @@ pub async fn db_commit_slide_detection(
     .await
     .map_err(|error| format!("採用スライドrunを更新できませんでした: {error}"))?;
     let revisions = sqlx::query(
-        "SELECT id, revision FROM slides WHERE article_id = ? ORDER BY position",
+        "SELECT id, revision FROM visual_segments WHERE article_id = ? ORDER BY position",
     )
     .bind(&article_id)
     .fetch_all(&mut *tx)
@@ -154,7 +228,7 @@ pub async fn db_commit_transcription(
     article_id: String,
     run_id: String,
     transcription: Value,
-    slides: Value,
+    article_blocks: Value,
     article: Value,
     project_title: String,
     active_article_id: Option<String>,
@@ -171,9 +245,9 @@ pub async fn db_commit_transcription(
     {
         return Err("文字起こしsegmentsがありません。".to_string());
     }
-    let slides = slides
+    let article_blocks = article_blocks
         .as_array()
-        .ok_or_else(|| "スライド結果が配列ではありません。".to_string())?;
+        .ok_or_else(|| "記事ブロックが配列ではありません。".to_string())?;
     let mut tx = state
         .pool
         .begin()
@@ -190,23 +264,36 @@ pub async fn db_commit_transcription(
         Some(&transcription),
     )
     .await?;
-    for slide in slides {
-        let slide_id = value_string(slide, "id")?;
+    for block in article_blocks {
+        let block_id = value_string(block, "id")?;
         let affected =
-            sqlx::query("UPDATE slides SET transcript_json = ?, revision = revision + 1 WHERE id = ? AND article_id = ?")
-                .bind(json_text(slide.get("transcript"))?)
-                .bind(slide_id)
+            sqlx::query("UPDATE article_blocks SET transcript_json = ?, revision = revision + 1 WHERE id = ? AND article_id = ?")
+                .bind(json_text(block.get("transcript"))?)
+                .bind(block_id)
                 .bind(&article_id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|error| format!("スライドへの発話割当を保存できませんでした: {error}"))?;
+                .map_err(|error| format!("記事ブロックへの発話割当を保存できませんでした: {error}"))?;
         if affected.rows_affected() == 0 {
-            return Err(format!("NOT_FOUND: スライドが見つかりません: {slide_id}"));
+            return Err(format!(
+                "NOT_FOUND: 記事ブロックが見つかりません: {block_id}"
+            ));
+        }
+        let segment_update = sqlx::query(
+            "UPDATE visual_segments SET revision = revision + 1 WHERE id = ? AND article_id = ?",
+        )
+        .bind(block_id)
+        .bind(&article_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("発話割当後の映像区間を更新できませんでした: {error}"))?;
+        if segment_update.rows_affected() == 0 {
+            return Err(format!("NOT_FOUND: 映像区間が見つかりません: {block_id}"));
         }
     }
     sqlx::query(
-        "INSERT INTO article_material_selections (article_id, slide_run_id, transcription_run_id)
-         VALUES (?, (SELECT slide_run_id FROM article_material_selections WHERE article_id = ?), ?)
+        "INSERT INTO article_material_selections (article_id, visual_run_id, transcription_run_id)
+         VALUES (?, (SELECT visual_run_id FROM article_material_selections WHERE article_id = ?), ?)
          ON CONFLICT(article_id) DO UPDATE SET transcription_run_id = excluded.transcription_run_id",
     )
     .bind(&article_id)
@@ -216,7 +303,7 @@ pub async fn db_commit_transcription(
     .await
     .map_err(|error| format!("採用文字起こしrunを更新できませんでした: {error}"))?;
     let revisions = sqlx::query(
-        "SELECT id, revision FROM slides WHERE article_id = ? ORDER BY position",
+        "SELECT id, revision FROM article_blocks WHERE article_id = ? ORDER BY position",
     )
     .bind(&article_id)
     .fetch_all(&mut *tx)
@@ -255,179 +342,114 @@ pub async fn db_commit_transcription(
 }
 
 #[tauri::command]
-pub async fn db_commit_ocr(
+pub async fn db_commit_ocr_batch(
     state: State<'_, DbState>,
     article_id: String,
-    slide_id: String,
-    run_id: String,
-    ocr_result_id: String,
-    ocr: Value,
-    transcript: Option<Value>,
-    article: Value,
-    project_title: String,
-    active_article_id: Option<String>,
-    project_updated_at: String,
-    expected_project_revision: Option<i64>,
-    expected_revision: Option<i64>,
-    expected_slide_revision: Option<i64>,
-) -> Result<Value, String> {
-    validate_id(&article_id, "記事ID")?;
-    validate_id(&slide_id, "スライドID")?;
-    validate_id(&run_id, "解析run ID")?;
-    validate_id(&ocr_result_id, "OCR結果ID")?;
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|error| format!("OCR commitを開始できませんでした: {error}"))?;
-    ensure_article_in_transaction(&mut tx, &article_id).await?;
-    let current_article_revision =
-        ensure_article_revision(&mut tx, &article_id, expected_revision).await?;
-    let slide_revision: Option<i64> =
-        sqlx::query_scalar("SELECT revision FROM slides WHERE id = ? AND article_id = ?")
-            .bind(&slide_id)
-            .bind(&article_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|error| format!("OCR対象スライドを確認できませんでした: {error}"))?;
-    let slide_revision =
-        slide_revision.ok_or_else(|| "NOT_FOUND: OCR対象スライドが見つかりません。".to_string())?;
-    if let Some(expected) = expected_slide_revision {
-        if expected != slide_revision {
-            return Err(format!(
-                "REVISION_CONFLICT: expected={expected}, actual={slide_revision}"
-            ));
-        }
-    }
-    insert_analysis_run(&mut tx, &run_id, &article_id, "ocr", Some(&ocr)).await?;
-    sqlx::query(
-        "INSERT INTO ocr_results (id, article_id, slide_id, raw_text, edited_text, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, NULL, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-    )
-    .bind(&ocr_result_id)
-    .bind(&article_id)
-    .bind(&slide_id)
-    .bind(ocr.get("rawText").and_then(Value::as_str).unwrap_or_default())
-    .bind(serde_json::to_string(&ocr).map_err(|error| error.to_string())?)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("OCR結果を保存できませんでした: {error}"))?;
-    sqlx::query(
-        "INSERT INTO slide_ocr_selections (slide_id, ocr_result_id) VALUES (?, ?)
-         ON CONFLICT(slide_id) DO UPDATE SET ocr_result_id = excluded.ocr_result_id",
-    )
-    .bind(&slide_id)
-    .bind(&ocr_result_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("採用OCR結果を更新できませんでした: {error}"))?;
-    let next_slide_revision = slide_revision + 1;
-    sqlx::query(
-        "UPDATE slides SET transcript_json = ?, revision = ? WHERE id = ? AND article_id = ?",
-    )
-    .bind(
-        transcript
-            .map(|value| serde_json::to_string(&value))
-            .transpose()
-            .map_err(|error| format!("transcriptをJSON化できませんでした: {error}"))?,
-    )
-    .bind(next_slide_revision)
-    .bind(&slide_id)
-    .bind(&article_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("OCR後の本文を更新できませんでした: {error}"))?;
-    let project_id: String = sqlx::query_scalar("SELECT project_id FROM articles WHERE id = ?")
-        .bind(&article_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| format!("記事のプロジェクトを読めませんでした: {error}"))?;
-    let (project_revision, article_revision) = update_article_metadata_in_transaction(
-        &mut tx,
-        &project_id,
-        &project_title,
-        active_article_id.as_deref(),
-        &project_updated_at,
-        &article,
-        expected_project_revision,
-        current_article_revision,
-    )
-    .await?;
-    tx.commit()
-        .await
-        .map_err(|error| format!("OCR commitに失敗しました: {error}"))?;
-    Ok(
-        json!({ "projectRevision": project_revision, "articleRevision": article_revision, "slideId": slide_id, "slideRevision": next_slide_revision, "ocrId": ocr_result_id, "ocrRevision": 0 }),
-    )
-}
-
-#[tauri::command]
-pub async fn db_commit_slide_content(
-    state: State<'_, DbState>,
-    article_id: String,
-    slide_id: String,
-    run_id: String,
-    result: Value,
-    transcript: Value,
+    items: Value,
     article: Value,
     project_title: String,
     active_article_id: Option<String>,
     project_updated_at: String,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
-    expected_revision: Option<i64>,
 ) -> Result<Value, String> {
     validate_id(&article_id, "記事ID")?;
-    validate_id(&slide_id, "スライドID")?;
-    validate_id(&run_id, "解析run ID")?;
+    let items = items
+        .as_array()
+        .ok_or_else(|| "OCR結果が配列ではありません。".to_string())?;
+    if items.is_empty() {
+        return Err("OCR結果が空です。".to_string());
+    }
     let mut tx = state
         .pool
         .begin()
         .await
-        .map_err(|error| format!("本文生成commitを開始できませんでした: {error}"))?;
+        .map_err(|error| format!("OCR batch commitを開始できませんでした: {error}"))?;
     ensure_article_in_transaction(&mut tx, &article_id).await?;
-    let slide_revision: Option<i64> =
-        sqlx::query_scalar("SELECT revision FROM slides WHERE id = ? AND article_id = ?")
-            .bind(&slide_id)
-            .bind(&article_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|error| format!("本文生成対象スライドを確認できませんでした: {error}"))?;
-    let slide_revision = slide_revision
-        .ok_or_else(|| "NOT_FOUND: 本文生成対象スライドが見つかりません。".to_string())?;
-    if let Some(expected) = expected_revision {
-        if expected != slide_revision {
-            return Err(format!(
-                "REVISION_CONFLICT: expected={expected}, actual={slide_revision}"
-            ));
-        }
-    }
-    insert_analysis_run(
-        &mut tx,
-        &run_id,
-        &article_id,
-        "body_generation",
-        Some(&result),
-    )
-    .await?;
-    let affected =
-        sqlx::query("UPDATE slides SET transcript_json = ?, revision = revision + 1 WHERE id = ? AND article_id = ?")
-            .bind(serde_json::to_string(&transcript).map_err(|error| error.to_string())?)
-            .bind(&slide_id)
-            .bind(&article_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("本文を保存できませんでした: {error}"))?;
-    if affected.rows_affected() == 0 {
-        return Err("NOT_FOUND: 本文生成対象スライドが見つかりません。".to_string());
-    }
+    let article_revision =
+        ensure_article_revision(&mut tx, &article_id, expected_article_revision).await?;
     let project_id: String = sqlx::query_scalar("SELECT project_id FROM articles WHERE id = ?")
         .bind(&article_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| format!("記事のプロジェクトを読めませんでした: {error}"))?;
-    let current_article_revision =
-        ensure_article_revision(&mut tx, &article_id, expected_article_revision).await?;
+    let mut seen = HashSet::new();
+    let mut revisions = Vec::with_capacity(items.len());
+    for item in items {
+        let slide_id = value_string(item, "slideId")?;
+        if !seen.insert(slide_id) {
+            return Err(format!(
+                "VALIDATION_ERROR: スライドが重複しています: {slide_id}"
+            ));
+        }
+        let run_id = value_string(item, "runId")?;
+        let ocr_result_id = value_string(item, "ocrResultId")?;
+        validate_id(&slide_id, "スライドID")?;
+        validate_id(&run_id, "解析run ID")?;
+        validate_id(&ocr_result_id, "OCR結果ID")?;
+        let ocr = item.get("ocr").cloned().unwrap_or_else(|| json!({}));
+        let slide_revision: i64 = sqlx::query_scalar(
+            "SELECT revision FROM visual_segments WHERE id = ? AND article_id = ?",
+        )
+        .bind(&slide_id)
+        .bind(&article_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("OCR対象スライドを確認できませんでした: {error}"))?
+        .ok_or_else(|| format!("NOT_FOUND: OCR対象スライドが見つかりません: {slide_id}"))?;
+        if let Some(expected) = item.get("expectedSlideRevision").and_then(Value::as_i64) {
+            if expected != slide_revision {
+                return Err(format!(
+                    "REVISION_CONFLICT: expected={expected}, actual={slide_revision}"
+                ));
+            }
+        }
+        insert_analysis_run(&mut tx, &run_id, &article_id, "ocr", Some(&ocr)).await?;
+        sqlx::query(
+            "INSERT INTO ocr_results (id, article_id, segment_id, raw_text, edited_text, metadata_json, created_at)
+             VALUES (?, ?, ?, ?, NULL, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        )
+        .bind(&ocr_result_id)
+        .bind(&article_id)
+        .bind(&slide_id)
+        .bind(ocr.get("rawText").and_then(Value::as_str).unwrap_or_default())
+        .bind(serde_json::to_string(&ocr).map_err(|error| error.to_string())?)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("OCR結果を保存できませんでした: {error}"))?;
+        sqlx::query(
+            "INSERT INTO visual_segment_ocr_selections (segment_id, ocr_result_id) VALUES (?, ?)
+             ON CONFLICT(segment_id) DO UPDATE SET ocr_result_id = excluded.ocr_result_id",
+        )
+        .bind(&slide_id)
+        .bind(&ocr_result_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("採用OCR結果を更新できませんでした: {error}"))?;
+        let transcript = item.get("transcript").filter(|value| !value.is_null());
+        sqlx::query("UPDATE visual_segments SET revision = ? WHERE id = ? AND article_id = ?")
+            .bind(slide_revision + 1)
+            .bind(&slide_id)
+            .bind(&article_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("OCR後の映像区間を更新できませんでした: {error}"))?;
+        sqlx::query(
+            "UPDATE article_blocks SET transcript_json = ?, revision = revision + 1
+             WHERE image_segment_id = ? AND article_id = ?",
+        )
+        .bind(json_text(transcript)?)
+        .bind(&slide_id)
+        .bind(&article_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("OCR後の本文を更新できませんでした: {error}"))?;
+        revisions.push(json!({
+            "id": slide_id,
+            "revision": slide_revision + 1,
+            "ocrRevision": 0
+        }));
+    }
     let (project_revision, article_revision) = update_article_metadata_in_transaction(
         &mut tx,
         &project_id,
@@ -436,15 +458,134 @@ pub async fn db_commit_slide_content(
         &project_updated_at,
         &article,
         expected_project_revision,
-        current_article_revision,
+        article_revision,
     )
     .await?;
     tx.commit()
         .await
-        .map_err(|error| format!("本文生成commitに失敗しました: {error}"))?;
-    Ok(
-        json!({ "projectRevision": project_revision, "articleRevision": article_revision, "slideId": slide_id, "revision": slide_revision + 1 }),
+        .map_err(|error| format!("OCR batch commitに失敗しました: {error}"))?;
+    Ok(json!({
+        "projectRevision": project_revision,
+        "articleRevision": article_revision,
+        "slideRevisions": revisions
+    }))
+}
+
+#[tauri::command]
+pub async fn db_commit_slide_content_batch(
+    state: State<'_, DbState>,
+    article_id: String,
+    items: Value,
+    article: Value,
+    project_title: String,
+    active_article_id: Option<String>,
+    project_updated_at: String,
+    expected_project_revision: Option<i64>,
+    expected_article_revision: Option<i64>,
+) -> Result<Value, String> {
+    validate_id(&article_id, "記事ID")?;
+    let items = items
+        .as_array()
+        .ok_or_else(|| "本文生成結果が配列ではありません。".to_string())?;
+    if items.is_empty() {
+        return Err("本文生成結果が空です。".to_string());
+    }
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| format!("本文生成batch commitを開始できませんでした: {error}"))?;
+    ensure_article_in_transaction(&mut tx, &article_id).await?;
+    let article_revision =
+        ensure_article_revision(&mut tx, &article_id, expected_article_revision).await?;
+    let project_id: String = sqlx::query_scalar("SELECT project_id FROM articles WHERE id = ?")
+        .bind(&article_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| format!("記事のプロジェクトを読めませんでした: {error}"))?;
+    let mut seen = HashSet::new();
+    let mut revisions = Vec::with_capacity(items.len());
+    for item in items {
+        let slide_id = value_string(item, "slideId")?;
+        if !seen.insert(slide_id) {
+            return Err(format!(
+                "VALIDATION_ERROR: スライドが重複しています: {slide_id}"
+            ));
+        }
+        let run_id = value_string(item, "runId")?;
+        validate_id(&slide_id, "スライドID")?;
+        validate_id(&run_id, "解析run ID")?;
+        let result = item.get("result").cloned().unwrap_or_else(|| json!({}));
+        let transcript = item
+            .get("transcript")
+            .ok_or_else(|| "本文生成結果のtranscriptがありません。".to_string())?;
+        let slide_revision: i64 = sqlx::query_scalar(
+            "SELECT revision FROM visual_segments WHERE id = ? AND article_id = ?",
+        )
+        .bind(&slide_id)
+        .bind(&article_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("本文生成対象スライドを確認できませんでした: {error}"))?
+        .ok_or_else(|| format!("NOT_FOUND: 本文生成対象スライドが見つかりません: {slide_id}"))?;
+        if let Some(expected) = item.get("expectedSlideRevision").and_then(Value::as_i64) {
+            if expected != slide_revision {
+                return Err(format!(
+                    "REVISION_CONFLICT: expected={expected}, actual={slide_revision}"
+                ));
+            }
+        }
+        insert_analysis_run(
+            &mut tx,
+            &run_id,
+            &article_id,
+            "body_generation",
+            Some(&result),
+        )
+        .await?;
+        let affected = sqlx::query(
+            "UPDATE article_blocks SET transcript_json = ?, revision = revision + 1
+             WHERE id = ? AND article_id = ?",
+        )
+        .bind(serde_json::to_string(transcript).map_err(|error| error.to_string())?)
+        .bind(&slide_id)
+        .bind(&article_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("本文を保存できませんでした: {error}"))?;
+        if affected.rows_affected() == 0 {
+            return Err(format!(
+                "NOT_FOUND: 本文生成対象の記事ブロックが見つかりません: {slide_id}"
+            ));
+        }
+        sqlx::query("UPDATE visual_segments SET revision = ? WHERE id = ? AND article_id = ?")
+            .bind(slide_revision + 1)
+            .bind(&slide_id)
+            .bind(&article_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("本文生成後の映像区間を更新できませんでした: {error}"))?;
+        revisions.push(json!({ "id": slide_id, "revision": slide_revision + 1 }));
+    }
+    let (project_revision, article_revision) = update_article_metadata_in_transaction(
+        &mut tx,
+        &project_id,
+        &project_title,
+        active_article_id.as_deref(),
+        &project_updated_at,
+        &article,
+        expected_project_revision,
+        article_revision,
     )
+    .await?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("本文生成batch commitに失敗しました: {error}"))?;
+    Ok(json!({
+        "projectRevision": project_revision,
+        "articleRevision": article_revision,
+        "slideRevisions": revisions
+    }))
 }
 
 #[tauri::command]
@@ -471,7 +612,7 @@ pub async fn db_update_slide_results(
         })?;
     ensure_article_in_transaction(&mut tx, &article_id).await?;
     let slide_revision: i64 =
-        sqlx::query_scalar("SELECT revision FROM slides WHERE id = ? AND article_id = ?")
+        sqlx::query_scalar("SELECT revision FROM visual_segments WHERE id = ? AND article_id = ?")
             .bind(&slide_id)
             .bind(&article_id)
             .fetch_optional(&mut *tx)
@@ -485,7 +626,7 @@ pub async fn db_update_slide_results(
             ));
         }
     }
-    let selected = sqlx::query("SELECT o.id, o.revision FROM ocr_results o WHERE o.id = (SELECT ocr_result_id FROM slide_ocr_selections WHERE slide_id = ?) AND o.article_id = ? AND o.slide_id = ?")
+    let selected = sqlx::query("SELECT o.id, o.revision FROM ocr_results o WHERE o.id = (SELECT ocr_result_id FROM visual_segment_ocr_selections WHERE segment_id = ?) AND o.article_id = ? AND o.segment_id = ?")
         .bind(&slide_id).bind(&article_id).bind(&slide_id).fetch_optional(&mut *tx).await
         .map_err(|error| format!("OCR結果を確認できませんでした: {error}"))?;
     let mut next_ocr_revision = None;
@@ -521,10 +662,16 @@ pub async fn db_update_slide_results(
         slide_revision
     };
     if let Some(transcript) = transcript {
-        sqlx::query("UPDATE slides SET transcript_json = ?, revision = ? WHERE id = ? AND article_id = ? AND revision = ?")
+        let affected = sqlx::query("UPDATE article_blocks SET transcript_json = ?, revision = revision + 1 WHERE id = ? AND article_id = ?")
             .bind(serde_json::to_string(&transcript).map_err(|error| format!("transcriptをJSON化できませんでした: {error}"))?)
-            .bind(next_slide_revision).bind(&slide_id).bind(&article_id).bind(slide_revision).execute(&mut *tx).await
+            .bind(&slide_id).bind(&article_id).execute(&mut *tx).await
             .map_err(|error| format!("スライド本文を更新できませんでした: {error}"))?;
+        if affected.rows_affected() == 0 {
+            return Err("NOT_FOUND: 記事ブロックが見つかりません。".to_string());
+        }
+        sqlx::query("UPDATE visual_segments SET revision = ? WHERE id = ? AND article_id = ? AND revision = ?")
+            .bind(next_slide_revision).bind(&slide_id).bind(&article_id).bind(slide_revision).execute(&mut *tx).await
+            .map_err(|error| format!("映像区間revisionを更新できませんでした: {error}"))?;
     }
     let project_id: String = sqlx::query_scalar("SELECT project_id FROM articles WHERE id = ?")
         .bind(&article_id)

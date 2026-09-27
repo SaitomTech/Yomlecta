@@ -5,6 +5,7 @@ import { ModelDescription } from '../../../components/ModelDescription'
 import { ModelSelect } from '../../../components/ModelSelect'
 import { ProcessingStatusRow } from '../../../components/ProcessingStatusRow'
 import { estimateOpenAiOcrCost, representativeFrameDimensions } from '../../../lib/openai/cost'
+import { ocrEligibleSegments } from '../../../lib/pipeline/articleBlocks'
 import {
   APPLE_VISION_OCR_MODEL,
   getOcrModel,
@@ -94,9 +95,10 @@ export function OcrPanel({
   const isCompleted = ocr.status === 'completed'
   const total = ocr.progress.total
   const model = getOcrModel(modelId)
+  const eligibleSlides = ocrEligibleSegments(project.slides, project.articleBlocks)
   const slidesToProcess = isCompleted
-    ? project.slides
-    : project.slides.filter(
+    ? eligibleSlides
+    : eligibleSlides.filter(
         (slide) => slide.ocr?.inputFingerprint !== ocrInputFingerprint(slide, modelId),
       )
   const frameSize = representativeFrameDimensions(

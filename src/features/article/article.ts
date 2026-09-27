@@ -1,9 +1,10 @@
 import { DEFAULT_ARTICLE_MODEL_ID } from '../../lib/article/articleModel'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import type { MediaProject, SlideData } from '../../types/project'
 
-const ARTICLE_PROMPT_VERSION = 'content-processing-v14-preserve-all-content'
-const ARTICLE_SUMMARY_PROMPT_VERSION = 'article-summary-v2-talk-lecture-core-fields'
-const ARTICLE_SECTIONS_PROMPT_VERSION = 'article-sections-v2-contiguous-all-transcribed-slides'
+const ARTICLE_PROMPT_VERSION = 'content-processing-v16-infer-source-language'
+const ARTICLE_SUMMARY_PROMPT_VERSION = 'article-summary-v4-infer-source-language'
+const ARTICLE_SECTIONS_PROMPT_VERSION = 'article-sections-v4-infer-source-language'
 
 export function articleInputFingerprint(
   slide: SlideData,
@@ -26,8 +27,27 @@ export function hasCurrentArticle(slide: SlideData, modelId?: string) {
   )
 }
 
+export function articleSlidesWithSpeech(project: MediaProject) {
+  return articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
+    Boolean(slide.transcript?.raw.trim()),
+  )
+}
+
+export function articleTranscriptInput(project: MediaProject) {
+  return articleSlidesWithSpeech(project)
+    .map((slide) => slide.transcript?.raw ?? '')
+    .join('\n\n')
+}
+
+export function hasAllSpeechArticleBodies(project: MediaProject) {
+  const slides = articleSlidesWithSpeech(project)
+  return (
+    slides.length > 0 && slides.every((slide) => Boolean(slide.transcript?.articleBody?.trim()))
+  )
+}
+
 export function articleSummaryInput(project: MediaProject) {
-  return project.slides
+  return articleSlidesWithSpeech(project)
     .flatMap((slide) => {
       const body = slide.transcript?.articleBody?.trim()
       return body
@@ -44,7 +64,10 @@ export function articleSummaryInputFingerprint(
   modelId = project.article?.summary?.model ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
   return JSON.stringify([
-    project.slides.map((slide) => [slide.id, slide.transcript?.articleBody ?? '']),
+    articleSlidesWithSpeech(project).map((slide) => [
+      slide.id,
+      slide.transcript?.articleBody ?? '',
+    ]),
     modelId,
     ARTICLE_SUMMARY_PROMPT_VERSION,
   ])
@@ -65,8 +88,7 @@ export function hasCurrentArticleSummary(
 }
 
 export function articleSectionsInput(project: MediaProject) {
-  return project.slides
-    .filter((slide) => slide.transcript)
+  return articleSlidesWithSpeech(project)
     .map((slide) => {
       return [
         `<SLIDE id="${slide.id}" index="${slide.index + 1}">`,
@@ -82,7 +104,11 @@ export function articleSectionsInputFingerprint(
   modelId = project.article?.sections?.model ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
   return JSON.stringify([
-    project.slides.map((slide) => [slide.id, slide.index, slide.transcript?.articleBody ?? '']),
+    articleSlidesWithSpeech(project).map((slide) => [
+      slide.id,
+      slide.index,
+      slide.transcript?.articleBody ?? '',
+    ]),
     modelId,
     ARTICLE_SECTIONS_PROMPT_VERSION,
   ])

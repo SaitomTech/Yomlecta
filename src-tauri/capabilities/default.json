@@ -95,6 +95,11 @@
           "args": true
         },
         {
+          "name": "binaries/apple-translator",
+          "sidecar": true,
+          "args": true
+        },
+        {
           "name": "binaries/yt-dlp",
           "sidecar": true,
           "args": true
@@ -131,6 +136,11 @@
         },
         {
           "name": "binaries/apple-foundation-models",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/apple-translator",
           "sidecar": true,
           "args": true
         },
@@ -181,6 +191,8 @@
         { "path": "$APPLOCALDATA/projects" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
+        { "path": "$APPLOCALDATA/projects/*/exports/.asset-manifest.json" },
+        { "path": "$APPLOCALDATA/projects/*/articles/*/exports/.asset-manifest.json" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
         { "path": "$APPLOCALDATA/projects/*/.trash/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash/**/*" }
@@ -192,6 +204,8 @@
         { "path": "$APPLOCALDATA/projects" },
         { "path": "$APPLOCALDATA/projects/*" },
         { "path": "$APPLOCALDATA/projects/**/*" },
+        { "path": "$APPLOCALDATA/projects/*/exports/.asset-manifest.json" },
+        { "path": "$APPLOCALDATA/projects/*/articles/*/exports/.asset-manifest.json" },
         { "path": "$APPLOCALDATA/projects/*/.trash" },
         { "path": "$APPLOCALDATA/projects/*/.trash/*" },
         { "path": "$APPLOCALDATA/projects/*/.trash/**/*" },

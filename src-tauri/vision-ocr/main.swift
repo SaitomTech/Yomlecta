@@ -23,9 +23,28 @@ struct VisionRegion: Codable {
     let polygon: [Point]
 }
 
+struct FaceRegion: Codable {
+    let confidence: Double
+    let polygon: [Point]
+    let landmarkSignature: [Double]?
+}
+
 struct RectangleDetectionResponse: Codable {
     let imagePath: String
     let rectangles: [VisionRegion]
+    let engineVersion: String
+}
+
+struct PeopleDetectionResponse: Codable {
+    let imagePath: String
+    let faces: [FaceRegion]
+    let humans: [VisionRegion]
+    let engineVersion: String
+}
+
+struct TextRegionDetectionResponse: Codable {
+    let imagePath: String
+    let textRegions: [VisionRegion]
     let engineVersion: String
 }
 
@@ -44,7 +63,7 @@ enum VisionOcrError: LocalizedError {
         case .noSupportedLanguages:
             return "このmacOS環境で利用できるOCR言語がありません。"
         case .recognitionFailed(let message):
-            return "Apple Visionの文字認識に失敗しました: \(message)"
+            return "Apple Visionの処理に失敗しました: \(message)"
         }
     }
 }
@@ -204,6 +223,126 @@ func detectRectangles(imagePath: String) throws -> RectangleDetectionResponse {
     )
 }
 
+func normalizedPoints(from region: VNFaceLandmarkRegion2D?) -> [Double] {
+    guard let region else { return [] }
+    return (0..<region.pointCount).flatMap { index in
+        let point = region.normalizedPoints[index]
+        return [Double(point.x), Double(point.y)]
+    }
+}
+
+func faceLandmarkSignature(from landmarks: VNFaceLandmarks2D?) -> [Double]? {
+    guard let landmarks else { return nil }
+    let signature = [
+        landmarks.faceContour,
+        landmarks.leftEye,
+        landmarks.rightEye,
+        landmarks.leftEyebrow,
+        landmarks.rightEyebrow,
+        landmarks.nose,
+        landmarks.noseCrest,
+        landmarks.medianLine,
+        landmarks.outerLips,
+        landmarks.innerLips,
+    ].flatMap(normalizedPoints)
+    return signature.isEmpty ? nil : signature
+}
+
+func detectFaces(imageURL: URL, cpuOnly: Bool) throws -> [FaceRegion] {
+    let faceRequest = VNDetectFaceLandmarksRequest()
+    faceRequest.revision = VNDetectFaceLandmarksRequest.currentRevision
+    faceRequest.usesCPUOnly = cpuOnly
+    try VNImageRequestHandler(url: imageURL, options: [:]).perform([faceRequest])
+    return (faceRequest.results ?? []).map { observation in
+        FaceRegion(
+            confidence: Double(observation.confidence),
+            polygon: topLeftPolygon(for: observation.boundingBox),
+            landmarkSignature: faceLandmarkSignature(from: observation.landmarks)
+        )
+    }
+}
+
+func detectTextRegions(imagePath: String) throws -> TextRegionDetectionResponse {
+    let imageURL = URL(fileURLWithPath: imagePath)
+    guard FileManager.default.fileExists(atPath: imagePath) else {
+        throw VisionOcrError.imageCouldNotBeLoaded(imagePath)
+    }
+
+    let request = VNDetectTextRectanglesRequest()
+    request.reportCharacterBoxes = false
+    try VNImageRequestHandler(url: imageURL, options: [:]).perform([request])
+
+    let regions = (request.results ?? []).map { observation in
+        VisionRegion(
+            confidence: Double(observation.confidence),
+            polygon: topLeftPolygon(for: observation.boundingBox)
+        )
+    }
+    return TextRegionDetectionResponse(
+        imagePath: imagePath,
+        textRegions: regions,
+        engineVersion: "apple-vision-text-regions-\(VNDetectTextRectanglesRequest.currentRevision)"
+    )
+}
+
+func detectHumans(imageURL: URL, cpuOnly: Bool) throws -> [VisionRegion] {
+    let humanRequest = VNDetectHumanRectanglesRequest()
+    humanRequest.revision = VNDetectHumanRectanglesRequest.currentRevision
+    humanRequest.usesCPUOnly = cpuOnly
+    if #available(macOS 12.0, *) {
+        humanRequest.upperBodyOnly = false
+    }
+    try VNImageRequestHandler(url: imageURL, options: [:]).perform([humanRequest])
+    return (humanRequest.results ?? []).map { observation in
+        VisionRegion(
+            confidence: Double(observation.confidence),
+            polygon: topLeftPolygon(for: observation.boundingBox)
+        )
+    }
+}
+
+func detectPeople(imagePath: String) throws -> PeopleDetectionResponse {
+    let imageURL = URL(fileURLWithPath: imagePath)
+    guard FileManager.default.fileExists(atPath: imagePath) else {
+        throw VisionOcrError.imageCouldNotBeLoaded(imagePath)
+    }
+
+    var faceRegions: [FaceRegion] = []
+    var humanRegions: [VisionRegion] = []
+    var usedCpuFallback = false
+    var failures: [String] = []
+    do {
+        faceRegions = try detectFaces(imageURL: imageURL, cpuOnly: false)
+    } catch {
+        do {
+            faceRegions = try detectFaces(imageURL: imageURL, cpuOnly: true)
+            usedCpuFallback = true
+        } catch {
+            failures.append("face: \(error.localizedDescription)")
+        }
+    }
+    do {
+        humanRegions = try detectHumans(imageURL: imageURL, cpuOnly: false)
+    } catch {
+        do {
+            humanRegions = try detectHumans(imageURL: imageURL, cpuOnly: true)
+            usedCpuFallback = true
+        } catch {
+            failures.append("human: \(error.localizedDescription)")
+        }
+    }
+    if failures.count == 2 {
+        throw VisionOcrError.recognitionFailed("人物検出に失敗しました: \(failures.joined(separator: "; "))")
+    }
+
+    return PeopleDetectionResponse(
+        imagePath: imagePath,
+        faces: faceRegions,
+        humans: humanRegions,
+        engineVersion: "apple-vision-people-face-landmarks-\(VNDetectFaceLandmarksRequest.currentRevision)-human-\(VNDetectHumanRectanglesRequest.currentRevision)-\(usedCpuFallback ? "cpu-fallback" : "default")"
+    )
+}
+
 func writeJSON<T: Encodable>(_ value: T) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
@@ -219,7 +358,19 @@ do {
         throw VisionOcrError.missingImagePath
     }
 
-    if CommandLine.arguments[1] == "--detect-rectangles" {
+    if CommandLine.arguments[1] == "--detect-people" {
+        let imagePaths = Array(CommandLine.arguments.dropFirst(2))
+        guard !imagePaths.isEmpty else {
+            throw VisionOcrError.missingImagePath
+        }
+        try writeJSON(imagePaths.map { try detectPeople(imagePath: $0) })
+    } else if CommandLine.arguments[1] == "--detect-text-regions" {
+        let imagePaths = Array(CommandLine.arguments.dropFirst(2))
+        guard !imagePaths.isEmpty else {
+            throw VisionOcrError.missingImagePath
+        }
+        try writeJSON(imagePaths.map { try detectTextRegions(imagePath: $0) })
+    } else if CommandLine.arguments[1] == "--detect-rectangles" {
         let imagePaths = Array(CommandLine.arguments.dropFirst(2))
         guard imagePaths.count == 1, let imagePath = imagePaths.first else {
             throw VisionOcrError.missingImagePath

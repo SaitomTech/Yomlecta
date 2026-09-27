@@ -3,6 +3,7 @@ import { withUserFacingError, UserFacingError } from '../../lib/errors'
 import type { ContentProcessingResult, MediaProject } from '../../types/project'
 import { hasCurrentArticle } from '../article/article'
 import { createArticleGenerator } from './articleGenerator'
+import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 
 export type ContentProcessingStage = 'preparing-model' | 'processing'
 
@@ -13,8 +14,7 @@ export type ContentProcessingProgress = {
 }
 
 export type ContentProcessingSlideCompleted = (
-  slideId: string,
-  result: ContentProcessingResult,
+  results: Array<{ slideId: string; result: ContentProcessingResult }>,
 ) => void | Promise<void>
 
 export type ContentProcessingSlideSkipped = (
@@ -82,8 +82,13 @@ export async function runContentProcessing({
   signal,
   force = false,
 }: RunContentProcessingInput) {
-  const generator = createArticleGenerator(getArticleModel(modelId))
-  const targetSlides = project.slides.filter((slide) => slide.transcript?.raw.trim())
+  const generator = createArticleGenerator(
+    getArticleModel(modelId),
+    project.transcription?.language,
+  )
+  const targetSlides = articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
+    slide.transcript?.raw.trim(),
+  )
   if (targetSlides.length === 0) {
     throw new UserFacingError('処理する文字起こしがありません。先に文字起こしを実行してください。')
   }
@@ -113,6 +118,21 @@ export async function runContentProcessing({
         // Generation can run concurrently, but project updates must stay ordered because
         // each completion callback reads and writes the current project snapshot.
         let completionTail = Promise.resolve()
+        const batch: Array<{
+          slideId: string
+          slideIndex: number
+          result: ContentProcessingResult
+        }> = []
+        const flush = async () => {
+          if (batch.length === 0) return
+          const pending = batch.splice(0)
+          await withUserFacingError(
+            `Slide ${pending[0].slideIndex + 1}以降の解析結果を保存できませんでした。空き容量を確認して、再試行してください。`,
+            () => onSlideCompleted(pending.map(({ slideId, result }) => ({ slideId, result }))),
+          )
+          completed += pending.length
+          report(null)
+        }
         const completeSlide = (
           slide: (typeof pendingSlides)[number],
           result: ContentProcessingResult | undefined,
@@ -121,29 +141,32 @@ export async function runContentProcessing({
             throwIfAborted(signal)
             if (!result) {
               onSlideSkipped?.(slide.id, slide.index, 'unsupported-language')
+              completed += 1
+              report(null)
             } else {
-              await withUserFacingError(
-                `Slide ${slide.index + 1}の解析結果を保存できませんでした。空き容量を確認して、再試行してください。`,
-                () => onSlideCompleted(slide.id, result),
-              )
+              batch.push({ slideId: slide.id, slideIndex: slide.index, result })
+              if (batch.length >= 8) await flush()
             }
             throwIfAborted(signal)
-            completed += 1
-            report(null)
           })
           completionTail = completion
           return completion
         }
 
-        await mapWithConcurrency(
-          pendingSlides,
-          generator.maxConcurrentRequests,
-          async (slide) => {
-            const result = await generate(slide, signal)
-            await completeSlide(slide, result)
-          },
-          signal,
-        )
+        try {
+          await mapWithConcurrency(
+            pendingSlides,
+            generator.maxConcurrentRequests,
+            async (slide) => {
+              const result = await generate(slide, signal)
+              await completeSlide(slide, result)
+            },
+            signal,
+          )
+        } finally {
+          await completionTail
+          await flush()
+        }
       },
     }),
   )

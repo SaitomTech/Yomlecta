@@ -8,15 +8,25 @@ import {
   useDroppable,
 } from '@dnd-kit/react'
 import { Fragment, useRef, useState } from 'react'
+import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
+import { articleBlockViews } from '../../../lib/pipeline/articleBlocks'
 import type {
   ArticleSection,
   ArticleSections,
+  ArticleOutputLanguage,
   ArticleSummary,
+  ArticleTranslation,
   MediaProject,
 } from '../../../types/project'
 import { useProjectTitleEditor } from '../../project/hooks/useProjectTitleEditor'
 import { ArticleSectionEditor } from './ArticleSectionEditor'
 import { ArticleSummaryResult } from './ArticleSummaryResult'
+import { getArticleSourceLanguage, isArticleOutputLanguageAvailable } from '../outputLanguage'
+import {
+  ARTICLE_OUTPUT_LANGUAGE_OPTIONS,
+  articleLanguageLabel,
+  resolveArticleLanguageVisibility,
+} from '../articleLanguage'
 
 type ArticleReviewSectionGroup = {
   id: string
@@ -40,14 +50,17 @@ type ArticleStructureEditorProps = {
   onBodyChange: (body: string) => void
   onSaveSections: (sections: ArticleSections | null) => void | Promise<void>
   summary?: ArticleSummary
+  translation?: ArticleTranslation
+  outputLanguage: ArticleOutputLanguage
   summaryIsUpToDate: boolean
   summaryDisabled?: boolean
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
+  onSaveOutputLanguage: (language: ArticleOutputLanguage) => void | Promise<void>
   disabled?: boolean
 }
 
 function articleSlidesFor(project: MediaProject) {
-  return project.slides
+  return articleBlockViews(project.slides, project.articleBlocks)
     .filter((slide) => Boolean(slide.transcript))
     .sort((first, second) => first.index - second.index)
 }
@@ -67,7 +80,7 @@ function createSectionId() {
 }
 
 function sortSlideIdsByProjectOrder(slideIds: string[], project: MediaProject) {
-  const slideOrder = new Map(project.slides.map((slide) => [slide.id, slide.index]))
+  const slideOrder = new Map(articleSlidesFor(project).map((slide) => [slide.id, slide.index]))
   return [...slideIds].sort(
     (first, second) =>
       (slideOrder.get(first) ?? Number.MAX_SAFE_INTEGER) -
@@ -323,6 +336,172 @@ function SectionInsertGap({ onAdd }: { onAdd: () => void }) {
   )
 }
 
+function SectionReviewHeader({
+  section,
+  index,
+  totalSlides,
+  globalStartIndex,
+  disabled,
+  translation,
+  sourceLanguage,
+  outputLanguage,
+  onHeadingSave,
+  onMoveByButton,
+  onDelete,
+}: {
+  section: ArticleSection
+  index: number
+  totalSlides: number
+  globalStartIndex: number
+  disabled: boolean
+  translation?: ArticleTranslation
+  sourceLanguage: string
+  outputLanguage: ArticleOutputLanguage
+  onHeadingSave: (sectionId: string, heading: string) => Promise<void>
+  onMoveByButton: (offset: -1 | 1) => void
+  onDelete: () => void
+}) {
+  const headerRef = useRef<HTMLElement | null>(null)
+  const translatedHeading = translation?.sections?.find((candidate) => candidate.id === section.id)
+  const visibility = resolveArticleLanguageVisibility({
+    outputLanguage,
+    sourceLanguage,
+    targetLanguage: translation?.targetLanguage,
+    hasTranslation: Boolean(translatedHeading),
+  })
+  return (
+    <header
+      ref={headerRef}
+      className={`flex min-h-[44px] min-w-0 items-center gap-3 rounded-none border-l-[10px] border-l-[#8bb6a2] bg-[#e8f2ec] px-2 py-0 transition-colors hover:bg-[#e2eee8] ${!disabled ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''}`}
+    >
+      <SectionDragBehavior sectionId={section.id} disabled={disabled} elementRef={headerRef} />
+      <div className="min-w-0 flex-1">
+        {visibility.showSource && (
+          <>
+            {visibility.showSourceLanguageLabel && (
+              <p className="mb-0.5 px-1.5 text-[10px] font-semibold text-[#71807b]">
+                {articleLanguageLabel(sourceLanguage)}
+              </p>
+            )}
+            <SectionHeadingEditor
+              section={section}
+              index={index}
+              disabled={disabled}
+              onSave={onHeadingSave}
+            />
+          </>
+        )}
+        {visibility.showTranslation && translation && translatedHeading && (
+          <div className={visibility.showSource ? 'mt-1.5' : ''}>
+            {visibility.showTargetLanguageLabel && (
+              <p className="mb-0.5 px-1.5 text-[10px] font-semibold text-[#71807b]">
+                {articleLanguageLabel(translation.targetLanguage)}
+              </p>
+            )}
+            <p className="px-2 py-1.5 text-[16px] font-semibold leading-6 text-[#33413c]">
+              {translatedHeading.heading}
+            </p>
+          </div>
+        )}
+      </div>
+      <button
+        className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#d8e1dc] bg-[#fbfcfa] p-0 text-[#9aada3] transition hover:border-[#b7cbc0] hover:bg-[#e8f2ec] hover:text-[#1d6b50] disabled:opacity-30 disabled:hover:border-[#d8e1dc] disabled:hover:bg-[#fbfcfa] disabled:hover:text-[#9aada3] sm:inline-flex"
+        type="button"
+        onClick={() => onMoveByButton(-1)}
+        disabled={globalStartIndex <= 0 || disabled}
+        aria-label={`${section.heading}の境界を上へ移動`}
+        title="境界を上へ移動"
+      >
+        <ArrowUp size={11} strokeWidth={2} />
+      </button>
+      <button
+        className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#d8e1dc] bg-[#fbfcfa] p-0 text-[#9aada3] transition hover:border-[#b7cbc0] hover:bg-[#e8f2ec] hover:text-[#1d6b50] disabled:opacity-30 disabled:hover:border-[#d8e1dc] disabled:hover:bg-[#fbfcfa] disabled:hover:text-[#9aada3] sm:inline-flex"
+        type="button"
+        onClick={() => onMoveByButton(1)}
+        disabled={globalStartIndex >= totalSlides - 1 || disabled}
+        aria-label={`${section.heading}の境界を下へ移動`}
+        title="境界を下へ移動"
+      >
+        <ArrowDown size={11} strokeWidth={2} />
+      </button>
+      <button
+        className="shrink-0 rounded-[7px] p-2 text-[#9aada3] transition hover:bg-[#f8ebe7] hover:text-[#b6533a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30"
+        type="button"
+        onClick={onDelete}
+        disabled={disabled}
+        aria-label={`${section.heading}を削除（スライドは残ります）`}
+        title="セクションを削除（スライドは残ります）"
+      >
+        <Trash2 size={15} strokeWidth={1.8} />
+      </button>
+    </header>
+  )
+}
+
+type ReviewGroupSlidesProps = {
+  group: ArticleReviewSectionGroup
+  globalStartIndex: number
+  isDragging: boolean
+  disabled: boolean
+  savedBodies: Record<string, string>
+  editingSlideId: string | null
+  bodyDraft: string
+  translation?: ArticleTranslation
+  sourceLanguage: string
+  outputLanguage: ArticleOutputLanguage
+  isSavingBody: boolean
+  isBodyDirty: boolean
+  bodySaveError: string | null
+  videoSrc: string | null
+  activeVideoSlideId: string | null
+  canEditSlide: boolean
+  onAddAtGap: (gapIndex: number) => void
+  onStartSlideEditing: (slideId: string) => void
+  onCancelSlideEditing: () => void
+  onSaveSlide: () => void
+  onBodyChange: (body: string) => void
+  onVideoToggle: (slideId: string, open: boolean) => void
+}
+
+function ReviewGroupSlides(props: ReviewGroupSlidesProps) {
+  return props.group.slides.map((slide, slideIndex) => {
+    const isEditing = props.editingSlideId === slide.id
+    const globalGapIndex = props.globalStartIndex + slideIndex
+    return (
+      <Fragment key={slide.id}>
+        {slideIndex > 0 && (
+          <>
+            <SectionMoveGap gapIndex={globalGapIndex} dragging={props.isDragging} />
+            {!props.isDragging && !props.disabled && (
+              <SectionInsertGap onAdd={() => props.onAddAtGap(globalGapIndex)} />
+            )}
+          </>
+        )}
+        <ArticleSectionEditor
+          slide={slide}
+          videoSrc={props.videoSrc}
+          videoOpen={props.activeVideoSlideId === slide.id}
+          body={isEditing ? props.bodyDraft : (props.savedBodies[slide.id] ?? '')}
+          sourceLanguage={props.sourceLanguage}
+          outputLanguage={props.outputLanguage}
+          translationBody={props.translation?.bodies[slide.id]}
+          translationLanguage={props.translation?.targetLanguage}
+          editing={isEditing}
+          editDisabled={!isEditing && (!props.canEditSlide || props.disabled)}
+          saving={props.isSavingBody && isEditing}
+          canSave={props.isBodyDirty}
+          error={isEditing ? props.bodySaveError : null}
+          onEdit={() => props.onStartSlideEditing(slide.id)}
+          onCancel={props.onCancelSlideEditing}
+          onSave={props.onSaveSlide}
+          onBodyChange={props.onBodyChange}
+          onVideoToggle={(open) => props.onVideoToggle(slide.id, open)}
+        />
+      </Fragment>
+    )
+  })
+}
+
 function SectionReviewGroup({
   section,
   group,
@@ -334,10 +513,14 @@ function SectionReviewGroup({
   savedBodies,
   editingSlideId,
   bodyDraft,
+  translation,
+  sourceLanguage,
+  outputLanguage,
   isSavingBody,
   isBodyDirty,
   bodySaveError,
-  sourcePath,
+  videoSrc,
+  activeVideoSlideId,
   canEditSlide,
   onHeadingSave,
   onMoveByButton,
@@ -347,6 +530,7 @@ function SectionReviewGroup({
   onCancelSlideEditing,
   onSaveSlide,
   onBodyChange,
+  onVideoToggle,
 }: {
   section?: ArticleSection
   group: ArticleReviewSectionGroup
@@ -358,10 +542,14 @@ function SectionReviewGroup({
   savedBodies: Record<string, string>
   editingSlideId: string | null
   bodyDraft: string
+  translation?: ArticleTranslation
+  sourceLanguage: string
+  outputLanguage: ArticleOutputLanguage
   isSavingBody: boolean
   isBodyDirty: boolean
   bodySaveError: string | null
-  sourcePath: string
+  videoSrc: string | null
+  activeVideoSlideId: string | null
   canEditSlide: boolean
   onHeadingSave: (sectionId: string, heading: string) => Promise<void>
   onMoveByButton: (offset: -1 | 1) => void
@@ -371,9 +559,9 @@ function SectionReviewGroup({
   onCancelSlideEditing: () => void
   onSaveSlide: () => void
   onBodyChange: (body: string) => void
+  onVideoToggle: (slideId: string, open: boolean) => void
 }) {
   const isDragging = draggingSectionId !== null
-  const headerRef = useRef<HTMLElement | null>(null)
   return (
     <div className="relative">
       {section && (
@@ -388,95 +576,134 @@ function SectionReviewGroup({
         <SectionMoveGap gapIndex={globalStartIndex} dragging={isDragging} />
       )}
       {section && (
-        <header
-          ref={headerRef}
-          className={`flex min-h-[44px] min-w-0 items-center gap-3 rounded-none border-l-[10px] border-l-[#8bb6a2] bg-[#e8f2ec] px-2 py-0 transition-colors hover:bg-[#e2eee8] ${!sectionControlsDisabled ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''}`}
-        >
-          <SectionDragBehavior
-            sectionId={section.id}
-            disabled={sectionControlsDisabled}
-            elementRef={headerRef}
-          />
-
-          <div className="min-w-0 flex-1">
-            <SectionHeadingEditor
-              section={section}
-              index={index}
-              disabled={sectionControlsDisabled}
-              onSave={onHeadingSave}
-            />
-          </div>
-
-          <>
-            <button
-              className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#d8e1dc] bg-[#fbfcfa] p-0 text-[#9aada3] transition hover:border-[#b7cbc0] hover:bg-[#e8f2ec] hover:text-[#1d6b50] disabled:opacity-30 disabled:hover:border-[#d8e1dc] disabled:hover:bg-[#fbfcfa] disabled:hover:text-[#9aada3] sm:inline-flex"
-              type="button"
-              onClick={() => onMoveByButton(-1)}
-              disabled={globalStartIndex <= 0 || sectionControlsDisabled}
-              aria-label={`${section.heading}の境界を上へ移動`}
-              title="境界を上へ移動"
-            >
-              <ArrowUp size={11} strokeWidth={2} />
-            </button>
-            <button
-              className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[6px] border border-[#d8e1dc] bg-[#fbfcfa] p-0 text-[#9aada3] transition hover:border-[#b7cbc0] hover:bg-[#e8f2ec] hover:text-[#1d6b50] disabled:opacity-30 disabled:hover:border-[#d8e1dc] disabled:hover:bg-[#fbfcfa] disabled:hover:text-[#9aada3] sm:inline-flex"
-              type="button"
-              onClick={() => onMoveByButton(1)}
-              disabled={globalStartIndex >= totalSlides - 1 || sectionControlsDisabled}
-              aria-label={`${section.heading}の境界を下へ移動`}
-              title="境界を下へ移動"
-            >
-              <ArrowDown size={11} strokeWidth={2} />
-            </button>
-            <button
-              className="shrink-0 rounded-[7px] p-2 text-[#9aada3] transition hover:bg-[#f8ebe7] hover:text-[#b6533a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30"
-              type="button"
-              onClick={onDelete}
-              disabled={sectionControlsDisabled}
-              aria-label={`${section.heading}を削除（スライドは残ります）`}
-              title="セクションを削除（スライドは残ります）"
-            >
-              <Trash2 size={15} strokeWidth={1.8} />
-            </button>
-          </>
-        </header>
+        <SectionReviewHeader
+          section={section}
+          index={index}
+          totalSlides={totalSlides}
+          globalStartIndex={globalStartIndex}
+          disabled={sectionControlsDisabled}
+          translation={translation}
+          sourceLanguage={sourceLanguage}
+          outputLanguage={outputLanguage}
+          onHeadingSave={onHeadingSave}
+          onMoveByButton={onMoveByButton}
+          onDelete={onDelete}
+        />
       )}
 
       <div className={section ? 'mt-4' : 'mt-0'}>
         {!section && globalStartIndex === 0 && !isDragging && !sectionControlsDisabled && (
           <SectionInsertGap onAdd={() => onAddAtGap(0)} />
         )}
-        {group.slides.map((slide, slideIndex) => {
-          const isEditing = editingSlideId === slide.id
-          const globalGapIndex = globalStartIndex + slideIndex
+        <ReviewGroupSlides
+          group={group}
+          globalStartIndex={globalStartIndex}
+          isDragging={isDragging}
+          disabled={sectionControlsDisabled}
+          savedBodies={savedBodies}
+          editingSlideId={editingSlideId}
+          bodyDraft={bodyDraft}
+          translation={translation}
+          sourceLanguage={sourceLanguage}
+          outputLanguage={outputLanguage}
+          isSavingBody={isSavingBody}
+          isBodyDirty={isBodyDirty}
+          bodySaveError={bodySaveError}
+          videoSrc={videoSrc}
+          activeVideoSlideId={activeVideoSlideId}
+          canEditSlide={canEditSlide}
+          onAddAtGap={onAddAtGap}
+          onStartSlideEditing={onStartSlideEditing}
+          onCancelSlideEditing={onCancelSlideEditing}
+          onSaveSlide={onSaveSlide}
+          onBodyChange={onBodyChange}
+          onVideoToggle={onVideoToggle}
+        />
+      </div>
+    </div>
+  )
+}
+
+function OutputLanguageSelector({
+  project,
+  translation,
+  sourceLanguage,
+  outputLanguage,
+  disabled,
+  canEditSlide,
+  saving,
+  error,
+  onChange,
+}: {
+  project: MediaProject
+  translation?: ArticleTranslation
+  sourceLanguage: string
+  outputLanguage: ArticleOutputLanguage
+  disabled: boolean
+  canEditSlide: boolean
+  saving: boolean
+  error: string | null
+  onChange: (language: ArticleOutputLanguage) => void
+}) {
+  return (
+    <fieldset className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#f7faf7] p-4 md:p-5">
+      <legend className="px-1 text-xs font-semibold text-[#18211f]">記事の出力言語</legend>
+      <div className="flex flex-wrap gap-3">
+        {ARTICLE_OUTPUT_LANGUAGE_OPTIONS.map((option) => {
+          const language = option.value
+          const available = isArticleOutputLanguageAvailable(project, language, translation)
           return (
-            <Fragment key={slide.id}>
-              {slideIndex > 0 && (
-                <>
-                  <SectionMoveGap gapIndex={globalGapIndex} dragging={isDragging} />
-                  {!isDragging && !sectionControlsDisabled && (
-                    <SectionInsertGap onAdd={() => onAddAtGap(globalGapIndex)} />
-                  )}
-                </>
-              )}
-              <ArticleSectionEditor
-                slide={slide}
-                videoPath={sourcePath}
-                body={isEditing ? bodyDraft : (savedBodies[slide.id] ?? '')}
-                editing={isEditing}
-                editDisabled={!isEditing && !canEditSlide}
-                saving={isSavingBody && isEditing}
-                canSave={isBodyDirty}
-                error={isEditing ? bodySaveError : null}
-                onEdit={() => onStartSlideEditing(slide.id)}
-                onCancel={onCancelSlideEditing}
-                onSave={onSaveSlide}
-                onBodyChange={onBodyChange}
+            <label
+              key={language}
+              className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-semibold ${available ? 'border-[#b7cbc0] bg-white text-[#33413c]' : 'border-[#e0e8e3] bg-[#f0f3f1] text-[#9aa6a1]'}`}
+            >
+              <input
+                className="accent-[#1d6b50]"
+                type="radio"
+                name="article-output-language"
+                value={language}
+                checked={outputLanguage === language}
+                onChange={() => onChange(language)}
+                disabled={
+                  disabled || !canEditSlide || saving || (!available && language !== outputLanguage)
+                }
               />
-            </Fragment>
+              {option.label}
+            </label>
           )
         })}
       </div>
+      {!translation && (
+        <p className="mt-2 text-[10px] leading-5 text-[#71807b]">
+          {sourceLanguage === 'en' ? '日本語のみ' : '英語のみ'}または「両方」を選ぶには、Step
+          1で翻訳を生成してください。
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-[#b6533a]">{error}</p>}
+    </fieldset>
+  )
+}
+
+function TranslatedArticleTitle({
+  translation,
+  outputLanguage,
+}: {
+  translation?: ArticleTranslation
+  outputLanguage: ArticleOutputLanguage
+}) {
+  if (!translation || (outputLanguage !== 'both' && outputLanguage !== translation.targetLanguage))
+    return null
+  return (
+    <div className="mt-4 rounded-[12px] border border-[#d8e1dc] bg-[#fbfcfa] px-4 py-3">
+      <p className="text-[10px] font-semibold text-[#71807b]">記事タイトルの訳文</p>
+      {outputLanguage === 'both' && (
+        <p className="mt-1 text-[10px] font-semibold text-[#71807b]">
+          {articleLanguageLabel(translation.targetLanguage)}
+        </p>
+      )}
+      <p className="mt-1 px-2 py-1.5 text-[16px] font-semibold leading-6 text-[#33413c]">
+        {translation.title}
+      </p>
     </div>
   )
 }
@@ -489,6 +716,8 @@ export function ArticleStructureEditor({
   editingSlideId,
   savedBodies,
   bodyDraft,
+  translation,
+  outputLanguage,
   isSavingBody,
   isBodyDirty,
   bodySaveError,
@@ -498,11 +727,14 @@ export function ArticleStructureEditor({
   onBodyChange,
   onSaveSections,
   summary,
+  onSaveOutputLanguage,
   summaryIsUpToDate,
   summaryDisabled = false,
   onSaveSummary,
   disabled = false,
 }: ArticleStructureEditorProps) {
+  const videoSource = useVideoSourceUrl(sourcePath)
+  const [activeVideoSlideId, setActiveVideoSlideId] = useState<string | null>(null)
   const [draftState, setDraftState] = useState<{
     version: string
     value: ArticleSections
@@ -510,6 +742,9 @@ export function ArticleStructureEditor({
   const [isSavingSections, setIsSavingSections] = useState(false)
   const [sectionError, setSectionError] = useState<string | null>(null)
   const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null)
+  const [isSavingOutputLanguage, setIsSavingOutputLanguage] = useState(false)
+  const [outputLanguageError, setOutputLanguageError] = useState<string | null>(null)
+  const sourceLanguage = getArticleSourceLanguage(project, translation)
 
   const sectionVersion = `${sections.model}:${sections.inputFingerprint}:${sections.generatedAt ?? ''}`
   const draft = draftState?.version === sectionVersion ? draftState.value : null
@@ -622,24 +857,55 @@ export function ArticleStructureEditor({
       moveSectionHeadingToGap(currentSections, project, sourceSectionId, targetGapIndex),
     ).catch(() => undefined)
   }
-
+  const handleOutputLanguageChange = async (language: ArticleOutputLanguage) => {
+    if (isSavingOutputLanguage || language === outputLanguage) return
+    setIsSavingOutputLanguage(true)
+    setOutputLanguageError(null)
+    try {
+      await onSaveOutputLanguage(language)
+    } catch (error) {
+      console.error(error)
+      setOutputLanguageError(
+        error instanceof Error ? error.message : '表示言語の設定を保存できませんでした。',
+      )
+    } finally {
+      setIsSavingOutputLanguage(false)
+    }
+  }
+  const handleVideoToggle = (slideId: string, open: boolean) => {
+    setActiveVideoSlideId((current) => (open ? slideId : current === slideId ? null : current))
+  }
   return (
     <DragDropProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 id="article-review-heading" className="text-[21px] font-bold tracking-[-0.05em]">
-              2. 生成された記事の確認・編集
+              2. 表示言語の設定・生成記事の確認と編集
             </h2>
             <p className="mt-1 text-xs text-[#71807b]">
-              本文を確認しながら、セクション見出しと区切りを編集できます。Slideの順番は固定です。
+              出力言語を選び、要約・見出し・各Slideの原文を編集できます。訳文は再翻訳で更新されます。
             </p>
           </div>
         </div>
+        <OutputLanguageSelector
+          project={project}
+          translation={translation}
+          sourceLanguage={sourceLanguage}
+          outputLanguage={outputLanguage}
+          disabled={disabled}
+          canEditSlide={canEditSlide}
+          saving={isSavingOutputLanguage}
+          error={outputLanguageError}
+          onChange={(language) => void handleOutputLanguageChange(language)}
+        />
+        <TranslatedArticleTitle translation={translation} outputLanguage={outputLanguage} />
         {sectionError && <p className="mt-3 text-xs text-[#b6533a]">{sectionError}</p>}
 
         <ArticleSummaryResult
           summary={summary}
+          translation={translation}
+          outputLanguage={outputLanguage}
           isUpToDate={summaryIsUpToDate}
           disabled={summaryDisabled}
           onSave={onSaveSummary}
@@ -660,10 +926,14 @@ export function ArticleStructureEditor({
                 savedBodies={savedBodies}
                 editingSlideId={editingSlideId}
                 bodyDraft={bodyDraft}
+                translation={translation}
+                sourceLanguage={sourceLanguage}
+                outputLanguage={outputLanguage}
                 isSavingBody={isSavingBody}
                 isBodyDirty={isBodyDirty}
                 bodySaveError={bodySaveError}
-                sourcePath={sourcePath}
+                videoSrc={videoSource.src}
+                activeVideoSlideId={activeVideoSlideId}
                 canEditSlide={canEditSlide}
                 onHeadingSave={saveHeading}
                 onMoveByButton={(offset) => {
@@ -677,6 +947,7 @@ export function ArticleStructureEditor({
                 onCancelSlideEditing={onCancelSlideEditing}
                 onSaveSlide={onSaveSlide}
                 onBodyChange={onBodyChange}
+                onVideoToggle={handleVideoToggle}
               />
             ))
           ) : (

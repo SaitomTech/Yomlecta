@@ -1,18 +1,39 @@
 import {
+  extractFullFrame,
   extractRepresentativeFrame,
-  sampleVideoFrames,
+  sampleCropFrames,
   type FrameHash,
 } from '../../lib/media/ffmpeg'
 import { hammingDistance } from '../../lib/media/dhash'
-import { getSlideAssetPath } from '../../lib/storage/projectAssets'
+import { join } from '@tauri-apps/api/path'
 import {
+  getSlideRunAssetPath,
+  prepareVisualClassificationDirectory,
+  pruneSlideAssetRuns,
+  removeSlideRunAssets,
+  removeVisualClassificationDirectory,
+} from '../../lib/storage/projectAssets'
+import { detectPeopleInImages, type PeopleDetection } from '../../lib/vision/personDetection'
+import { detectTextInImages, type TextDetection } from '../../lib/vision/textDetection'
+import {
+  effectiveVisualKind,
   requireActiveArticleId,
   type MediaProject,
   type SlideBoundary,
   type SlideData,
+  type VisualClassificationMetadata,
 } from '../../types/project'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
-import type { SlideDetectionOutput, SlideDetectionStage } from './types'
+import type {
+  PendingSlideDetectionOutput,
+  SlideDetectionOutput,
+  SlideDetectionStage,
+} from './types'
+import {
+  classifyVisualSegment,
+  VISUAL_CLASSIFIER_VERSION,
+  visualSampleTimestamps,
+} from './classification'
 
 export const MINIMUM_BOUNDARY_GAP_MS = 1500
 
@@ -31,7 +52,7 @@ type DetectBoundariesInput = {
   minimumGapMs?: number
 }
 
-export function detectSlideBoundaries({
+function detectSlideBoundaries({
   frames,
   threshold,
   minimumGapMs = MINIMUM_BOUNDARY_GAP_MS,
@@ -62,27 +83,152 @@ export function detectSlideBoundaries({
   return boundaries
 }
 
+export function detectVisualBoundaries({
+  frames,
+  threshold,
+}: {
+  frames: FrameHash[]
+  threshold: number
+}) {
+  return detectSlideBoundaries({
+    frames,
+    threshold,
+  })
+}
+
 export function buildSlideData(
   boundaries: SlideBoundary[],
   durationMs: number,
-  existingSlides: SlideData[] = [],
+  slideIdPrefix: string,
 ): SlideData[] {
   const starts = [0, ...boundaries.map((boundary) => boundary.timestampMs)]
   return starts.map((startMs, index) => {
     const endMs = index < starts.length - 1 ? starts[index + 1] : durationMs
     const boundary = index > 0 ? boundaries[index - 1] : undefined
     return {
-      id: `slide-${index + 1}`,
+      id: `${slideIdPrefix}-${index + 1}`,
       index,
       startMs,
       endMs: Math.max(startMs, endMs),
+      autoKind: 'unknown',
+      personLayout: 'none',
       detection: {
         source: boundary?.source ?? 'auto',
         distance: boundary?.distance,
       },
-      image: existingSlides[index]?.image ?? {},
+      image: {},
     }
   })
+}
+
+function boundariesForSegments(segments: SlideData[]): SlideBoundary[] {
+  return segments.slice(1).map((segment) => ({
+    id: `boundary-${segment.startMs}`,
+    timestampMs: segment.startMs,
+    distance: segment.detection.distance ?? 0,
+    source: segment.detection.source,
+  }))
+}
+
+function weightedAverage(first: number, firstWeight: number, second: number, secondWeight: number) {
+  const total = firstWeight + secondWeight
+  return total === 0 ? 0 : (first * firstWeight + second * secondWeight) / total
+}
+
+function mergeClassificationMetadata(
+  first: VisualClassificationMetadata,
+  second: VisualClassificationMetadata,
+): VisualClassificationMetadata {
+  const firstSamples = first.evidence.samplesAnalyzed
+  const secondSamples = second.evidence.samplesAnalyzed
+  const average = (firstValue: number, secondValue: number) =>
+    weightedAverage(firstValue, firstSamples, secondValue, secondSamples)
+  return {
+    confidence: Math.min(first.confidence, second.confidence),
+    classifierVersion: VISUAL_CLASSIFIER_VERSION,
+    visionEngineVersion: first.visionEngineVersion ?? second.visionEngineVersion,
+    evidence: {
+      samplesAnalyzed: firstSamples + secondSamples,
+      cropLongestStableRunRatio: average(
+        first.evidence.cropLongestStableRunRatio ?? first.evidence.cropStableRatio ?? 0,
+        second.evidence.cropLongestStableRunRatio ?? second.evidence.cropStableRatio ?? 0,
+      ),
+      cropLongestStableRunMs: Math.max(
+        first.evidence.cropLongestStableRunMs ?? 0,
+        second.evidence.cropLongestStableRunMs ?? 0,
+      ),
+      cropMotionMedian: average(first.evidence.cropMotionMedian, second.evidence.cropMotionMedian),
+      textRegionCount:
+        (first.evidence.textRegionCount ?? 0) + (second.evidence.textRegionCount ?? 0),
+      textRegionAreaRatio: average(
+        first.evidence.textRegionAreaRatio ?? 0,
+        second.evidence.textRegionAreaRatio ?? 0,
+      ),
+      facePresenceRatio: average(
+        first.evidence.facePresenceRatio,
+        second.evidence.facePresenceRatio,
+      ),
+      humanPresenceRatio: average(
+        first.evidence.humanPresenceRatio,
+        second.evidence.humanPresenceRatio,
+      ),
+      largestFaceAreaRatio: Math.max(
+        first.evidence.largestFaceAreaRatio,
+        second.evidence.largestFaceAreaRatio,
+      ),
+      largestHumanAreaRatio: Math.max(
+        first.evidence.largestHumanAreaRatio,
+        second.evidence.largestHumanAreaRatio,
+      ),
+      personOutsideCropRatio: Math.max(
+        first.evidence.personOutsideCropRatio,
+        second.evidence.personOutsideCropRatio,
+      ),
+      personCenterMotionMedian: average(
+        first.evidence.personCenterMotionMedian,
+        second.evidence.personCenterMotionMedian,
+      ),
+      personAreaChangeMedian: average(
+        first.evidence.personAreaChangeMedian,
+        second.evidence.personAreaChangeMedian,
+      ),
+      personBoxIouMedian: average(
+        first.evidence.personBoxIouMedian,
+        second.evidence.personBoxIouMedian,
+      ),
+      faceLandmarkMotionMax: Math.max(
+        first.evidence.faceLandmarkMotionMax ?? 0,
+        second.evidence.faceLandmarkMotionMax ?? 0,
+      ),
+    },
+  }
+}
+
+export function mergeAdjacentNonSlideSegments(segments: SlideData[]) {
+  const merged: SlideData[] = []
+  for (const source of segments) {
+    const segment = { ...source }
+    const previous = merged.at(-1)
+    const canMerge =
+      previous !== undefined &&
+      previous.endMs === segment.startMs &&
+      previous.autoKind === 'non-slide' &&
+      segment.autoKind === 'non-slide'
+
+    if (canMerge && previous.classification !== undefined && segment.classification !== undefined) {
+      merged[merged.length - 1] = {
+        ...previous,
+        endMs: segment.endMs,
+        classification: mergeClassificationMetadata(
+          previous.classification,
+          segment.classification,
+        ),
+      }
+      continue
+    }
+    merged.push(segment)
+  }
+  return merged.map((segment, index) => ({ ...segment, index }))
 }
 
 function representativeTimestamp(startMs: number, endMs: number) {
@@ -91,62 +237,277 @@ function representativeTimestamp(startMs: number, endMs: number) {
   return startMs + Math.min(Math.round(segmentDurationMs / 2), segmentDurationMs - 200)
 }
 
+export async function extractRepresentativeFrameForSlide(
+  project: MediaProject,
+  slide: SlideData,
+  outputPath: string,
+  signal?: AbortSignal,
+) {
+  const context = getActiveArticleSourceContext(project)
+  if (effectiveVisualKind(slide) === 'non-slide') {
+    return extractFullFrame({
+      path: context.source.path,
+      timestampMs: context.range.startMs + representativeTimestamp(slide.startMs, slide.endMs),
+      outputPath,
+      signal,
+    })
+  }
+  return extractRepresentativeFrame({
+    path: context.source.path,
+    crop: context.crop,
+    perspectiveCrop: context.perspectiveCrop,
+    metadata: context.source.metadata,
+    timestampMs: context.range.startMs + representativeTimestamp(slide.startMs, slide.endMs),
+    outputPath,
+    signal,
+  })
+}
+
+async function classifySegments(
+  project: MediaProject,
+  segments: SlideData[],
+  sampledFrames: FrameHash[],
+  threshold: number,
+) {
+  const articleId = requireActiveArticleId(project)
+  const context = getActiveArticleSourceContext(project)
+  const runId = crypto.randomUUID()
+  const directory = await prepareVisualClassificationDirectory(project.id, articleId, runId)
+  const pathsBySegment = new Map<string, string[]>()
+  const cropPathBySegment = new Map<string, string>()
+  try {
+    for (const segment of segments) {
+      const paths: string[] = []
+      const timestamps = visualSampleTimestamps(segment.startMs, segment.endMs)
+      for (let index = 0; index < timestamps.length; index += 1) {
+        const outputPath = await join(directory, `${segment.index}-${index}.jpg`)
+        try {
+          await extractFullFrame({
+            path: context.source.path,
+            timestampMs: context.range.startMs + timestamps[index],
+            outputPath,
+          })
+          paths.push(outputPath)
+        } catch (error) {
+          console.warn(`区間${segment.index + 1}の人物検出画像を抽出できませんでした`, error)
+        }
+      }
+      pathsBySegment.set(segment.id, paths)
+      const cropOutputPath = await join(directory, `${segment.index}-crop.jpg`)
+      try {
+        await extractRepresentativeFrame({
+          path: context.source.path,
+          crop: context.crop,
+          perspectiveCrop: context.perspectiveCrop,
+          metadata: context.source.metadata,
+          timestampMs:
+            context.range.startMs + representativeTimestamp(segment.startMs, segment.endMs),
+          outputPath: cropOutputPath,
+        })
+        cropPathBySegment.set(segment.id, cropOutputPath)
+      } catch (error) {
+        console.warn(`区間${segment.index + 1}の文字領域検出画像を抽出できませんでした`, error)
+      }
+    }
+
+    const allPaths = [...pathsBySegment.values()].flat()
+    let detections: PeopleDetection[] = []
+    let failedImagePaths = new Set<string>()
+    try {
+      const result = await detectPeopleInImages({ imagePaths: allPaths })
+      detections = result.detections
+      failedImagePaths = new Set(result.failedImagePaths)
+    } catch (error) {
+      failedImagePaths = new Set(allPaths)
+      console.warn('人物検出を実行できなかったため区間を不明として継続します', error)
+    }
+    const byPath = new Map(detections.map((detection) => [detection.imagePath, detection]))
+    let textDetections: TextDetection[] = []
+    try {
+      textDetections = await detectTextInImages({ imagePaths: [...cropPathBySegment.values()] })
+    } catch (error) {
+      console.warn('文字領域検出を実行できなかったため文字の証拠なしで継続します', error)
+    }
+    const textByPath = new Map(textDetections.map((detection) => [detection.imagePath, detection]))
+    const settleThreshold = Math.max(2, Math.floor(threshold / 2))
+    const classifiedSegments = segments.map((segment) => {
+      const midpoint = (segment.startMs + segment.endMs) / 2
+      const representative = sampledFrames
+        .filter(
+          (frame) => frame.timestampMs >= segment.startMs && frame.timestampMs < segment.endMs,
+        )
+        .toSorted(
+          (first, second) =>
+            Math.abs(first.timestampMs - midpoint) - Math.abs(second.timestampMs - midpoint),
+        )[0]
+      const segmentPaths = pathsBySegment.get(segment.id) ?? []
+      const segmentDetections = segmentPaths.flatMap((path) => {
+        const detection = byPath.get(path)
+        return detection ? [detection] : []
+      })
+      if (
+        segmentPaths.length === 0 ||
+        segmentPaths.some((path) => failedImagePaths.has(path)) ||
+        segmentDetections.length !== segmentPaths.length
+      ) {
+        return {
+          ...segment,
+          autoKind: 'unknown' as const,
+          personLayout: 'none' as const,
+          detection: {
+            ...segment.detection,
+            ...(representative ? { hash: representative.hash } : {}),
+          },
+        }
+      }
+      const classified = classifyVisualSegment({
+        segment,
+        sampledFrames,
+        people: segmentDetections,
+        text: textByPath.get(cropPathBySegment.get(segment.id) ?? ''),
+        crop: context.crop,
+        metadata: context.source.metadata,
+        settleThreshold,
+      })
+      return {
+        ...segment,
+        ...classified,
+        detection: {
+          ...segment.detection,
+          ...(representative ? { hash: representative.hash } : {}),
+        },
+      }
+    })
+    return mergeAdjacentNonSlideSegments(classifiedSegments)
+  } finally {
+    await removeVisualClassificationDirectory(project.id, articleId, runId)
+  }
+}
+
 async function addRepresentativeFrames(
   project: MediaProject,
   slides: SlideData[],
   onProgress?: (progress: number) => void,
+  failOnError = false,
 ) {
-  const context = getActiveArticleSourceContext(project)
   const articleId = requireActiveArticleId(project)
+  const assetRunId = crypto.randomUUID()
   const completed: SlideData[] = []
-  // Keep ffmpeg sidecars sequential so long videos do not spawn dozens of encoders at once.
-  for (let index = 0; index < slides.length; index += 1) {
-    const slide = slides[index]
-    try {
-      const outputPath = await getSlideAssetPath(project.id, articleId, index)
-      await extractRepresentativeFrame({
-        path: context.source.path,
-        crop: context.crop,
-        perspectiveCrop: context.perspectiveCrop,
-        metadata: context.source.metadata,
-        timestampMs: context.range.startMs + representativeTimestamp(slide.startMs, slide.endMs),
-        outputPath,
-      })
-      completed.push({ ...slide, image: { representativeFramePath: outputPath } })
-    } catch (error) {
-      console.error(`Slide ${index + 1}の代表フレームを作成できませんでした`, error)
-      completed.push(slide)
-    } finally {
-      onProgress?.((index + 1) / Math.max(slides.length, 1))
+  try {
+    // Keep ffmpeg sidecars sequential so long videos do not spawn dozens of encoders at once.
+    for (let index = 0; index < slides.length; index += 1) {
+      const slide = slides[index]
+      try {
+        const outputPath = await getSlideRunAssetPath(project.id, articleId, assetRunId, index)
+        await extractRepresentativeFrameForSlide(project, slide, outputPath)
+        completed.push({ ...slide, image: { representativeFramePath: outputPath } })
+      } catch (error) {
+        console.error(`Slide ${index + 1}の代表フレームを作成できませんでした`, error)
+        if (failOnError) {
+          const detail = error instanceof Error ? error.message : String(error)
+          throw new Error(`Slide ${index + 1}の代表画像を作成できませんでした: ${detail}`)
+        }
+        completed.push(slide)
+      } finally {
+        onProgress?.((index + 1) / Math.max(slides.length, 1))
+      }
     }
+  } catch (error) {
+    await removeSlideRunAssets(project.id, articleId, assetRunId).catch((cleanupError) => {
+      console.warn('失敗した代表画像候補を削除できませんでした。', cleanupError)
+    })
+    throw error
   }
 
-  return completed
+  return { slides: completed, assetRunId }
+}
+
+export async function commitSlideDetectionOutput(
+  project: MediaProject,
+  pending: PendingSlideDetectionOutput,
+  persist: (output: SlideDetectionOutput) => void | Promise<void>,
+) {
+  const articleId = requireActiveArticleId(project)
+  try {
+    const output = { result: pending.result, slides: pending.slides }
+    await persist(output)
+    await pruneSlideAssetRuns(project.id, articleId, pending.assetRunId).catch((cleanupError) => {
+      console.warn('以前の代表画像を削除できませんでした。', cleanupError)
+    })
+    return output
+  } catch (error) {
+    try {
+      await removeSlideRunAssets(project.id, articleId, pending.assetRunId)
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'スライド区間の保存失敗後に代表画像を片付けられませんでした。',
+      )
+    }
+    throw error
+  }
+}
+
+type CreateManualSlideDetectionOutputInput = {
+  project: MediaProject
+  boundaries: SlideBoundary[]
+  threshold: number
+  sampleIntervalMs: number
+  segments?: SlideData[]
+}
+
+export async function createManualSlideDetectionOutput({
+  project,
+  boundaries,
+  threshold,
+  sampleIntervalMs,
+  segments,
+}: CreateManualSlideDetectionOutputInput): Promise<PendingSlideDetectionOutput> {
+  const context = getActiveArticleSourceContext(project)
+  const durationMs = context.range.endMs - context.range.startMs
+  const sortedBoundaries = boundaries.toSorted(
+    (first, second) => first.timestampMs - second.timestampMs,
+  )
+  const pending = await addRepresentativeFrames(
+    project,
+    (
+      segments ??
+      buildSlideData(sortedBoundaries, durationMs, `segment-${requireActiveArticleId(project)}`)
+    ).map((segment) => ({ ...segment, image: {} })),
+    undefined,
+    true,
+  )
+
+  return {
+    result: {
+      sampleIntervalMs,
+      threshold,
+      framesAnalyzed: project.slideDetection?.framesAnalyzed ?? 0,
+      boundaries: sortedBoundaries,
+      detectedAt: project.slideDetection?.detectedAt ?? new Date().toISOString(),
+      visualClassifier: project.slideDetection?.visualClassifier,
+    },
+    slides: pending.slides,
+    assetRunId: pending.assetRunId,
+  }
 }
 
 type RunSlideDetectionInput = {
   project: MediaProject
-  threshold?: number
-  sampleIntervalMs?: number
   onProgress?: (progress: number) => void
   onStage?: (stage: SlideDetectionStage) => void
 }
 
 export async function runSlideDetection({
   project,
-  threshold: thresholdOverride,
-  sampleIntervalMs: sampleIntervalOverride,
   onProgress,
   onStage,
-}: RunSlideDetectionInput): Promise<SlideDetectionOutput> {
+}: RunSlideDetectionInput): Promise<PendingSlideDetectionOutput> {
   const context = getActiveArticleSourceContext(project)
   const durationMs = context.range.endMs - context.range.startMs
-  const { sampleIntervalMs: configuredSampleIntervalMs, threshold: configuredThreshold } =
-    project.settings.slideDetection
-  const sampleIntervalMs = sampleIntervalOverride ?? configuredSampleIntervalMs
-  const threshold = thresholdOverride ?? configuredThreshold
+  const { sampleIntervalMs, threshold } = project.settings.slideDetection
   onStage?.('sampling')
-  const frames = await sampleVideoFrames({
+  const frames = await sampleCropFrames({
     path: context.source.path,
     crop: context.crop,
     perspectiveCrop: context.perspectiveCrop,
@@ -156,22 +517,33 @@ export async function runSlideDetection({
     endMs: context.range.endMs,
   })
   onStage?.('comparing')
-  const boundaries = detectSlideBoundaries({ frames, threshold })
-  onStage?.('extracting')
-  const slides = await addRepresentativeFrames(
+  const boundaries = detectVisualBoundaries({ frames, threshold })
+  onStage?.('classifying')
+  const classifiedSegments = await classifySegments(
     project,
-    buildSlideData(boundaries, durationMs),
-    onProgress,
+    buildSlideData(boundaries, durationMs, `segment-${requireActiveArticleId(project)}`),
+    frames,
+    threshold,
   )
+  const classifiedBoundaries = boundariesForSegments(classifiedSegments)
+  onStage?.('extracting')
+  const pending = await addRepresentativeFrames(project, classifiedSegments, onProgress)
 
   return {
     result: {
       sampleIntervalMs,
       threshold,
       framesAnalyzed: frames.length,
-      boundaries,
+      boundaries: classifiedBoundaries,
       detectedAt: new Date().toISOString(),
+      visualClassifier: {
+        version: VISUAL_CLASSIFIER_VERSION,
+        personDetection: 'face-and-human',
+        samplePolicy: 'adaptive-2-3-5',
+        frameWidth: 640,
+      },
     },
-    slides,
+    slides: pending.slides,
+    assetRunId: pending.assetRunId,
   }
 }

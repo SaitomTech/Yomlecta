@@ -1,7 +1,7 @@
 import type { SlideDetectionOutput } from '../../features/slide-detection/types'
 import {
-  commitOcr,
-  commitSlideContent,
+  commitOcrBatch,
+  commitSlideContentBatch,
   commitSlideDetection,
   commitTranscription,
   updateArticleSource,
@@ -13,10 +13,12 @@ import {
 import {
   syncActiveArticle,
   updateProjectArticleDraft,
+  updateProjectArticleOutputLanguage,
   updateProjectArticleSections,
   updateProjectArticleSourceSettings,
   updateProjectArticleSummary,
   updateProjectArticleTitle,
+  updateProjectArticleTranslation,
   updateProjectSlideContent,
   updateProjectSlideDetection,
   updateProjectSlideOcr,
@@ -26,8 +28,10 @@ import {
 import type {
   ContentProcessingResult,
   ArticleDraft,
+  ArticleOutputLanguage,
   ArticleSections,
   ArticleSummary,
+  ArticleTranslation,
   CropRegion,
   MediaProject,
   PerspectiveCrop,
@@ -36,6 +40,7 @@ import type {
   TranscriptionResult,
   VideoTrimRange,
 } from '../../types/project'
+import { removeArticleRunDirectories } from '../storage/projectAssets'
 
 function activeArticle(project: MediaProject) {
   if (!project.activeArticleId) return null
@@ -54,7 +59,7 @@ export async function saveArticleDraft(project: MediaProject, draft: ArticleDraf
   if (updated === project) return project
   const synced = syncedArticle(updated)
   if (!synced) return null
-  await updateArticleContent(synced.next, synced.article, synced.next.slides)
+  await updateArticleContent(synced.next, synced.article, synced.next.articleBlocks)
   return synced.next
 }
 
@@ -80,6 +85,30 @@ export async function saveArticleSummary(project: MediaProject, summary: Article
   return synced.next
 }
 
+export async function saveArticleTranslation(
+  project: MediaProject,
+  translation: ArticleTranslation,
+) {
+  const updated = updateProjectArticleTranslation(project, translation)
+  if (updated === project) return project
+  const synced = syncedArticle(updated)
+  if (!synced) return null
+  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
+  return synced.next
+}
+
+export async function saveArticleOutputLanguage(
+  project: MediaProject,
+  outputLanguage: ArticleOutputLanguage,
+) {
+  const updated = updateProjectArticleOutputLanguage(project, outputLanguage)
+  if (updated === project) return project
+  const synced = syncedArticle(updated)
+  if (!synced) return null
+  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
+  return synced.next
+}
+
 export async function saveArticleTitle(project: MediaProject, title: string) {
   const updated = updateProjectArticleTitle(project, title)
   if (updated === project) return project
@@ -100,6 +129,9 @@ export async function saveArticleSource(
   const synced = syncedArticle(updated)
   if (!synced) return null
   await updateArticleSource(synced.next, synced.article)
+  await removeArticleRunDirectories(synced.next.id, synced.article.id).catch((error) =>
+    console.warn('古い記事解析ファイルを削除できませんでした。', error),
+  )
   return synced.next
 }
 
@@ -115,30 +147,43 @@ export async function saveTranscription(project: MediaProject, transcription: Tr
   const updated = updateProjectTranscription(project, transcription)
   if (updated === project) return null
   const next = syncActiveArticle(updated)
-  await commitTranscription(next, next.transcription ?? transcription, next.slides)
+  await commitTranscription(next, next.transcription ?? transcription)
   return next
 }
 
-export async function saveOcr(project: MediaProject, slideId: string, ocr: SlideOcrResult) {
-  const updated = updateProjectSlideOcr(project, slideId, ocr)
-  if (updated === project) return null
-  const next = syncActiveArticle(updated)
-  const transcript = next.slides.find((slide) => slide.id === slideId)?.transcript
-  await commitOcr(next, slideId, ocr, transcript)
-  return next
-}
-
-export async function saveSlideContent(
+export async function saveOcrBatch(
   project: MediaProject,
-  slideId: string,
-  result: ContentProcessingResult,
+  results: Array<{ slideId: string; ocr: SlideOcrResult }>,
 ) {
-  const updated = updateProjectSlideContent(project, slideId, result)
-  if (updated === project) return null
-  const next = syncActiveArticle(updated)
-  const transcript = next.slides.find((slide) => slide.id === slideId)?.transcript
-  if (!transcript) return null
-  await commitSlideContent(next, slideId, result, transcript)
+  let next = project
+  for (const { slideId, ocr } of results) next = updateProjectSlideOcr(next, slideId, ocr)
+  if (next === project) return null
+  next = syncActiveArticle(next)
+  await commitOcrBatch(
+    next,
+    results.map(({ slideId, ocr }) => ({
+      slideId,
+      ocr,
+      transcript: next.slides.find((slide) => slide.id === slideId)?.transcript,
+    })),
+  )
+  return next
+}
+
+export async function saveSlideContentBatch(
+  project: MediaProject,
+  results: Array<{ slideId: string; result: ContentProcessingResult }>,
+) {
+  let next = project
+  for (const { slideId, result } of results) next = updateProjectSlideContent(next, slideId, result)
+  if (next === project) return null
+  next = syncActiveArticle(next)
+  const items = results.flatMap(({ slideId, result }) => {
+    const transcript = next.slides.find((slide) => slide.id === slideId)?.transcript
+    return transcript ? [{ slideId, result, transcript }] : []
+  })
+  if (items.length !== results.length) return null
+  await commitSlideContentBatch(next, items)
   return next
 }
 

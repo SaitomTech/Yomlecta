@@ -3,7 +3,7 @@ import {
   copyFile as tauriCopyFile,
   mkdir,
   readDir,
-  readTextFile,
+  readTextFile as tauriReadTextFile,
   remove,
   rename,
   stat,
@@ -41,7 +41,7 @@ export async function writeAppLocalTextFile(path: string, contents: string) {
 }
 
 export async function readAppLocalTextFile(path: string) {
-  return readTextFile(path, {
+  return tauriReadTextFile(path, {
     baseDir: BaseDirectory.AppLocalData,
   })
 }
@@ -87,6 +87,15 @@ export async function fileExists(path: string) {
   }
 }
 
+export async function getFileFingerprint(path: string) {
+  const fileInfo = await stat(path)
+  if (!fileInfo.isFile) throw new Error('ファイルではないパスの情報を取得しようとしました。')
+  return {
+    size: fileInfo.size,
+    mtimeMs: fileInfo.mtime?.getTime() ?? null,
+  }
+}
+
 export async function ensureDirectory(path: string) {
   await mkdir(path, { recursive: true })
 }
@@ -97,4 +106,8 @@ export async function copyFile(sourcePath: string, destinationPath: string) {
 
 export async function writeTextFile(path: string, contents: string) {
   await tauriWriteTextFile(path, contents)
+}
+
+export async function readTextFile(path: string) {
+  return tauriReadTextFile(path)
 }

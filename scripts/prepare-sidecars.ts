@@ -20,6 +20,14 @@ const FOUNDATION_MODELS_SOURCE = join(
   'main.swift',
 )
 const FOUNDATION_MODELS_SIDECAR_NAME = 'apple-foundation-models'
+const APPLE_TRANSLATOR_SOURCE = join(
+  import.meta.dir,
+  '..',
+  'src-tauri',
+  'apple-translator',
+  'main.swift',
+)
+const APPLE_TRANSLATOR_SIDECAR_NAME = 'apple-translator'
 const YT_DLP_SIDECAR_NAME = 'yt-dlp'
 const YT_DLP_VERSION = '2026.08.19'
 const RELEASE_DIRECTORY = '1787073674_9.0.1'
@@ -201,6 +209,42 @@ async function buildFoundationModelsSidecar(temporaryDirectory: string, force: b
   await chmod(temporaryDestination, 0o755)
   await rename(temporaryDestination, destination)
   console.log(`✓ ${FOUNDATION_MODELS_SIDECAR_NAME}-${TARGET_TRIPLE}`)
+}
+
+async function buildAppleTranslatorSidecar(temporaryDirectory: string, force: boolean) {
+  const destination = sidecarPath(APPLE_TRANSLATOR_SIDECAR_NAME)
+  if (!force) {
+    try {
+      const [sourceStats, destinationStats] = await Promise.all([
+        stat(APPLE_TRANSLATOR_SOURCE),
+        stat(destination),
+      ])
+      if (destinationStats.size > 0 && destinationStats.mtimeMs >= sourceStats.mtimeMs) return
+    } catch {
+      // The helper has not been built yet, so continue with compilation.
+    }
+  }
+
+  const temporaryDestination = join(temporaryDirectory, APPLE_TRANSLATOR_SIDECAR_NAME)
+  const moduleCachePath = join(temporaryDirectory, 'swift-module-cache')
+  await run('swiftc', [
+    '-O',
+    '-parse-as-library',
+    '-target',
+    'arm64-apple-macosx15.0',
+    '-module-cache-path',
+    moduleCachePath,
+    '-framework',
+    'Foundation',
+    '-framework',
+    'Translation',
+    APPLE_TRANSLATOR_SOURCE,
+    '-o',
+    temporaryDestination,
+  ])
+  await chmod(temporaryDestination, 0o755)
+  await rename(temporaryDestination, destination)
+  console.log(`✓ ${APPLE_TRANSLATOR_SIDECAR_NAME}-${TARGET_TRIPLE}`)
 }
 
 async function pathExists(path: string) {
@@ -455,6 +499,7 @@ async function main() {
     await buildVisionSidecar(cleanTemporaryDirectory, force)
     await buildSpeechSidecar(cleanTemporaryDirectory, force)
     await buildFoundationModelsSidecar(cleanTemporaryDirectory, force)
+    await buildAppleTranslatorSidecar(cleanTemporaryDirectory, force)
     const downloadedSidecarsReady = (await Promise.all(SIDECARS.map(sidecarReady))).every(Boolean)
     const visionSidecarReady = await nonEmptyFileExists(sidecarPath(VISION_SIDECAR_NAME))
     const speechSidecarReady = await nonEmptyFileExists(sidecarPath(SPEECH_SIDECAR_NAME))

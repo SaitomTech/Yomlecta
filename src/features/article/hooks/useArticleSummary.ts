@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { getUserErrorMessage } from '../../../lib/errors'
 import type { ArticleModelId } from '../../../lib/article/articleModel'
 import type { ArticleSummary, MediaProject } from '../../../types/project'
-import { hasCurrentArticleSummary } from '../article'
+import { hasAllSpeechArticleBodies, hasCurrentArticleSummary } from '../article'
 import { runArticleSummaryGeneration } from '../summaryGenerator'
 
 export type ArticleSummaryStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
@@ -14,10 +14,7 @@ export function useArticleSummary(
   onCompleted: (summary: ArticleSummary) => void | Promise<void>,
   getCurrentProject?: () => MediaProject | null,
 ) {
-  const articleSlides = project.slides.filter((slide) => slide.transcript)
-  const hasAllArticleBodies =
-    articleSlides.length > 0 &&
-    articleSlides.every((slide) => slide.transcript?.articleBody?.trim())
+  const hasAllArticleBodies = hasAllSpeechArticleBodies(project)
   const isUpToDate = hasCurrentArticleSummary(project, modelId)
   const [status, setStatus] = useState<ArticleSummaryStatus>('idle')
   const [stage, setStage] = useState<ArticleSummaryStage>('preparing-model')
@@ -28,14 +25,11 @@ export function useArticleSummary(
   async function generate(force = false): Promise<boolean> {
     if (activeController.current) return false
     const currentProject = getCurrentProject?.() ?? project
-    const currentArticleSlides = currentProject.slides.filter((slide) => slide.transcript)
-    const currentHasAllArticleBodies =
-      currentArticleSlides.length > 0 &&
-      currentArticleSlides.every((slide) => slide.transcript?.articleBody?.trim())
+    const currentHasAllArticleBodies = hasAllSpeechArticleBodies(currentProject)
     const currentIsUpToDate = hasCurrentArticleSummary(currentProject, modelId)
     if (!currentHasAllArticleBodies) {
       setStatus('error')
-      setError('Slide本文をすべて生成してから、文書全体の要約を作成してください。')
+      setError('発話がある区間の本文を生成してから、文書全体の要約を作成してください。')
       return false
     }
     if (currentIsUpToDate && !force) {

@@ -1,5 +1,5 @@
 import { Pause, Play } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatTimestamp } from '../lib/time'
 import type { SlideData } from '../types/project'
 
@@ -20,6 +20,17 @@ export function SegmentVideoPlayer({
   const startTime = Math.max(0, slide.startMs / 1000)
   const endTime = Math.max(startTime, slide.endMs / 1000)
   const segmentDuration = Math.max(0.1, endTime - startTime)
+
+  useEffect(
+    () => () => {
+      const video = videoRef.current
+      if (!video) return
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    },
+    [],
+  )
 
   const resetToSegmentStart = () => {
     const video = videoRef.current

@@ -13,13 +13,7 @@ export function ApiCostEstimate({
   estimate,
   label = 'この処理の費用見込み',
 }: ApiCostEstimateProps) {
-  if (!isOpenAi || !estimate) {
-    return (
-      <p className="mt-3 text-[11px] leading-5 text-[#71807b]">
-        API費用なし（このMac内で処理します）
-      </p>
-    )
-  }
+  if (!isOpenAi || !estimate) return null
 
   const formatted = formatOpenAiCost(estimate.usd)
 

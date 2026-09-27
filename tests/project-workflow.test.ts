@@ -25,6 +25,14 @@ import {
 } from '../src/lib/workflow'
 import type { Article, MediaProject, ProjectVideo, SlideData } from '../src/types/project'
 import { PROJECT_VERSION } from '../src/types/project'
+import {
+  TRANSLATION_LANGUAGES,
+  articleTranslationInputFingerprint,
+  getCurrentArticleTranslation,
+  normalizeLanguage,
+} from '../src/features/article/translation'
+import { articleGenerationLanguageInstruction } from '../src/features/article/articleLanguage'
+import { articleSlidesWithSpeech, hasAllSpeechArticleBodies } from '../src/features/article/article'
 
 const NOW = '2026-09-15T00:00:00.000Z'
 
@@ -75,6 +83,8 @@ function createArticleWorkspace() {
     index: 0,
     startMs: 0,
     endMs: 10_000,
+    autoKind: 'slide',
+    personLayout: 'none',
     detection: { source: 'auto' },
     image: { representativeFramePath: '/tmp/slide.jpg' },
     ocr: { rawText: 'OCR', model: 'ocr-model', inputFingerprint: 'ocr-fingerprint' },
@@ -94,6 +104,17 @@ function createArticleWorkspace() {
     sourceRange: { startMs: 0, endMs: 10_000 },
     settings: base.settings,
     slides: [slide],
+    articleBlocks: [
+      {
+        id: slide.id,
+        index: 0,
+        visualSegmentIds: [slide.id],
+        imageSegmentId: slide.id,
+        startMs: slide.startMs,
+        endMs: slide.endMs,
+        transcript: slide.transcript,
+      },
+    ],
     slideDetection: {
       sampleIntervalMs: 500,
       threshold: 12,
@@ -391,4 +412,92 @@ test('project parser accepts the current persisted shape and rejects stale or un
       ],
     }),
   ).toThrow()
+})
+
+test('article translation is limited to Japanese and English', () => {
+  expect(TRANSLATION_LANGUAGES.map((language) => language.id)).toEqual(['ja', 'en'])
+  expect(normalizeLanguage('ja-JP')).toBe('ja')
+  expect(normalizeLanguage('en-US')).toBe('en')
+  expect(normalizeLanguage('english')).toBe('en')
+  expect(normalizeLanguage('japanese')).toBe('ja')
+  expect(normalizeLanguage('fr-FR')).toBeUndefined()
+  expect(articleGenerationLanguageInstruction('english')).toContain('必ず英語')
+  expect(articleGenerationLanguageInstruction('english')).toContain('日本語へ翻訳しない')
+})
+
+test('silent visual segments do not require generated article bodies', () => {
+  const project = createArticleWorkspace()
+  const sourceSlide = project.slides[0]
+  const silentSlide: SlideData = {
+    ...sourceSlide,
+    id: 'slide-silent',
+    index: 1,
+    startMs: sourceSlide.endMs,
+    endMs: sourceSlide.endMs + 5_000,
+    transcript: { raw: '', model: sourceSlide.transcript?.model ?? 'test' },
+  }
+  const withSilence: MediaProject = {
+    ...project,
+    slides: [sourceSlide, silentSlide],
+    articleBlocks: [
+      {
+        id: sourceSlide.id,
+        index: 0,
+        visualSegmentIds: [sourceSlide.id],
+        imageSegmentId: sourceSlide.id,
+        startMs: sourceSlide.startMs,
+        endMs: sourceSlide.endMs,
+        transcript: sourceSlide.transcript,
+      },
+      {
+        id: silentSlide.id,
+        index: 1,
+        visualSegmentIds: [silentSlide.id],
+        imageSegmentId: silentSlide.id,
+        startMs: silentSlide.startMs,
+        endMs: silentSlide.endMs,
+        transcript: silentSlide.transcript,
+      },
+    ],
+  }
+
+  expect(articleSlidesWithSpeech(withSilence).map((slide) => slide.id)).toEqual([sourceSlide.id])
+  expect(hasAllSpeechArticleBodies(withSilence)).toBe(true)
+})
+
+test('article translation becomes stale when its source body changes', () => {
+  const project = createArticleWorkspace()
+  const inputFingerprint = articleTranslationInputFingerprint(project, 'ja', 'en')
+  const translated: MediaProject = {
+    ...project,
+    article: {
+      ...project.article,
+      title: project.article?.title ?? 'article',
+      translations: {
+        en: {
+          sourceLanguage: 'ja',
+          targetLanguage: 'en',
+          engine: 'apple-translation' as const,
+          model: 'Apple Translation',
+          inputFingerprint,
+          generatedAt: NOW,
+          title: 'Article',
+          bodies: { 'slide-1': 'Body' },
+        },
+      },
+    },
+  }
+
+  expect(getCurrentArticleTranslation(translated, 'en', 'ja')?.title).toBe('Article')
+
+  const changed = {
+    ...translated,
+    slides: translated.slides.map((slide) => ({
+      ...slide,
+      transcript: slide.transcript
+        ? { ...slide.transcript, articleBody: 'changed body' }
+        : undefined,
+    })),
+  }
+  expect(getCurrentArticleTranslation(changed, 'en', 'ja')).toBeUndefined()
 })

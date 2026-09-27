@@ -137,7 +137,12 @@ pub(crate) async fn insert_analysis_run(
 
 pub(crate) fn validate_run_kind(kind: &str) -> Result<(), String> {
     match kind {
-        "slide_detection" | "transcription" | "ocr" | "body_generation" | "summary_generation"
+        "slide_detection"
+        | "visual_segmentation"
+        | "transcription"
+        | "ocr"
+        | "body_generation"
+        | "summary_generation"
         | "chapter_generation" => Ok(()),
         _ => Err(format!("不正な解析種別です: {kind}")),
     }

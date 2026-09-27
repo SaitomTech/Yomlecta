@@ -4,6 +4,7 @@ export type SlideDetectionStage =
   | 'preparing'
   | 'sampling'
   | 'comparing'
+  | 'classifying'
   | 'extracting'
   | 'saving'
   | 'completed'
@@ -11,4 +12,8 @@ export type SlideDetectionStage =
 export type SlideDetectionOutput = {
   result: SlideDetectionResult
   slides: SlideData[]
+}
+
+export type PendingSlideDetectionOutput = SlideDetectionOutput & {
+  assetRunId: string
 }

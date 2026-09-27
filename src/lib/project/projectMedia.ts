@@ -1,5 +1,5 @@
 import { extractVideoThumbnail } from '../media/ffmpeg'
-import { copyFile } from '../tauri/filesystem'
+import { copyFile, renameAbsolutePath } from '../tauri/filesystem'
 import {
   getProjectVideoPath,
   getProjectVideoThumbnailPath,
@@ -54,7 +54,16 @@ export async function addProjectVideo(project: MediaProject, selected: SelectedV
     const outputPath = await getProjectVideoPath(project.id, videoId, extension)
     const thumbnailPath = await getProjectVideoThumbnailPath(project.id, videoId)
     const relativePath = relativeVideoPath(videoId, extension)
-    await copyFile(selected.path, outputPath)
+    if (youtubeOrigin) {
+      try {
+        await renameAbsolutePath(selected.path, outputPath)
+      } catch (error) {
+        console.warn('YouTube動画を直接移動できなかったためコピーします。', error)
+        await copyFile(selected.path, outputPath)
+      }
+    } else {
+      await copyFile(selected.path, outputPath)
+    }
     let hasThumbnail = false
     try {
       await extractVideoThumbnail(outputPath, thumbnailPath)
@@ -130,6 +139,7 @@ export async function createArticleFromRange(
     ...(requestedPerspectiveCrop ? { perspectiveCrop: requestedPerspectiveCrop } : {}),
     settings: DEFAULT_SETTINGS,
     slides: [],
+    articleBlocks: [],
     workflow: {
       lastVisitedStep: 'crop',
       maxReachedStep: 'crop',

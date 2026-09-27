@@ -11,6 +11,9 @@ type CompleteChatInput = {
   model: string
   messages: LlamaChatMessage[]
   temperature?: number
+  topP?: number
+  minP?: number
+  repeatPenalty?: number
   maxTokens?: number
   responseFormat?: { type: 'json_object' }
   signal?: AbortSignal
@@ -82,7 +85,17 @@ export function parseJsonResponse(text: string) {
 
 export async function completeChat(
   baseUrl: string,
-  { model, messages, temperature = 0, maxTokens = 2048, responseFormat, signal }: CompleteChatInput,
+  {
+    model,
+    messages,
+    temperature = 0,
+    topP,
+    minP,
+    repeatPenalty,
+    maxTokens = 2048,
+    responseFormat,
+    signal,
+  }: CompleteChatInput,
 ) {
   const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
@@ -91,6 +104,9 @@ export async function completeChat(
       model,
       messages,
       temperature,
+      ...(topP !== undefined ? { top_p: topP } : {}),
+      ...(minP !== undefined ? { min_p: minP } : {}),
+      ...(repeatPenalty !== undefined ? { repeat_penalty: repeatPenalty } : {}),
       max_tokens: maxTokens,
       ...(responseFormat ? { response_format: responseFormat } : {}),
       stream: false,

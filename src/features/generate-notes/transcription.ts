@@ -1,7 +1,11 @@
 import { UserFacingError, withUserFacingError } from '../../lib/errors'
 import { extractAudio, extractAudioChunkForOpenAi } from '../../lib/media/ffmpeg'
 import { transcribeOpenAiAudio } from '../../lib/openai/openai'
-import { getAudioAssetPath, getTranscriptionAudioChunkPath } from '../../lib/storage/projectAssets'
+import {
+  getAudioAssetPath,
+  getTranscriptionAudioChunkPath,
+  resetTranscriptionAudioChunks,
+} from '../../lib/storage/projectAssets'
 import { fileExists, getFileSize } from '../../lib/tauri/filesystem'
 import { runAppleSpeech } from '../../lib/speech/appleSpeech'
 import {
@@ -12,7 +16,8 @@ import {
 } from '../../lib/transcription/transcriptionModel'
 import { ensureWhisperModel } from '../../lib/whisper/modelManager'
 import { runWhisper } from '../../lib/whisper/whisper'
-import { normalizeTranscriptSegments } from '../../lib/pipeline/assignTranscriptToSlides'
+import { normalizeTranscriptSegments } from '../../lib/pipeline/normalizeTranscriptSegments'
+import { transcriptionRangesForArticleBlocks } from '../../lib/pipeline/articleBlocks'
 import { buildOpenAiTranscriptionContext } from '../../lib/pipeline/transcriptionContext'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import {
@@ -68,7 +73,10 @@ type OpenAiTranscriptionProvider = {
 
 const MAX_OPENAI_AUDIO_BYTES = 25_000_000
 const MIN_OPENAI_CHUNK_MS = 1000
-const MAX_OPENAI_CONCURRENT_REQUESTS = 8
+const MAX_OPENAI_CONCURRENT_REQUESTS = 4
+const MAX_OPENAI_CHUNK_DURATION_MS = 15 * 60 * 1000
+const TARGET_OPENAI_CHUNK_DURATION_MS = 60 * 1000
+const TRANSCRIPTION_PIPELINE_VERSION = 'transcription-v2-bounded-article-ranges'
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
@@ -101,6 +109,7 @@ function inputFingerprint(project: MediaProject, modelId: TranscriptionModelId, 
     JSON.stringify(context.perspectiveCrop ?? null),
     modelId,
     language,
+    TRANSCRIPTION_PIPELINE_VERSION,
   ].join(':')
   return modelId === OPENAI_TRANSCRIBE_MODEL.id
     ? `${baseFingerprint}:${ocrContextFingerprint}`
@@ -183,25 +192,12 @@ async function runAppleTranscription({
 function createOpenAiAudioRanges(project: MediaProject) {
   const context = getActiveArticleSourceContext(project)
   const durationMs = Math.max(1, context.range.endMs - context.range.startMs)
-  const slides = project.slides.toSorted((first, second) => first.startMs - second.startMs)
-  if (slides.length === 0) return [{ startMs: 0, endMs: durationMs }]
-
-  const ranges: ChunkRange[] = []
-  let cursorMs = 0
-  for (const slide of slides) {
-    const rangeStartMs = Math.max(cursorMs, Math.max(0, Math.min(durationMs, slide.startMs)))
-    const rangeEndMs = Math.max(rangeStartMs, Math.min(durationMs, slide.endMs))
-    if (rangeStartMs > cursorMs) {
-      ranges.push({ startMs: cursorMs, endMs: rangeStartMs })
-    }
-    if (rangeEndMs > rangeStartMs) {
-      ranges.push({ startMs: rangeStartMs, endMs: rangeEndMs })
-      cursorMs = rangeEndMs
-    }
-  }
-  if (cursorMs < durationMs) ranges.push({ startMs: cursorMs, endMs: durationMs })
-
-  return ranges.length > 0 ? ranges : [{ startMs: 0, endMs: durationMs }]
+  return transcriptionRangesForArticleBlocks(
+    durationMs,
+    project.articleBlocks,
+    MAX_OPENAI_CHUNK_DURATION_MS,
+    TARGET_OPENAI_CHUNK_DURATION_MS,
+  )
 }
 
 async function runLocalTranscription({
@@ -253,6 +249,7 @@ async function runLocalTranscription({
   throwIfAborted(signal)
   onStage?.('transcribing')
   onProgress?.(null)
+  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'local')
   const rawTranscript = await withUserFacingError(
     '音声を文字起こしできませんでした。アプリを再起動して、再試行してください。',
     () =>
@@ -486,6 +483,7 @@ export async function runTranscription(input: RunTranscriptionInput): Promise<Tr
     return path
   })
 
+  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'openai')
   const ranges = createOpenAiAudioRanges(project)
   const chunks: PreparedChunk[] = []
   onStage?.('preparing-chunks')

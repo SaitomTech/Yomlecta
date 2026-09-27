@@ -48,6 +48,16 @@ export const TEXT_MODELS = [
   },
 ] as const
 
+export const LFM2_ENJP_TRANSLATION_MODEL = {
+  id: 'lfm2-350m-enjp-mt-q4_k_m',
+  label: 'LFM2-350M-ENJP-MT Q4_K_M',
+  filename: 'LFM2-350M-ENJP-MT-Q4_K_M.gguf',
+  directory: 'models/lfm2-350m-enjp-mt',
+  sizeBytes: 229_310_240,
+  url: 'https://huggingface.co/LiquidAI/LFM2-350M-ENJP-MT-GGUF/resolve/1a5bdb2d6e596656ed645a4088b9bb8f3423801c/LFM2-350M-ENJP-MT-Q4_K_M.gguf?download=true',
+  sha256: '574ef7980dd20d69b494bce82565db5f25124d404be02052bbca62277d33077b',
+} as const
+
 export type TextModel = (typeof TEXT_MODELS)[number]
 export type TextModelId = TextModel['id']
 
@@ -74,4 +84,28 @@ export async function ensureTextModel({
   })
 
   return { modelPath, contextSize: 32_768 }
+}
+
+export async function ensureLfm2TranslationModel({
+  onProgress,
+  signal,
+}: {
+  onProgress?: (progress: ModelDownloadProgress) => void
+  signal?: AbortSignal
+} = {}) {
+  const [modelPath] = await ensureModelFiles({
+    directory: LFM2_ENJP_TRANSLATION_MODEL.directory,
+    files: [
+      {
+        filename: LFM2_ENJP_TRANSLATION_MODEL.filename,
+        url: LFM2_ENJP_TRANSLATION_MODEL.url,
+        sizeBytes: LFM2_ENJP_TRANSLATION_MODEL.sizeBytes,
+        sha256: LFM2_ENJP_TRANSLATION_MODEL.sha256,
+      },
+    ],
+    onProgress,
+    signal,
+  })
+
+  return { modelPath, contextSize: 8_192 }
 }

@@ -12,6 +12,7 @@ import {
   type OcrModelId,
 } from '../../lib/ocr/modelManager'
 import { modelProgressRatio } from '../../lib/models/download'
+import { ocrEligibleSegments } from '../../lib/pipeline/articleBlocks'
 import type { MediaProject, SlideData, SlideOcrResult } from '../../types/project'
 
 const OCR_PROMPT_VERSION = 'text-recognition-v4'
@@ -24,7 +25,9 @@ export type OcrProgress = {
   stageProgress: number | null
 }
 
-export type OcrSlideCompleted = (slideId: string, ocr: SlideOcrResult) => void | Promise<void>
+export type OcrSlideCompleted = (
+  results: Array<{ slideId: string; ocr: SlideOcrResult }>,
+) => void | Promise<void>
 
 type RunOcrInput = {
   project: MediaProject
@@ -148,7 +151,7 @@ export async function runOcr({
   force = false,
   modelId = DEFAULT_OCR_MODEL.id,
 }: RunOcrInput) {
-  const slides = project.slides
+  const slides = ocrEligibleSegments(project.slides, project.articleBlocks)
   if (slides.length === 0) {
     throw new UserFacingError('OCRするSlideがありません。先にスライド検出を実行してください。')
   }
@@ -199,17 +202,29 @@ export async function runOcr({
     throwIfAborted(signal)
     onStage?.('recognizing')
     report(null)
-    for (const slide of pendingSlides) {
-      const fingerprint = ocrInputFingerprint(slide, modelId)
-      throwIfAborted(signal)
-      const recognition = await withUserFacingError(
-        `Slide ${slide.index + 1}の文字を読み取れませんでした。再試行してください。`,
-        () => recognize(slide),
-      )
+    const batch: Array<{ slideId: string; ocr: SlideOcrResult; slideIndex: number }> = []
+    const flush = async () => {
+      if (batch.length === 0) return
+      const pending = batch.splice(0)
       await withUserFacingError(
-        `Slide ${slide.index + 1}のOCR結果を保存できませんでした。空き容量を確認して、再試行してください。`,
-        async () => {
-          await onSlideCompleted?.(slide.id, {
+        `Slide ${pending[0].slideIndex + 1}以降のOCR結果を保存できませんでした。空き容量を確認して、再試行してください。`,
+        () => onSlideCompleted?.(pending.map(({ slideId, ocr }) => ({ slideId, ocr }))),
+      )
+      completed += pending.length
+      report(null)
+    }
+    try {
+      for (const slide of pendingSlides) {
+        const fingerprint = ocrInputFingerprint(slide, modelId)
+        throwIfAborted(signal)
+        const recognition = await withUserFacingError(
+          `Slide ${slide.index + 1}の文字を読み取れませんでした。再試行してください。`,
+          () => recognize(slide),
+        )
+        batch.push({
+          slideId: slide.id,
+          slideIndex: slide.index,
+          ocr: {
             rawText: recognition.rawText,
             model: modelId,
             provider: ocrModel.provider,
@@ -219,12 +234,12 @@ export async function runOcr({
             usage: recognition.usage,
             requestId: recognition.requestId,
             inputFingerprint: fingerprint,
-          })
-        },
-      )
-      throwIfAborted(signal)
-      completed += 1
-      report(null)
+          },
+        })
+        if (batch.length >= 8) await flush()
+      }
+    } finally {
+      await flush()
     }
   }
 
