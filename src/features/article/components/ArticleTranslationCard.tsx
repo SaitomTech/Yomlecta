@@ -81,7 +81,7 @@ export function ArticleTranslationCard({
       ? 1
       : generation.stage === 'preparing-model'
         ? generation.progress.stageProgress
-        : generation.progress.total > 0
+        : generation.progress.total > 0 && generation.progress.completed > 0
           ? generation.progress.completed / generation.progress.total
           : null
   const progressLabel =

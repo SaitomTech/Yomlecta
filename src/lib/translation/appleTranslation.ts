@@ -26,14 +26,31 @@ export async function translateBatchWithApple({
   targetLanguage,
   items,
   signal,
+  onProgress,
 }: {
   client: Awaited<ReturnType<typeof openAppleTranslation>>
   sourceLanguage: string
   targetLanguage: string
   items: Array<{ id: string; text: string }>
   signal?: AbortSignal
+  onProgress?: (progress: { completed: number; total: number }) => void
 }) {
-  const response = await client.request({ sourceLanguage, targetLanguage, items }, signal)
+  const response = await client.request(
+    { sourceLanguage, targetLanguage, items },
+    signal,
+    (progress) => {
+      if (!progress || typeof progress !== 'object') return
+      const value = progress as { completed?: unknown; total?: unknown }
+      if (
+        typeof value.completed === 'number' &&
+        Number.isFinite(value.completed) &&
+        typeof value.total === 'number' &&
+        Number.isFinite(value.total)
+      ) {
+        onProgress?.({ completed: value.completed, total: value.total })
+      }
+    },
+  )
   const parsed = AppleTranslationResponseSchema.safeParse(response)
   if (!parsed.success) throw new Error('Apple Translationの応答形式が不正です。')
   if (!parsed.data.ok || !parsed.data.translations) {

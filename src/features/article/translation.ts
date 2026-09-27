@@ -312,6 +312,12 @@ export async function runArticleTranslation({
       async (baseUrl) => {
         const systemPrompt =
           targetLanguage === 'ja' ? 'Translate to Japanese.' : 'Translate to English.'
+        onProgress({
+          stage: 'translating',
+          completed: 0,
+          total: segments.length,
+          stageProgress: null,
+        })
         return translateSegments(
           segments,
           (text) =>
@@ -345,6 +351,12 @@ export async function runArticleTranslation({
       stageProgress: 1,
     })
     const translate = await createCloudTranslator(sourceLanguage, targetLanguage, signal)
+    onProgress({
+      stage: 'translating',
+      completed: 0,
+      total: segments.length,
+      stageProgress: null,
+    })
     const translations = await translateSegments(segments, translate, onProgress, signal)
     return assembleTranslation(project, translations, engineId, sourceLanguage, targetLanguage)
   }
@@ -371,6 +383,13 @@ export async function runArticleTranslation({
         targetLanguage,
         items: segments,
         signal,
+        onProgress: ({ completed, total }) =>
+          onProgress({
+            stage: 'translating',
+            completed,
+            total,
+            stageProgress: null,
+          }),
       })
       onProgress({
         stage: 'translating',

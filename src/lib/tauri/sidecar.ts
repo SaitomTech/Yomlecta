@@ -30,7 +30,11 @@ type SidecarStreamResult = {
 }
 
 type JsonLineSidecarClient = {
-  request: (message: unknown, signal?: AbortSignal) => Promise<unknown>
+  request: (
+    message: unknown,
+    signal?: AbortSignal,
+    onProgress?: (progress: unknown) => void,
+  ) => Promise<unknown>
   close: () => Promise<void>
 }
 
@@ -43,7 +47,11 @@ export async function openJsonLineSidecar(name: SidecarName, signal?: AbortSigna
   const command = Command.sidecar(name, [], { encoding: 'utf-8' })
   const pending = new Map<
     string,
-    { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+    {
+      resolve: (value: unknown) => void
+      reject: (error: unknown) => void
+      onProgress?: (progress: unknown) => void
+    }
   >()
   let buffer = ''
   let child: Child | null = null
@@ -73,11 +81,15 @@ export async function openJsonLineSidecar(name: SidecarName, signal?: AbortSigna
       if (!line) continue
 
       try {
-        const message = JSON.parse(line) as { id?: unknown }
+        const message = JSON.parse(line) as { id?: unknown; type?: unknown }
         const id = typeof message.id === 'string' ? message.id : null
         if (!id) continue
         const entry = pending.get(id)
         if (!entry) continue
+        if (message.type === 'progress') {
+          entry.onProgress?.(message)
+          continue
+        }
         pending.delete(id)
         entry.resolve(message)
       } catch {
@@ -114,7 +126,11 @@ export async function openJsonLineSidecar(name: SidecarName, signal?: AbortSigna
   }
 
   return {
-    request(message: unknown, requestSignal?: AbortSignal) {
+    request(
+      message: unknown,
+      requestSignal?: AbortSignal,
+      onProgress?: (progress: unknown) => void,
+    ) {
       if (closed || !child) return Promise.reject(new Error('sidecarは利用できません'))
       if (requestSignal?.aborted) {
         return Promise.reject(new DOMException('処理を中止しました。', 'AbortError'))
@@ -137,6 +153,7 @@ export async function openJsonLineSidecar(name: SidecarName, signal?: AbortSigna
             requestSignal?.removeEventListener('abort', abort)
             reject(error)
           },
+          onProgress,
         })
         void child.write(`${request}\n`).catch((error) => {
           pending.delete(id)

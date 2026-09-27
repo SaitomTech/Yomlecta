@@ -35,10 +35,28 @@ export function normalizeArticleLanguage(value: string | undefined) {
   return undefined
 }
 
-export function articleGenerationLanguageInstruction(sourceLanguage: string | undefined) {
-  const normalized = normalizeArticleLanguage(sourceLanguage)
+function countMatches(text: string, pattern: RegExp) {
+  return [...text.matchAll(pattern)].length
+}
+
+export function inferArticleLanguage(sourceLanguage: string | undefined, sourceText = '') {
+  const kanaCount = countMatches(sourceText, /[\p{Script=Hiragana}\p{Script=Katakana}]/gu)
+  const latinCount = countMatches(sourceText, /\p{Script=Latin}/gu)
+
+  // Transcription metadata can be stale or wrong. Prefer a clear script signal from the
+  // actual content the model will process, and use the detected audio language as fallback.
+  if (kanaCount >= 6 && kanaCount / Math.max(1, latinCount) >= 0.08) return 'ja' as const
+  if (latinCount >= 12 && kanaCount / latinCount < 0.04) return 'en' as const
+  return normalizeArticleLanguage(sourceLanguage)
+}
+
+export function articleGenerationLanguageInstruction(
+  sourceLanguage: string | undefined,
+  sourceText = '',
+) {
+  const normalized = inferArticleLanguage(sourceLanguage, sourceText)
   if (normalized === 'en') {
-    return '元の言語は英語です。出力も必ず英語にし、日本語へ翻訳しないでください。固有名詞や引用内の他言語は原文どおり維持してください。'
+    return 'OUTPUT LANGUAGE REQUIREMENT: Write all generated prose in English, matching the source text. Do not answer in Japanese or translate the source into Japanese. Keep names, technical terms, and quoted text in another language only when they appear that way in the source.'
   }
   if (normalized === 'ja') {
     return '元の言語は日本語です。出力も日本語にし、別の言語へ翻訳しないでください。固有名詞や引用内の他言語は原文どおり維持してください。'

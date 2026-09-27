@@ -40,7 +40,10 @@ enum AppleTranslationError: LocalizedError {
 }
 
 @available(macOS 26.0, *)
-func translate(_ request: TranslationRequest) async throws -> [TranslatedItem] {
+func translate(
+    _ request: TranslationRequest,
+    onProgress: (Int, Int) -> Void
+) async throws -> [TranslatedItem] {
     guard !request.items.isEmpty,
           request.items.allSatisfy({ !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
         throw AppleTranslationError.emptyText
@@ -68,18 +71,33 @@ func translate(_ request: TranslationRequest) async throws -> [TranslatedItem] {
     let requests = request.items.map {
         TranslationSession.Request(sourceText: $0.text, clientIdentifier: $0.id)
     }
-    let responses = try await session.translations(from: requests)
-    let translationsByID = Dictionary(
-        uniqueKeysWithValues: responses.compactMap { response in
-            response.clientIdentifier.map { ($0, response.targetText) }
+    var translationsByID: [String: String] = [:]
+    for try await response in session.translate(batch: requests) {
+        if let id = response.clientIdentifier {
+            translationsByID[id] = response.targetText
         }
-    )
+        onProgress(translationsByID.count, request.items.count)
+    }
     return try request.items.map { item in
         guard let translatedText = translationsByID[item.id] else {
             throw AppleTranslationError.missingTranslation(item.id)
         }
         return TranslatedItem(id: item.id, text: translatedText)
     }
+}
+
+func writeProgress(id: String, completed: Int, total: Int) {
+    let response: [String: Any] = [
+        "id": id,
+        "type": "progress",
+        "completed": completed,
+        "total": total,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]) else {
+        return
+    }
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write(Data([0x0A]))
 }
 
 func writeResponse(_ response: TranslationResponse) {
@@ -103,7 +121,9 @@ struct AppleTranslatorMain {
                 do {
                     let request = try JSONDecoder().decode(TranslationRequest.self, from: data)
                     if #available(macOS 26.0, *) {
-                        let result = try await translate(request)
+                        let result = try await translate(request) { completed, total in
+                            writeProgress(id: request.id, completed: completed, total: total)
+                        }
                         writeResponse(
                             TranslationResponse(
                                 id: request.id,
