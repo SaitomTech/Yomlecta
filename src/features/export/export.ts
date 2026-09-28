@@ -295,6 +295,10 @@ function buildExportDocument(
           ]
         : [],
   }))
+  const secondarySummary =
+    bilingual && translation && secondaryLanguage
+      ? translatedSummary(currentSummary, translation, secondaryLanguage)
+      : undefined
 
   return {
     sourceLanguage: outputLanguage,
@@ -318,7 +322,7 @@ function buildExportDocument(
                 translation,
                 secondaryLanguage,
               ),
-              ...(translation.summary ? { summary: translation.summary } : {}),
+              ...(secondarySummary ? { summary: secondarySummary } : {}),
             },
           ]
         : [],
