@@ -1,4 +1,5 @@
 import { UserFacingError, withUserFacingError } from '../../lib/errors'
+import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { extractAudio, extractAudioChunkForOpenAi } from '../../lib/media/ffmpeg'
 import { transcribeOpenAiAudio } from '../../lib/openai/openai'
 import {
@@ -397,42 +398,6 @@ function reportChunkProgress(
 ) {
   onProgress?.(total > 0 ? completed / total : null)
   onChunkProgress?.({ completed, total })
-}
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  task: (item: T, index: number) => Promise<R>,
-  signal?: AbortSignal,
-  onCompleted?: (completed: number) => void,
-) {
-  const results = new Array<R>(items.length)
-  let nextIndex = 0
-  let completed = 0
-  let failure: unknown
-
-  async function worker() {
-    while (failure === undefined) {
-      throwIfAborted(signal)
-      const index = nextIndex
-      nextIndex += 1
-      if (index >= items.length) return
-
-      try {
-        results[index] = await task(items[index], index)
-        completed += 1
-        onCompleted?.(completed)
-      } catch (error) {
-        failure ??= error
-        return
-      }
-    }
-  }
-
-  const workerCount = Math.min(Math.max(1, concurrency), items.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
-  if (failure !== undefined) throw failure
-  return results
 }
 
 function offsetSegments(chunk: PreparedChunk, segments: TranscriptSegment[]) {
