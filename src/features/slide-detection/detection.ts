@@ -36,6 +36,7 @@ import {
 } from './classification'
 
 export const MINIMUM_BOUNDARY_GAP_MS = 1500
+export const MINIMUM_STABLE_SUBSEGMENT_MS = 5000
 
 function frameDistance(first: FrameHash, second: FrameHash) {
   const hashDistance = hammingDistance(first.hash, second.hash)
@@ -119,6 +120,95 @@ export function buildSlideData(
       image: {},
     }
   })
+}
+
+/**
+ * The first-pass boundary detector can miss gradual transitions. Split an auto interval around
+ * long, locally stable holds so they can be classified independently from nearby live footage.
+ */
+export function refineSegmentsAtStableRuns(
+  segments: SlideData[],
+  sampledFrames: FrameHash[],
+  threshold: number,
+) {
+  const settleThreshold = Math.max(2, Math.floor(threshold / 2))
+  const refined: SlideData[] = []
+
+  for (const segment of segments) {
+    const frames = sampledFrames.filter(
+      (frame) => frame.timestampMs >= segment.startMs && frame.timestampMs < segment.endMs,
+    )
+    if (frames.length < 2) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    const stableRuns: Array<{ startMs: number; endMs: number }> = []
+    let runStartIndex = -1
+    for (let index = 0; index < frames.length - 1; index += 1) {
+      const stable = frameDistance(frames[index], frames[index + 1]) <= settleThreshold
+      if (stable && runStartIndex < 0) runStartIndex = index
+      const isRunEnd = runStartIndex >= 0 && (!stable || index === frames.length - 2)
+      if (!isRunEnd) continue
+
+      const lastStablePairIndex = stable ? index : index - 1
+      const startMs = frames[runStartIndex].timestampMs
+      const endMs = frames[lastStablePairIndex + 1].timestampMs
+      if (endMs - startMs >= MINIMUM_STABLE_SUBSEGMENT_MS) stableRuns.push({ startMs, endMs })
+      runStartIndex = -1
+    }
+
+    if (stableRuns.length === 0) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    const cutPoints = [segment.startMs]
+    for (const run of stableRuns) {
+      for (const timestampMs of [run.startMs, run.endMs]) {
+        const distanceFromPrevious = timestampMs - cutPoints.at(-1)!
+        const distanceToEnd = segment.endMs - timestampMs
+        if (
+          distanceFromPrevious >= MINIMUM_BOUNDARY_GAP_MS &&
+          distanceToEnd >= MINIMUM_BOUNDARY_GAP_MS
+        ) {
+          cutPoints.push(timestampMs)
+        }
+      }
+    }
+    cutPoints.push(segment.endMs)
+
+    if (cutPoints.length === 2) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    for (let partIndex = 0; partIndex < cutPoints.length - 1; partIndex += 1) {
+      const startMs = cutPoints[partIndex]
+      const endMs = cutPoints[partIndex + 1]
+      const boundaryFrameIndex = frames.findIndex((frame) => frame.timestampMs >= startMs)
+      const boundaryDistance =
+        boundaryFrameIndex > 0
+          ? frameDistance(frames[boundaryFrameIndex - 1], frames[boundaryFrameIndex])
+          : segment.detection.distance
+      refined.push({
+        ...segment,
+        id: `${segment.id}-stable-${partIndex + 1}`,
+        index: refined.length,
+        startMs,
+        endMs,
+        detection:
+          partIndex === 0
+            ? segment.detection
+            : {
+                source: 'auto',
+                ...(boundaryDistance === undefined ? {} : { distance: boundaryDistance }),
+              },
+      })
+    }
+  }
+
+  return refined
 }
 
 function boundariesForSegments(segments: SlideData[]): SlideBoundary[] {
@@ -269,6 +359,7 @@ async function classifySegments(
   sampledFrames: FrameHash[],
   threshold: number,
 ) {
+  const refinedSegments = refineSegmentsAtStableRuns(segments, sampledFrames, threshold)
   const articleId = requireActiveArticleId(project)
   const context = getActiveArticleSourceContext(project)
   const runId = crypto.randomUUID()
@@ -276,7 +367,7 @@ async function classifySegments(
   const pathsBySegment = new Map<string, string[]>()
   const cropPathBySegment = new Map<string, string>()
   try {
-    for (const segment of segments) {
+    for (const segment of refinedSegments) {
       const paths: string[] = []
       const timestamps = visualSampleTimestamps(segment.startMs, segment.endMs)
       for (let index = 0; index < timestamps.length; index += 1) {
@@ -330,7 +421,7 @@ async function classifySegments(
     }
     const textByPath = new Map(textDetections.map((detection) => [detection.imagePath, detection]))
     const settleThreshold = Math.max(2, Math.floor(threshold / 2))
-    const classifiedSegments = segments.map((segment) => {
+    const classifiedSegments = refinedSegments.map((segment) => {
       const midpoint = (segment.startMs + segment.endMs) / 2
       const representative = sampledFrames
         .filter(

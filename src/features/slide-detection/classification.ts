@@ -15,12 +15,12 @@ import type {
   VisualSegmentKind,
 } from '../../types/project'
 
-export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v11-evidence-priority'
+export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v12-stable-hold-refinement'
 
 const MIN_PERSON_CONFIDENCE = 0.5
 const MIN_PERSON_TRACK_IOU = 0.1
 const MIN_SUSTAINED_PERSON_PRESENCE = 0.6
-const MIN_FACE_LANDMARK_MOTION = 0.015
+const MIN_FACE_LANDMARK_MOTION = 0.05
 const MIN_LONGEST_STABLE_RUN_RATIO = 0.6
 const MIN_TEXT_REGION_CONFIDENCE = 0.3
 const MIN_TEXT_REGION_AREA_RATIO = 0.008
@@ -326,6 +326,9 @@ export function classifyVisualSegment({
   } else if (hasPerson && meaningfulPerson && !smallOutsidePerson && liveFaceMotion) {
     autoKind = 'non-slide'
     confidence = dominantPerson ? 0.92 : 0.84
+  } else if (stableSlide && hasPerson && !liveFaceMotion && !movingPersonBox) {
+    autoKind = 'slide'
+    confidence = dominantPerson ? 0.72 : 0.76
   } else if (slideLikeCrop && hasTextEvidence) {
     autoKind = 'slide'
     confidence = stableSlide ? 0.9 : 0.76
