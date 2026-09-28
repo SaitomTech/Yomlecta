@@ -15,7 +15,7 @@ import type {
   VisualSegmentKind,
 } from '../../types/project'
 
-export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v15-adaptive-person-review'
+export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v16-stationary-person-slides'
 
 const MIN_PERSON_CONFIDENCE = 0.5
 const MIN_PERSON_TRACK_IOU = 0.1
@@ -160,9 +160,7 @@ function trackedPersonMotion(people: PeopleDetection[], kind: PersonRegionKind) 
 function personMotionEvidence(people: PeopleDetection[]) {
   const humanMotion = trackedPersonMotion(people, 'humans')
   const faceMotion = trackedPersonMotion(people, 'faces')
-  const { matchedPairs: _, ...motion } =
-    humanMotion.matchedPairs >= faceMotion.matchedPairs ? humanMotion : faceMotion
-  return motion
+  return humanMotion.matchedPairs >= faceMotion.matchedPairs ? humanMotion : faceMotion
 }
 
 function landmarkDistance(first: number[], second: number[]) {
@@ -307,6 +305,12 @@ export function classifyVisualSegment({
     motion.personCenterMotionMedian >= 0.02 ||
     motion.personAreaChangeMedian >= 0.12 ||
     motion.personBoxIouMedian <= 0.82
+  const stationaryPersonTrack =
+    motion.matchedPairs >= 4 &&
+    motion.personCenterMotionMedian <= 0.005 &&
+    motion.personAreaChangeMedian <= 0.02 &&
+    motion.personBoxIouMedian >= 0.97 &&
+    faceLandmarkMotionMax < MIN_FACE_LANDMARK_MOTION
   const textRegions =
     text?.textRegions.filter((region) => region.confidence >= MIN_TEXT_REGION_CONFIDENCE) ?? []
   const textRegionCount = textRegions.length
@@ -317,12 +321,27 @@ export function classifyVisualSegment({
   const hasTextEvidence = textRegionCount >= 2 || textRegionArea >= MIN_TEXT_REGION_AREA_RATIO
   const slideLikeCrop =
     stableSlide || (hasTextEvidence && cropLongestStableRun.ratio >= MIN_TEXT_STABLE_RUN_RATIO)
+  const stationaryPersonSlide =
+    stableSlide &&
+    hasPerson &&
+    meaningfulPerson &&
+    Math.max(facePresenceRatio, humanPresenceRatio) >= 0.8 &&
+    stationaryPersonTrack &&
+    (hasTextEvidence ||
+      (motion.personCenterMotionMedian <= 0.002 &&
+        motion.personAreaChangeMedian <= 0.01 &&
+        motion.personBoxIouMedian >= 0.99))
 
   let autoKind: VisualSegmentKind = 'unknown'
   let confidence = 0.45
   if (slideLikeCrop && hasPerson && smallOutsidePerson) {
     autoKind = 'slide'
     confidence = 0.78
+  } else if (stationaryPersonSlide) {
+    // Stable, repeatedly identical person boxes on a settled frame indicate a still image, even
+    // when the slide is a painting/photo with no OCR text or the person dominates the crop.
+    autoKind = 'slide'
+    confidence = hasTextEvidence ? 0.88 : 0.82
   } else if (hasPerson && meaningfulPerson && !smallOutsidePerson && liveFaceMotion) {
     autoKind = 'non-slide'
     confidence = dominantPerson ? 0.92 : 0.84
@@ -373,7 +392,9 @@ export function classifyVisualSegment({
         largestFaceAreaRatio,
         largestHumanAreaRatio,
         personOutsideCropRatio,
-        ...motion,
+        personCenterMotionMedian: motion.personCenterMotionMedian,
+        personAreaChangeMedian: motion.personAreaChangeMedian,
+        personBoxIouMedian: motion.personBoxIouMedian,
         faceLandmarkMotionMax,
       },
     },
