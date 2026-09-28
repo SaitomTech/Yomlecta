@@ -5,6 +5,7 @@ import {
   type MediaProject,
 } from '../../types/project'
 import { LFM2_ENJP_TRANSLATION_MODEL, ensureLfm2TranslationModel } from '../../lib/llama/textModel'
+import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { completeChat } from '../../lib/llama/chat'
 import { withLlamaServer } from '../../lib/llama/server'
 import { modelProgressRatio } from '../../lib/models/download'
@@ -50,6 +51,7 @@ export type TranslationProgress = {
 export const TRANSLATION_LANGUAGES = ARTICLE_LANGUAGES
 
 type TranslationSegment = { id: string; text: string }
+const MAX_OPENAI_TRANSLATION_REQUESTS = 4
 
 export function normalizeLanguage(value: string | undefined) {
   return normalizeArticleLanguage(value)
@@ -226,19 +228,22 @@ async function translateSegments(
   translate: (text: string) => Promise<string>,
   onProgress: (progress: TranslationProgress) => void,
   signal?: AbortSignal,
+  concurrency = 1,
 ) {
-  const results = new Map<string, string>()
-  for (const [index, segment] of segments.entries()) {
-    throwIfAborted(signal)
-    results.set(segment.id, await translate(segment.text))
-    onProgress({
-      stage: 'translating',
-      completed: index + 1,
-      total: segments.length,
-      stageProgress: null,
-    })
-  }
-  return results
+  const translated = await mapWithConcurrency(
+    segments,
+    concurrency,
+    (segment) => translate(segment.text),
+    signal,
+    (completed) =>
+      onProgress({
+        stage: 'translating',
+        completed,
+        total: segments.length,
+        stageProgress: null,
+      }),
+  )
+  return new Map(segments.map((segment, index) => [segment.id, translated[index]]))
 }
 
 async function createCloudTranslator(
@@ -357,7 +362,13 @@ export async function runArticleTranslation({
       total: segments.length,
       stageProgress: null,
     })
-    const translations = await translateSegments(segments, translate, onProgress, signal)
+    const translations = await translateSegments(
+      segments,
+      translate,
+      onProgress,
+      signal,
+      MAX_OPENAI_TRANSLATION_REQUESTS,
+    )
     return assembleTranslation(project, translations, engineId, sourceLanguage, targetLanguage)
   }
 

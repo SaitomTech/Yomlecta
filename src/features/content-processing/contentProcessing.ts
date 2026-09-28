@@ -1,4 +1,5 @@
 import { getArticleModel, type ArticleModelId } from '../../lib/article/articleModel'
+import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { withUserFacingError, UserFacingError } from '../../lib/errors'
 import type { ContentProcessingResult, MediaProject } from '../../types/project'
 import { hasCurrentArticle } from '../article/article'
@@ -36,36 +37,6 @@ type RunContentProcessingInput = {
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
-}
-
-async function mapWithConcurrency<T>(
-  items: T[],
-  concurrency: number,
-  task: (item: T, index: number) => Promise<void>,
-  signal?: AbortSignal,
-) {
-  let nextIndex = 0
-  let failure: unknown
-
-  async function worker() {
-    while (failure === undefined) {
-      throwIfAborted(signal)
-      const index = nextIndex
-      nextIndex += 1
-      if (index >= items.length) return
-
-      try {
-        await task(items[index], index)
-      } catch (error) {
-        failure ??= error
-        return
-      }
-    }
-  }
-
-  const workerCount = Math.min(Math.max(1, concurrency), items.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
-  if (failure !== undefined) throw failure
 }
 
 export function hasCurrentContent(slide: MediaProject['slides'][number], modelId: ArticleModelId) {

@@ -1,4 +1,5 @@
 import { readFile } from '@tauri-apps/plugin-fs'
+import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { UserFacingError, withUserFacingError } from '../../lib/errors'
 import { completeChat } from '../../lib/llama/chat'
 import { withLlamaServer } from '../../lib/llama/server'
@@ -16,6 +17,7 @@ import { ocrEligibleSegments } from '../../lib/pipeline/articleBlocks'
 import type { MediaProject, SlideData, SlideOcrResult } from '../../types/project'
 
 const OCR_PROMPT_VERSION = 'text-recognition-v4'
+const MAX_OPENAI_OCR_REQUESTS = 4
 
 export type OcrStage = 'preparing-model' | 'recognizing'
 
@@ -198,11 +200,16 @@ export async function runOcr({
     },
   )
 
-  const processSlides = async (recognize: (slide: SlideData) => Promise<OcrRecognition>) => {
+  const processSlides = async (
+    recognize: (slide: SlideData) => Promise<OcrRecognition>,
+    concurrency = 1,
+  ) => {
     throwIfAborted(signal)
     onStage?.('recognizing')
     report(null)
     const batch: Array<{ slideId: string; ocr: SlideOcrResult; slideIndex: number }> = []
+    // Recognition may finish out of order; project writes must remain serialized.
+    let completionTail = Promise.resolve()
     const flush = async () => {
       if (batch.length === 0) return
       const pending = batch.splice(0)
@@ -213,14 +220,9 @@ export async function runOcr({
       completed += pending.length
       report(null)
     }
-    try {
-      for (const slide of pendingSlides) {
-        const fingerprint = ocrInputFingerprint(slide, modelId)
+    const completeSlide = (slide: SlideData, recognition: OcrRecognition) => {
+      const completion = completionTail.then(async () => {
         throwIfAborted(signal)
-        const recognition = await withUserFacingError(
-          `Slide ${slide.index + 1}の文字を読み取れませんでした。再試行してください。`,
-          () => recognize(slide),
-        )
         batch.push({
           slideId: slide.id,
           slideIndex: slide.index,
@@ -233,12 +235,29 @@ export async function runOcr({
             language: recognition.language,
             usage: recognition.usage,
             requestId: recognition.requestId,
-            inputFingerprint: fingerprint,
+            inputFingerprint: ocrInputFingerprint(slide, modelId),
           },
         })
         if (batch.length >= 8) await flush()
-      }
+      })
+      completionTail = completion
+      return completion
+    }
+    try {
+      await mapWithConcurrency(
+        pendingSlides,
+        concurrency,
+        async (slide) => {
+          const recognition = await withUserFacingError(
+            `Slide ${slide.index + 1}の文字を読み取れませんでした。再試行してください。`,
+            () => recognize(slide),
+          )
+          await completeSlide(slide, recognition)
+        },
+        signal,
+      )
     } finally {
+      await completionTail
       await flush()
     }
   }
@@ -247,7 +266,11 @@ export async function runOcr({
     report(1)
     await withUserFacingError(
       'OpenAI OCRを完了できませんでした。APIキーと利用上限、通信状況を確認してください。',
-      () => processSlides((slide) => recognizeOpenAiSlide(slide, ocrModel, signal)),
+      () =>
+        processSlides(
+          (slide) => recognizeOpenAiSlide(slide, ocrModel, signal),
+          MAX_OPENAI_OCR_REQUESTS,
+        ),
     )
     return
   }
