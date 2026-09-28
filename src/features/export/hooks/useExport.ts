@@ -69,7 +69,7 @@ export function useExport(project: MediaProject, initialResult: ExportResult | n
       if (!result) return false
       const file = result.files.find((candidate) => candidate.format === format)
       if (!file) return false
-      return downloadExportFile(file, result.assets)
+      return downloadExportFile(file, result.assets, result.files)
     },
     [result],
   )

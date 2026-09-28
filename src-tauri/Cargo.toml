@@ -39,3 +39,19 @@ sqlx = { version = "0.8.6", default-features = false, features = [
   "migrate",
   "macros",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+  "alloc",
+  "NSData",
+  "NSError",
+  "NSObject",
+  "NSString",
+  "NSURL",
+] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = [
+  "WKPDFConfiguration",
+  "WKWebView",
+  "block2",
+] }

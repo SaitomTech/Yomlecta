@@ -8,6 +8,7 @@ use tauri::Manager;
 
 mod db;
 mod openai;
+mod pdf_export;
 mod video_server;
 
 #[tauri::command]
@@ -139,6 +140,7 @@ pub fn run() {
             openai::recognize_openai_image,
             openai::transcribe_openai_audio,
             openai::cancel_openai_request,
+            pdf_export::export_article_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -423,6 +423,7 @@ export function renderHtml(document: ExportDocument) {
     '    .image-lightbox-close:hover, .image-lightbox-close:focus-visible { background: rgba(24,33,31,.78); }',
     '    p { margin: 0 0 16px; font-size: 16px; line-height: 1.9; }',
     '    @media (max-width: 600px) { main { padding-top: 20px; } .summary-body { padding: 18px; } .summary-grid { grid-template-columns: 1fr; gap: 22px; } .article-section-heading { border-left-width: 8px; } .article-section h2 { font-size: 20px; } .slide-section { padding: 6px 0 16px; } .section-content { display: block; } figure { width: auto; margin: 0 0 24px; } .image-preview-hint { opacity: .85; } p { font-size: 14px; } }',
+    '    @media print { @page { size: A4; margin: 14mm; } body { background: #fff; } main { width: auto; max-width: none; padding: 0; } .image-preview-trigger { cursor: default; } .image-preview-hint, .image-lightbox { display: none !important; } figure, .summary-group, .article-section-heading { break-inside: avoid; } img { max-height: 100mm; object-fit: contain; } p { orphans: 3; widows: 3; } }',
     '  </style>',
     '</head>',
     '<body>',

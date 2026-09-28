@@ -6729,9 +6729,12 @@ dependencies = [
 name = "yomlecta"
 version = "0.25.0"
 dependencies = [
+ "block2",
  "futures-util",
  "keyring",
  "log",
+ "objc2-foundation",
+ "objc2-web-kit",
  "reqwest",
  "serde",
  "serde_json",

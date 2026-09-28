@@ -1,4 +1,4 @@
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import {
@@ -34,6 +34,7 @@ import { renderHtml, renderMarkdown, renderTxt } from './renderers'
 
 export const EXPORT_OPTIONS = [
   { format: 'html', label: 'HTML', filename: 'index.html' },
+  { format: 'pdf', label: 'PDF', filename: 'article.pdf' },
   { format: 'markdown', label: 'Markdown', filename: 'notes.md' },
   { format: 'txt', label: 'TXT', filename: 'notes.txt' },
 ] as const
@@ -93,7 +94,7 @@ export type ExportDocument = {
   sections: ExportSection[]
 }
 
-const EXPORT_RENDERERS: Record<ExportFormat, (document: ExportDocument) => string> = {
+const EXPORT_RENDERERS: Partial<Record<ExportFormat, (document: ExportDocument) => string>> = {
   html: renderHtml,
   markdown: renderMarkdown,
   txt: renderTxt,
@@ -350,7 +351,7 @@ export async function exportProject(
     (_sourceImagePath, index) => `./assets/${imageFilename(index)}`,
   )
   const imageSections = document.sections.filter((section) => section.sourceImagePath)
-  const total = imageSections.length + EXPORT_OPTIONS.length
+  const total = imageSections.length + EXPORT_OPTIONS.length - 1
   let completed = 0
   const report = (stage: ExportProgress['stage']) => onProgress?.({ stage, completed, total })
 
@@ -402,12 +403,19 @@ export async function exportProject(
     })),
   )
   await Promise.all(
-    files.map(async (file) => {
-      await writeTextFile(file.path, EXPORT_RENDERERS[file.format](document))
-      completed += 1
-      report('writing-files')
-    }),
+    files
+      .filter((file) => file.format !== 'pdf')
+      .map(async (file) => {
+        const renderer = EXPORT_RENDERERS[file.format]
+        if (!renderer) throw new Error(`${file.format}形式の出力に対応していません。`)
+        await writeTextFile(file.path, renderer(document))
+        completed += 1
+        report('writing-files')
+      }),
   )
+
+  const pdfFile = files.find((file) => file.format === 'pdf')
+  if (pdfFile && (await fileExists(pdfFile.path))) await removeAbsolutePath(pdfFile.path)
 
   const previewDocument = buildExportDocument(project, (sourceImagePath) =>
     convertFileSrc(sourceImagePath),
@@ -429,13 +437,30 @@ async function copyExportAssets(assets: ExportAsset[], destinationDirectory: str
   )
 }
 
-export async function downloadExportFile(file: ExportFile, assets: ExportAsset[]) {
+async function ensurePdfGenerated(files: ExportFile[]) {
+  const pdfFile = files.find((candidate) => candidate.format === 'pdf')
+  if (!pdfFile || (await fileExists(pdfFile.path))) return
+
+  const htmlFile = files.find((candidate) => candidate.format === 'html')
+  if (!htmlFile) throw new Error('PDF生成に必要なHTMLファイルがありません。')
+  await invoke<void>('export_article_pdf', {
+    htmlPath: htmlFile.path,
+    pdfPath: pdfFile.path,
+  })
+}
+
+export async function downloadExportFile(
+  file: ExportFile,
+  assets: ExportAsset[],
+  files: ExportFile[],
+) {
   const destination = await save({
     defaultPath: file.filename,
     title: `${file.filename}を保存`,
   })
   if (!destination) return false
 
+  if (file.format === 'pdf') await ensurePdfGenerated(files)
   await copyFile(file.path, destination)
   if (file.format === 'html' || file.format === 'markdown') {
     await copyExportAssets(assets, await join(await dirname(destination), 'assets'))
@@ -451,6 +476,7 @@ export async function downloadAllExportFiles(files: ExportFile[], assets: Export
   })
   if (typeof selected !== 'string') return false
 
+  await ensurePdfGenerated(files)
   await Promise.all(
     files.map(async (file) => copyFile(file.path, await join(selected, file.filename))),
   )

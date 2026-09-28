@@ -88,15 +88,21 @@ function App() {
     articleId: string
     result: ExportResult
   } | null>(null)
+  const [exportPreparation, setExportPreparation] = useState<
+    | { articleId: string; status: 'running' }
+    | { articleId: string; status: 'error'; message: string }
+    | null
+  >(null)
   const exportOperationQueue = useRef<Promise<void> | null>(null)
   const navigationRequestRef = useRef(0)
   const { project, projectRef, setProjectState, clearProjectState, enqueueProjectOperation } =
     useProjectWorkspace()
 
-  const regenerateArticleExport = (savedProject: MediaProject | null) => {
+  const regenerateArticleExport = (savedProject: MediaProject | null, reportToExportPage = false) => {
     if (!savedProject?.activeArticleId) return Promise.resolve()
 
     const articleId = savedProject.activeArticleId
+    if (reportToExportPage) setExportPreparation({ articleId, status: 'running' })
     const previous = exportOperationQueue.current ?? Promise.resolve()
     const next = previous
       .catch(() => undefined)
@@ -104,8 +110,24 @@ function App() {
         try {
           const result = await exportProject(savedProject)
           setGeneratedExport({ articleId, result })
+          if (reportToExportPage) {
+            setExportPreparation((current) =>
+              current?.articleId === articleId ? null : current,
+            )
+          }
         } catch (error) {
           console.error('記事の書き出し結果を更新できませんでした。', error)
+          if (reportToExportPage) {
+            setExportPreparation((current) =>
+              current?.articleId === articleId
+                ? {
+                    articleId,
+                    status: 'error',
+                    message: error instanceof Error ? error.message : '記事の書き出しに失敗しました。',
+                  }
+                : current,
+            )
+          }
         }
       })
     exportOperationQueue.current = next.then(
@@ -343,14 +365,19 @@ function App() {
       setProjectState(saved)
       return { saved, step }
     })
-    if (step === 'export' && requestId === navigationRequestRef.current)
-      await regenerateArticleExport(saved)
     if (requestId === navigationRequestRef.current) {
+      if (step === 'export') {
+        setGeneratedExport(null)
+        setExportPreparation({ articleId: item.articleId, status: 'running' })
+      }
       setRoute({
         kind: 'article',
         articleId: item.articleId,
         step,
       })
+      if (step === 'export') {
+        window.setTimeout(() => void regenerateArticleExport(saved, true), 0)
+      }
     }
   }
 
@@ -397,9 +424,12 @@ function App() {
           const persisted = await persistProjectWorkflow(next)
           return setProjectState(persisted)
         })
-        if (saved) await regenerateArticleExport(saved)
-        if (saved && requestId === navigationRequestRef.current)
+        if (saved && requestId === navigationRequestRef.current) {
+          setGeneratedExport(null)
+          setExportPreparation({ articleId, status: 'running' })
           setRoute({ kind: 'article', articleId, step: nextStep })
+          window.setTimeout(() => void regenerateArticleExport(saved, true), 0)
+        }
         return
       }
       const saved = await enqueueProjectOperation(async () => {
@@ -561,6 +591,9 @@ function App() {
     await regenerateArticleExport(saved)
   }
 
+  const currentExportPreparation =
+    exportPreparation?.articleId === project?.activeArticleId ? exportPreparation : null
+
   const page = (() => {
     if (route.kind === 'home')
       return (
@@ -700,6 +733,12 @@ function App() {
             ? generatedExport.result
             : null
         }
+        preparationError={
+          currentExportPreparation?.status === 'error'
+            ? currentExportPreparation.message
+            : null
+        }
+        isPreparing={currentExportPreparation?.status === 'running'}
         onBackToProject={handleOpenProjects}
         onOpenArticle={handleOpenArticle}
         onGenerated={handleExportCompleted}
