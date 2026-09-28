@@ -30,12 +30,15 @@ import type {
   SlideDetectionStage,
 } from './types'
 import {
+  additionalPersonSampleTimestamps,
   classifyVisualSegment,
+  needsDensePersonSampling,
   VISUAL_CLASSIFIER_VERSION,
   visualSampleTimestamps,
 } from './classification'
 
 export const MINIMUM_BOUNDARY_GAP_MS = 1500
+export const MINIMUM_STABLE_SUBSEGMENT_MS = 5000
 
 function frameDistance(first: FrameHash, second: FrameHash) {
   const hashDistance = hammingDistance(first.hash, second.hash)
@@ -119,6 +122,95 @@ export function buildSlideData(
       image: {},
     }
   })
+}
+
+/**
+ * The first-pass boundary detector can miss gradual transitions. Split an auto interval around
+ * long, locally stable holds so they can be classified independently from nearby live footage.
+ */
+export function refineSegmentsAtStableRuns(
+  segments: SlideData[],
+  sampledFrames: FrameHash[],
+  threshold: number,
+) {
+  const settleThreshold = Math.max(2, Math.floor(threshold / 2))
+  const refined: SlideData[] = []
+
+  for (const segment of segments) {
+    const frames = sampledFrames.filter(
+      (frame) => frame.timestampMs >= segment.startMs && frame.timestampMs < segment.endMs,
+    )
+    if (frames.length < 2) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    const stableRuns: Array<{ startMs: number; endMs: number }> = []
+    let runStartIndex = -1
+    for (let index = 0; index < frames.length - 1; index += 1) {
+      const stable = frameDistance(frames[index], frames[index + 1]) <= settleThreshold
+      if (stable && runStartIndex < 0) runStartIndex = index
+      const isRunEnd = runStartIndex >= 0 && (!stable || index === frames.length - 2)
+      if (!isRunEnd) continue
+
+      const lastStablePairIndex = stable ? index : index - 1
+      const startMs = frames[runStartIndex].timestampMs
+      const endMs = frames[lastStablePairIndex + 1].timestampMs
+      if (endMs - startMs >= MINIMUM_STABLE_SUBSEGMENT_MS) stableRuns.push({ startMs, endMs })
+      runStartIndex = -1
+    }
+
+    if (stableRuns.length === 0) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    const cutPoints = [segment.startMs]
+    for (const run of stableRuns) {
+      for (const timestampMs of [run.startMs, run.endMs]) {
+        const distanceFromPrevious = timestampMs - cutPoints.at(-1)!
+        const distanceToEnd = segment.endMs - timestampMs
+        if (
+          distanceFromPrevious >= MINIMUM_BOUNDARY_GAP_MS &&
+          distanceToEnd >= MINIMUM_BOUNDARY_GAP_MS
+        ) {
+          cutPoints.push(timestampMs)
+        }
+      }
+    }
+    cutPoints.push(segment.endMs)
+
+    if (cutPoints.length === 2) {
+      refined.push({ ...segment, index: refined.length })
+      continue
+    }
+
+    for (let partIndex = 0; partIndex < cutPoints.length - 1; partIndex += 1) {
+      const startMs = cutPoints[partIndex]
+      const endMs = cutPoints[partIndex + 1]
+      const boundaryFrameIndex = frames.findIndex((frame) => frame.timestampMs >= startMs)
+      const boundaryDistance =
+        boundaryFrameIndex > 0
+          ? frameDistance(frames[boundaryFrameIndex - 1], frames[boundaryFrameIndex])
+          : segment.detection.distance
+      refined.push({
+        ...segment,
+        id: `${segment.id}-stable-${partIndex + 1}`,
+        index: refined.length,
+        startMs,
+        endMs,
+        detection:
+          partIndex === 0
+            ? segment.detection
+            : {
+                source: 'auto',
+                ...(boundaryDistance === undefined ? {} : { distance: boundaryDistance }),
+              },
+      })
+    }
+  }
+
+  return refined
 }
 
 function boundariesForSegments(segments: SlideData[]): SlideBoundary[] {
@@ -269,14 +361,16 @@ async function classifySegments(
   sampledFrames: FrameHash[],
   threshold: number,
 ) {
+  const refinedSegments = refineSegmentsAtStableRuns(segments, sampledFrames, threshold)
   const articleId = requireActiveArticleId(project)
   const context = getActiveArticleSourceContext(project)
   const runId = crypto.randomUUID()
   const directory = await prepareVisualClassificationDirectory(project.id, articleId, runId)
   const pathsBySegment = new Map<string, string[]>()
   const cropPathBySegment = new Map<string, string>()
+  const timestampByPath = new Map<string, number>()
   try {
-    for (const segment of segments) {
+    for (const segment of refinedSegments) {
       const paths: string[] = []
       const timestamps = visualSampleTimestamps(segment.startMs, segment.endMs)
       for (let index = 0; index < timestamps.length; index += 1) {
@@ -288,6 +382,7 @@ async function classifySegments(
             outputPath,
           })
           paths.push(outputPath)
+          timestampByPath.set(outputPath, timestamps[index])
         } catch (error) {
           console.warn(`区間${segment.index + 1}の人物検出画像を抽出できませんでした`, error)
         }
@@ -330,7 +425,7 @@ async function classifySegments(
     }
     const textByPath = new Map(textDetections.map((detection) => [detection.imagePath, detection]))
     const settleThreshold = Math.max(2, Math.floor(threshold / 2))
-    const classifiedSegments = segments.map((segment) => {
+    const classifiedSegments = refinedSegments.map((segment) => {
       const midpoint = (segment.startMs + segment.endMs) / 2
       const representative = sampledFrames
         .filter(
@@ -378,7 +473,106 @@ async function classifySegments(
         },
       }
     })
-    return mergeAdjacentNonSlideSegments(classifiedSegments)
+
+    const additionalPathsBySegment = new Map<string, string[]>()
+    for (const segment of classifiedSegments) {
+      if (!needsDensePersonSampling(segment)) continue
+      const existingPaths = pathsBySegment.get(segment.id) ?? []
+      const existingTimestamps = existingPaths.flatMap((path) => {
+        const timestamp = timestampByPath.get(path)
+        return timestamp === undefined ? [] : [timestamp]
+      })
+      const timestamps = additionalPersonSampleTimestamps(
+        segment.startMs,
+        segment.endMs,
+        existingTimestamps,
+      )
+      const additionalPaths: string[] = []
+      for (let index = 0; index < timestamps.length; index += 1) {
+        const outputPath = await join(directory, `${segment.index}-dense-${index}.jpg`)
+        try {
+          await extractFullFrame({
+            path: context.source.path,
+            timestampMs: context.range.startMs + timestamps[index],
+            outputPath,
+          })
+          additionalPaths.push(outputPath)
+          timestampByPath.set(outputPath, timestamps[index])
+        } catch (error) {
+          console.warn(`区間${segment.index + 1}の追加人物サンプルを抽出できませんでした`, error)
+        }
+      }
+      additionalPathsBySegment.set(segment.id, additionalPaths)
+    }
+
+    const additionalPaths = [...additionalPathsBySegment.values()].flat()
+    const additionalByPath = new Map<string, PeopleDetection>()
+    if (additionalPaths.length > 0) {
+      try {
+        const result = await detectPeopleInImages({ imagePaths: additionalPaths })
+        for (const detection of result.detections) {
+          additionalByPath.set(detection.imagePath, detection)
+        }
+      } catch (error) {
+        console.warn('追加人物検出を実行できなかったため区間を要確認のままにします', error)
+      }
+    }
+
+    const denselyClassifiedSegments = classifiedSegments.map((segment) => {
+      const extraPaths = additionalPathsBySegment.get(segment.id) ?? []
+      if (extraPaths.length === 0) return segment
+
+      const people = [
+        ...(pathsBySegment.get(segment.id) ?? []).flatMap((path) => {
+          const detection = byPath.get(path)
+          return detection ? [detection] : []
+        }),
+        ...extraPaths.flatMap((path) => {
+          const detection = additionalByPath.get(path)
+          return detection ? [detection] : []
+        }),
+      ].toSorted(
+        (first, second) =>
+          (timestampByPath.get(first.imagePath) ?? 0) -
+          (timestampByPath.get(second.imagePath) ?? 0),
+      )
+      const expectedCount = (pathsBySegment.get(segment.id) ?? []).length + extraPaths.length
+      if (people.length !== expectedCount) return segment
+
+      const classified = classifyVisualSegment({
+        segment,
+        sampledFrames,
+        people,
+        text: textByPath.get(cropPathBySegment.get(segment.id) ?? ''),
+        crop: context.crop,
+        metadata: context.source.metadata,
+        settleThreshold,
+      })
+      return { ...segment, ...classified }
+    })
+
+    const continuityClassifiedSegments = denselyClassifiedSegments.map((segment, index) => {
+      const segmentHash = segment.detection.hash
+      if (!needsDensePersonSampling(segment) || segmentHash === undefined) return segment
+      const neighbors = [denselyClassifiedSegments[index - 1], denselyClassifiedSegments[index + 1]]
+      const sameSceneNonSlide = neighbors.some(
+        (neighbor) =>
+          neighbor?.autoKind === 'non-slide' &&
+          neighbor.personLayout === 'dominant' &&
+          neighbor.detection.hash !== undefined &&
+          hammingDistance(segmentHash, neighbor.detection.hash) <= 20,
+      )
+      if (!sameSceneNonSlide) return segment
+      return {
+        ...segment,
+        autoKind: 'non-slide' as const,
+        classification: segment.classification
+          ? { ...segment.classification, confidence: 0.68 }
+          : undefined,
+      }
+    })
+
+    return mergeAdjacentNonSlideSegments(continuityClassifiedSegments)
   } finally {
     await removeVisualClassificationDirectory(project.id, articleId, runId)
   }

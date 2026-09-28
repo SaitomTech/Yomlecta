@@ -15,12 +15,12 @@ import type {
   VisualSegmentKind,
 } from '../../types/project'
 
-export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v11-evidence-priority'
+export const VISUAL_CLASSIFIER_VERSION = 'visual-rules-v15-adaptive-person-review'
 
 const MIN_PERSON_CONFIDENCE = 0.5
 const MIN_PERSON_TRACK_IOU = 0.1
 const MIN_SUSTAINED_PERSON_PRESENCE = 0.6
-const MIN_FACE_LANDMARK_MOTION = 0.015
+const MIN_FACE_LANDMARK_MOTION = 0.04
 const MIN_LONGEST_STABLE_RUN_RATIO = 0.6
 const MIN_TEXT_REGION_CONFIDENCE = 0.3
 const MIN_TEXT_REGION_AREA_RATIO = 0.008
@@ -326,12 +326,25 @@ export function classifyVisualSegment({
   } else if (hasPerson && meaningfulPerson && !smallOutsidePerson && liveFaceMotion) {
     autoKind = 'non-slide'
     confidence = dominantPerson ? 0.92 : 0.84
-  } else if (slideLikeCrop && hasTextEvidence) {
+  } else if (
+    hasPerson &&
+    meaningfulPerson &&
+    dominantPerson &&
+    !smallOutsidePerson &&
+    movingPersonBox
+  ) {
+    // A prominent moving person is stronger evidence than text-like stage lighting or logos.
+    autoKind = 'non-slide'
+    confidence = 0.86
+  } else if (slideLikeCrop && hasTextEvidence && !dominantPerson) {
     autoKind = 'slide'
     confidence = stableSlide ? 0.9 : 0.76
   } else if (hasPerson && meaningfulPerson && !smallOutsidePerson && movingPersonBox) {
     autoKind = 'non-slide'
     confidence = dominantPerson ? 0.86 : 0.76
+  } else if (hasPerson && meaningfulPerson && !smallOutsidePerson && !slideLikeCrop) {
+    autoKind = 'non-slide'
+    confidence = dominantPerson ? 0.76 : 0.68
   } else if (stableSlide && !hasPerson) {
     autoKind = 'slide'
     confidence = 0.88
@@ -381,4 +394,50 @@ export function visualSampleTimestamps(startMs: number, endMs: number) {
     const maximum = endMs - Math.min(300, duration / 2)
     return Math.round(Math.max(minimum, Math.min(maximum, raw)))
   })
+}
+
+const MAX_ADDITIONAL_PERSON_SAMPLES = 24
+
+export function needsDensePersonSampling(
+  segment: Pick<VisualSegment, 'autoKind' | 'personLayout' | 'classification'>,
+) {
+  const evidence = segment.classification?.evidence
+  // A stable crop or OCR noise cannot distinguish a static speaker from a slide.
+  // Dominant-person segments need denser motion evidence either way.
+  return (
+    segment.autoKind === 'unknown' &&
+    segment.personLayout === 'dominant' &&
+    evidence !== undefined &&
+    (evidence.cropLongestStableRunRatio ?? evidence.cropStableRatio ?? 0) >=
+      MIN_LONGEST_STABLE_RUN_RATIO
+  )
+}
+
+export function additionalPersonSampleTimestamps(
+  startMs: number,
+  endMs: number,
+  existingTimestamps: number[],
+) {
+  const duration = Math.max(0, endMs - startMs)
+  if (duration <= 0) return []
+
+  const targetSpacingMs = duration <= 3_000 ? 250 : duration <= 15_000 ? 500 : 1_000
+  const intervalCount = Math.min(
+    MAX_ADDITIONAL_PERSON_SAMPLES + 1,
+    Math.max(1, Math.ceil(duration / targetSpacingMs)),
+  )
+  const timestamps: number[] = []
+
+  for (let index = 1; index < intervalCount; index += 1) {
+    const timestamp = Math.round(startMs + (duration * index) / intervalCount)
+    if (
+      existingTimestamps.some((existing) => Math.abs(existing - timestamp) < 100) ||
+      timestamps.some((existing) => existing === timestamp)
+    ) {
+      continue
+    }
+    timestamps.push(timestamp)
+  }
+
+  return timestamps
 }
