@@ -66,6 +66,8 @@ jobs:
             ~/.cargo/git/db
             src-tauri/target
           key: macos-arm64-cargo-build-v2-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            macos-arm64-cargo-build-v2-
 
       - name: Check release version
         env:
