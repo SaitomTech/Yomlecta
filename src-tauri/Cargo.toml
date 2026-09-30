@@ -1,6 +1,6 @@
 [package]
 name = "yomlecta"
-version = "0.25.0"
+version = "0.26.0"
 description = "A macOS app for turning lecture videos into structured notes"
 authors = ["SaitomTech"]
 license = "MIT"
