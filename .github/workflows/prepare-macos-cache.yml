@@ -3,20 +3,23 @@ name: Prepare macOS build cache
 on:
   push:
     branches: [develop]
+    # Warm expensive native builds; frontend-only changes reuse the existing cache.
     paths:
       - '.github/workflows/prepare-macos-cache.yml'
       - '.github/workflows/release-macos.yml'
       - 'rust-toolchain.toml'
-      - 'src-tauri/**'
-      - 'scripts/**'
-      - 'src/**'
-      - 'public/**'
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+      - 'src-tauri/build.rs'
+      - 'src-tauri/src/**'
+      - 'src-tauri/migrations/**'
+      - 'src-tauri/.cargo/**'
+      - 'src-tauri/tauri*.conf.json'
+      - 'src-tauri/capabilities/**'
+      - 'scripts/prepare-sidecars.ts'
       - 'package.json'
       - 'bun.lock'
       - 'bunfig.toml'
-      - 'index.html'
-      - 'tsconfig*.json'
-      - 'vite.config.ts'
   workflow_dispatch:
 
 permissions:
