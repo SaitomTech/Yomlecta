@@ -1,4 +1,4 @@
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import {
@@ -30,10 +30,11 @@ import {
   getArticleOutputLanguage,
   isArticleOutputLanguageAvailable,
 } from '../article/outputLanguage'
-import { renderHtml, renderMarkdown, renderTxt } from './renderers'
+import { renderHtml, renderMarkdown, renderPdfHtml, renderTxt } from './renderers'
 
 export const EXPORT_OPTIONS = [
   { format: 'html', label: 'HTML', filename: 'index.html' },
+  { format: 'pdf', label: 'PDF', filename: 'article.pdf' },
   { format: 'markdown', label: 'Markdown', filename: 'notes.md' },
   { format: 'txt', label: 'TXT', filename: 'notes.txt' },
 ] as const
@@ -93,7 +94,7 @@ export type ExportDocument = {
   sections: ExportSection[]
 }
 
-const EXPORT_RENDERERS: Record<ExportFormat, (document: ExportDocument) => string> = {
+const EXPORT_RENDERERS: Partial<Record<ExportFormat, (document: ExportDocument) => string>> = {
   html: renderHtml,
   markdown: renderMarkdown,
   txt: renderTxt,
@@ -340,6 +341,23 @@ async function getExportDirectory(projectId: string, articleId?: string) {
     : join(await appLocalDataDir(), 'projects', projectId, 'exports')
 }
 
+function pdfFilename(title: string) {
+  const sanitizedTitle = title
+    .normalize('NFC')
+    .replace(/[<>:"/\\|?*\p{Cc}]/gu, '_')
+    .trim()
+  const encoder = new TextEncoder()
+  let basename = ''
+  let byteLength = 0
+  for (const character of sanitizedTitle) {
+    byteLength += encoder.encode(character).length
+    if (byteLength > 240) break
+    basename += character
+  }
+  basename = basename.replace(/[. ]+$/u, '') || '記事'
+  return `${basename}.pdf`
+}
+
 export async function exportProject(
   project: MediaProject,
   onProgress?: (progress: ExportProgress) => void,
@@ -395,19 +413,34 @@ export async function exportProject(
 
   report('writing-files')
   const files = await Promise.all(
-    EXPORT_OPTIONS.map(async (file) => ({
-      format: file.format,
-      filename: file.filename,
-      path: await join(destination, file.filename),
-    })),
-  )
-  await Promise.all(
-    files.map(async (file) => {
-      await writeTextFile(file.path, EXPORT_RENDERERS[file.format](document))
-      completed += 1
-      report('writing-files')
+    EXPORT_OPTIONS.map(async (file) => {
+      const filename = file.format === 'pdf' ? pdfFilename(document.title) : file.filename
+      return {
+        format: file.format,
+        filename,
+        path: await join(destination, filename),
+      }
     }),
   )
+  await Promise.all(
+    files
+      .filter((file) => file.format !== 'pdf')
+      .map(async (file) => {
+        const renderer = EXPORT_RENDERERS[file.format]
+        if (!renderer) throw new Error(`${file.format}形式の出力に対応していません。`)
+        await writeTextFile(file.path, renderer(document))
+        completed += 1
+        report('writing-files')
+      }),
+  )
+
+  const pdfSourceHtmlPath = await join(destination, 'article-pdf.html')
+  await writeTextFile(pdfSourceHtmlPath, renderPdfHtml(document))
+  completed += 1
+  report('writing-files')
+
+  const pdfFile = files.find((file) => file.format === 'pdf')
+  if (pdfFile && (await fileExists(pdfFile.path))) await removeAbsolutePath(pdfFile.path)
 
   const previewDocument = buildExportDocument(project, (sourceImagePath) =>
     convertFileSrc(sourceImagePath),
@@ -429,13 +462,34 @@ async function copyExportAssets(assets: ExportAsset[], destinationDirectory: str
   )
 }
 
-export async function downloadExportFile(file: ExportFile, assets: ExportAsset[]) {
+async function ensurePdfGenerated(files: ExportFile[]) {
+  const pdfFile = files.find((candidate) => candidate.format === 'pdf')
+  if (!pdfFile || (await fileExists(pdfFile.path))) return
+
+  const htmlFile = files.find((candidate) => candidate.format === 'html')
+  if (!htmlFile) throw new Error('PDF生成に必要なHTMLファイルがありません。')
+  const pdfSourceHtmlPath = await join(await dirname(htmlFile.path), 'article-pdf.html')
+  if (!(await fileExists(pdfSourceHtmlPath))) {
+    throw new Error('PDF用の記事レイアウトを生成できていません。記事を再生成してください。')
+  }
+  await invoke<void>('export_article_pdf', {
+    htmlPath: pdfSourceHtmlPath,
+    pdfPath: pdfFile.path,
+  })
+}
+
+export async function downloadExportFile(
+  file: ExportFile,
+  assets: ExportAsset[],
+  files: ExportFile[],
+) {
   const destination = await save({
     defaultPath: file.filename,
     title: `${file.filename}を保存`,
   })
   if (!destination) return false
 
+  if (file.format === 'pdf') await ensurePdfGenerated(files)
   await copyFile(file.path, destination)
   if (file.format === 'html' || file.format === 'markdown') {
     await copyExportAssets(assets, await join(await dirname(destination), 'assets'))
@@ -451,6 +505,7 @@ export async function downloadAllExportFiles(files: ExportFile[], assets: Export
   })
   if (typeof selected !== 'string') return false
 
+  await ensurePdfGenerated(files)
   await Promise.all(
     files.map(async (file) => copyFile(file.path, await join(selected, file.filename))),
   )

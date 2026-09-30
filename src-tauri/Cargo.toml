@@ -1,6 +1,6 @@
 [package]
 name = "yomlecta"
-version = "0.25.0"
+version = "0.26.0"
 description = "A macOS app for turning lecture videos into structured notes"
 authors = ["SaitomTech"]
 license = "MIT"
@@ -38,4 +38,27 @@ sqlx = { version = "0.8.6", default-features = false, features = [
   "sqlite",
   "migrate",
   "macros",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "NSPrintInfo",
+  "NSPrintOperation",
+  "NSResponder",
+  "NSView",
+  "NSWindow",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+  "NSDictionary",
+  "NSGeometry",
+  "NSObject",
+  "NSString",
+  "NSURL",
+] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = [
+  "objc2-app-kit",
+  "WKPreferences",
+  "WKWebView",
+  "WKWebViewConfiguration",
 ] }

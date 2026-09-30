@@ -39,6 +39,9 @@ import {
 
 export const MINIMUM_BOUNDARY_GAP_MS = 1500
 export const MINIMUM_STABLE_SUBSEGMENT_MS = 5000
+const MAX_SHORT_UNKNOWN_TRANSITION_MS = 2000
+const MAX_SLIDE_ABSORB_HASH_DISTANCE = 10
+const MIN_SLIDE_ABSORB_DISTANCE_MARGIN = 8
 
 function frameDistance(first: FrameHash, second: FrameHash) {
   const hashDistance = hammingDistance(first.hash, second.hash)
@@ -323,6 +326,71 @@ export function mergeAdjacentNonSlideSegments(segments: SlideData[]) {
   return merged.map((segment, index) => ({ ...segment, index }))
 }
 
+/**
+ * A very short transition frame can be neither a stable slide nor a sustained presenter shot.
+ * Attach it to an adjacent slide only when its frame hash is clearly closer to that slide than
+ * to any other classified neighbor.
+ */
+export function absorbShortUnknownTransitions(segments: SlideData[]) {
+  const merged: SlideData[] = []
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]
+    if (!segment) continue
+    const durationMs = segment.endMs - segment.startMs
+    const previous = merged.at(-1)
+    const next = segments[index + 1]
+
+    if (
+      segment.autoKind === 'unknown' &&
+      durationMs > 0 &&
+      durationMs <= MAX_SHORT_UNKNOWN_TRANSITION_MS
+    ) {
+      const neighbors = [
+        previous && previous.endMs === segment.startMs ? previous : undefined,
+        next && segment.endMs === next.startMs ? next : undefined,
+      ]
+      const candidates = neighbors
+        .filter(
+          (neighbor): neighbor is SlideData =>
+            neighbor !== undefined &&
+            neighbor.autoKind !== 'unknown' &&
+            neighbor.detection.hash !== undefined &&
+            segment.detection.hash !== undefined,
+        )
+        .map((neighbor) => ({
+          segment: neighbor,
+          distance: hammingDistance(segment.detection.hash!, neighbor.detection.hash!),
+        }))
+        .toSorted((first, second) => first.distance - second.distance)
+      const closest = candidates[0]
+      const runnerUp = candidates[1]
+      const clearlyMatchesSlide =
+        closest?.segment.autoKind === 'slide' &&
+        closest.distance <= MAX_SLIDE_ABSORB_HASH_DISTANCE &&
+        (runnerUp
+          ? runnerUp.distance - closest.distance >= MIN_SLIDE_ABSORB_DISTANCE_MARGIN
+          : closest.distance <= 6)
+
+      if (clearlyMatchesSlide && closest) {
+        if (closest.segment === previous) {
+          merged[merged.length - 1] = { ...previous, endMs: segment.endMs }
+          continue
+        }
+        if (closest.segment === next && next) {
+          merged.push({ ...next, startMs: segment.startMs })
+          index += 1
+          continue
+        }
+      }
+    }
+
+    merged.push(segment)
+  }
+
+  return merged.map((segment, index) => ({ ...segment, index }))
+}
+
 function representativeTimestamp(startMs: number, endMs: number) {
   const segmentDurationMs = Math.max(0, endMs - startMs)
   if (segmentDurationMs <= 400) return startMs
@@ -572,7 +640,9 @@ async function classifySegments(
       }
     })
 
-    return mergeAdjacentNonSlideSegments(continuityClassifiedSegments)
+    return absorbShortUnknownTransitions(
+      mergeAdjacentNonSlideSegments(continuityClassifiedSegments),
+    )
   } finally {
     await removeVisualClassificationDirectory(project.id, articleId, runId)
   }

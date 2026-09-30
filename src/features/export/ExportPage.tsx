@@ -20,6 +20,8 @@ import { useExport, type ExportController } from './hooks/useExport'
 type ExportPageProps = {
   project: MediaProject
   exportResult?: ExportResult | null
+  preparationError?: string | null
+  isPreparing?: boolean
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -33,9 +35,8 @@ const MIN_PREVIEW_HEIGHT = 420
 function getStatusMessage({ status, progress, error }: ExportController) {
   switch (status) {
     case 'running':
-      return progress.stage === 'copying-images'
-        ? 'Slide画像をアプリ内に保存しています…'
-        : 'HTML / Markdown / TXTを生成しています…'
+      if (progress.stage === 'copying-images') return 'Slide画像をアプリ内に保存しています…'
+      return '書き出しレイアウトを準備しています…'
     case 'error':
       return error ?? '書き出しに失敗しました。'
     default:
@@ -46,6 +47,8 @@ function getStatusMessage({ status, progress, error }: ExportController) {
 export function ExportPage({
   project,
   exportResult = null,
+  preparationError = null,
+  isPreparing = false,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -112,7 +115,7 @@ export function ExportPage({
     if (!format || isBusy) return
 
     setIsDownloading(true)
-    setDownloadMessage(null)
+    setDownloadMessage(format === 'pdf' ? 'PDFを生成しています…' : null)
     try {
       if (await exporter.download(format)) {
         const option = EXPORT_OPTIONS.find((candidate) => candidate.format === format)
@@ -130,9 +133,9 @@ export function ExportPage({
     if (isBusy || exporter.files.length === 0) return
 
     setIsDownloading(true)
-    setDownloadMessage(null)
+    setDownloadMessage('PDFを生成しています…')
     try {
-      if (await exporter.downloadAll()) setDownloadMessage('3つのファイルを保存しました。')
+      if (await exporter.downloadAll()) setDownloadMessage('4つのファイルを保存しました。')
     } catch (error) {
       console.error(error)
       setDownloadMessage(error instanceof Error ? error.message : 'ダウンロードに失敗しました。')
@@ -214,6 +217,7 @@ export function ExportPage({
                     Download
                   </option>
                   <option value="html">HTML</option>
+                  <option value="pdf">PDF</option>
                   <option value="markdown">Markdown</option>
                   <option value="txt">TXT</option>
                 </select>
@@ -244,6 +248,11 @@ export function ExportPage({
             {saveError && (
               <p className="mx-5 mt-3 text-sm text-[#b6533a] md:mx-7" role="alert">
                 {saveError}
+              </p>
+            )}
+            {preparationError && !exporter.previewHtml && (
+              <p className="mx-5 mt-3 text-sm text-[#b6533a] md:mx-7" role="alert">
+                {preparationError}
               </p>
             )}
 
@@ -279,7 +288,9 @@ export function ExportPage({
               <div className="mx-5 mt-5 flex min-h-[420px] items-center justify-center rounded-[12px] border border-dashed border-[#b7cbc0] bg-[#f4f7f4] px-5 text-center text-xs text-[#71807b] md:mx-7">
                 {exporter.status === 'error'
                   ? '書き出し結果を表示できません。記事プレビューに戻って内容を確認してください。'
-                  : '記事を保存すると、最新の書き出し結果がここに表示されます。'}
+                  : isPreparing
+                    ? '最新の記事を書き出しています…'
+                    : '「再生成」を押すと、最新の記事を表示できます。'}
               </div>
             )}
           </div>
