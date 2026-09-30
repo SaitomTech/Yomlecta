@@ -86,6 +86,10 @@ function renderSummaryLanguageBlock(
     .join('\n')
 }
 
+function renderSummaryIcon() {
+  return '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /><path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" /></svg>'
+}
+
 function renderSummaryHtml(
   summary?: ArticleSummary | ArticleTranslationSummary,
   language = 'ja',
@@ -156,13 +160,7 @@ function renderSummaryHtml(
     `      <section class="article-summary" lang="${escapeHtml(language)}">`,
     '        <header class="summary-header">',
     '          <h2 class="summary-title">',
-    '            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">',
-    '              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />',
-    '              <path d="M5 3v4" />',
-    '              <path d="M19 17v4" />',
-    '              <path d="M3 5h4" />',
-    '              <path d="M17 19h4" />',
-    '            </svg>',
+    renderSummaryIcon(),
     `            ${escapeHtml(heading)}`,
     '          </h2>',
     '        </header>',
@@ -503,6 +501,195 @@ export function renderHtml(document: ExportDocument) {
     '</html>',
     '',
   ].join('\n')
+}
+
+function pdfChapterTitle(chapter: ArticleChapter, index: number, sourceLanguage: string) {
+  const explicitHeading = safeHeading(chapter.heading ?? '')
+  if (explicitHeading) return explicitHeading
+
+  const firstSlide = chapter.slides[0]
+  const firstLine = firstSlide?.body
+    .trim()
+    .split(/\n|(?<=[。.!?])\s*/u)[0]
+    ?.trim()
+  if (firstLine) {
+    const title = Array.from(firstLine).slice(0, 42).join('')
+    return title.length < firstLine.length ? `${title}…` : title
+  }
+
+  const languageLabels = exportLabels(sourceLanguage)
+  return `${languageLabels.representativeImage} ${String(index + 1).padStart(2, '0')}`
+}
+
+function getPdfChapters(document: ExportDocument): ArticleChapter[] {
+  const structuredChapters = getArticleChapters(document)
+  if (structuredChapters.length) return structuredChapters
+
+  const sortedSlides = [...document.sections].sort((first, second) => first.index - second.index)
+  const slidesPerChapter = 5
+  const chapters: ArticleChapter[] = []
+  for (let index = 0; index < sortedSlides.length; index += slidesPerChapter) {
+    chapters.push({ slides: sortedSlides.slice(index, index + slidesPerChapter) })
+  }
+  return chapters
+}
+
+function renderPdfSlide(slide: ExportSection, sourceLanguage: string) {
+  const labels = exportLabels(sourceLanguage)
+  const body = slide.body.trim() ? renderBodyHtml(slide.body) : `<p>${labels.noSpeech}</p>`
+  const firstParagraphEnd = body.indexOf('</p>') + 4
+  const firstParagraph = body.slice(0, firstParagraphEnd)
+  const remainingBody = body.slice(firstParagraphEnd)
+  const translations = slide.translations
+    .filter((translation) => translation.body.trim())
+    .map(
+      (translation) =>
+        `<div class="translation" lang="${escapeHtml(translation.language)}"><h4>${escapeHtml(articleLanguageLabel(translation.language))}</h4>${renderBodyHtml(translation.body)}</div>`,
+    )
+    .join('\n')
+  const figure = slide.imagePath
+    ? `<figure><img src="${escapeHtml(slide.imagePath)}" alt="${escapeHtml(labels.representativeImage)}"><figcaption>${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</figcaption></figure>`
+    : `<p class="timestamp">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</p>`
+
+  return [
+    `<article class="pdf-slide" id="slide-${slide.index + 1}">`,
+    '<div class="slide-lead">',
+    `<div class="slide-visual">${figure}</div>`,
+    `<div class="prose" lang="${escapeHtml(sourceLanguage)}">${firstParagraph}</div>`,
+    '</div>',
+    `<div class="slide-copy"><div class="prose" lang="${escapeHtml(sourceLanguage)}">${remainingBody}</div>${translations}</div>`,
+    '</article>',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function renderPdfChapter(chapter: ArticleChapter, index: number, sourceLanguage: string) {
+  const heading = pdfChapterTitle(chapter, index, sourceLanguage)
+  const marker = `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`
+  const translatedHeading = chapter.slides[0]?.translations
+    .filter((translation) => translation.heading?.trim())
+    .map(
+      (translation) =>
+        `<p class="translated-heading" lang="${escapeHtml(translation.language)}">${escapeHtml(articleLanguageLabel(translation.language))}: ${escapeHtml(safeHeading(translation.heading ?? ''))}</p>`,
+    )
+    .join('\n')
+  return [
+    `<section class="pdf-chapter" id="chapter-${index + 1}">`,
+    `<header><h2 lang="${escapeHtml(sourceLanguage)}">${escapeHtml(heading)}</h2>${translatedHeading ?? ''}<span class="pdf-page-marker" aria-hidden="true">${marker}</span></header>`,
+    chapter.slides.map((slide) => renderPdfSlide(slide, sourceLanguage)).join('\n'),
+    '</section>',
+  ].join('\n')
+}
+
+export function renderPdfHtml(document: ExportDocument) {
+  const labels = exportLabels(document.sourceLanguage)
+  const chapters = getPdfChapters(document)
+  const contentsLabel = document.sourceLanguage === 'en' ? 'Contents' : '目次'
+  const summaryLabel = document.sourceLanguage === 'en' ? 'Overview' : 'AI要約'
+  const durationLabel = document.sourceLanguage === 'en' ? 'Duration' : '動画時間'
+  const toc = chapters
+    .map((chapter, index) => {
+      const heading = pdfChapterTitle(chapter, index, document.sourceLanguage)
+      const marker = `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`
+      return `<li><a href="#chapter-${index + 1}"><span class="toc-title">${escapeHtml(heading)}</span><span class="toc-page" data-target="${marker}">—</span></a></li>`
+    })
+    .join('\n')
+  const chapterHtml = chapters
+    .map((chapter, index) => renderPdfChapter(chapter, index, document.sourceLanguage))
+    .join('\n')
+  const outline = JSON.stringify(
+    chapters.map((chapter, index) => ({
+      marker: `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`,
+      title: pdfChapterTitle(chapter, index, document.sourceLanguage),
+    })),
+  ).replace(/</gu, '\\u003c')
+  const translations = document.translations
+    .map(
+      (translation) =>
+        `<p class="translated-title" lang="${escapeHtml(translation.language)}"><span>${escapeHtml(articleLanguageLabel(translation.language))}</span>${escapeHtml(translation.title)}</p>`,
+    )
+    .join('\n')
+
+  return [
+    '<!doctype html>',
+    `<html lang="${escapeHtml(document.sourceLanguage)}">`,
+    '<head>',
+    '  <meta charset="utf-8">',
+    `  <title>${escapeHtml(document.title)}</title>`,
+    '  <style>',
+    '    * { box-sizing: border-box; }',
+    '    @page { size: A4; margin: 17mm 18mm 19mm; }',
+    '    html { color: #1d2924; font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 10pt; line-height: 1.72; }',
+    '    body { margin: 0; background: #fff; }',
+    '    h1 { margin: 0; color: #14231c; font-size: 27pt; line-height: 1.3; letter-spacing: -.04em; }',
+    '    .translated-title { margin: 5mm 0 0; color: #4b5b53; font-size: 15pt; line-height: 1.4; }',
+    '    .translated-title span { display: block; margin-bottom: 1mm; color: #718078; font-size: 8pt; }',
+    '    .source-meta { margin-top: 8mm; padding-top: 4mm; border-top: 1px solid #cbd8d0; color: #65736b; font-size: 9pt; }',
+    '    .cover-summary { margin-top: 6mm; }',
+    '    .cover-summary > h2, .toc h2 { margin: 0 0 6mm; color: #197052; font-size: 16pt; }',
+    '    .cover-summary > h2 { display: flex; align-items: center; gap: 2mm; margin-bottom: 2mm; }',
+    '    .cover-summary > h2 svg { width: 5mm; height: 5mm; flex: 0 0 auto; }',
+    '    .cover-summary .summary-header { display: none; }',
+    '    .cover-summary .article-summary { border: 0; border-top: 2px solid #197052; border-radius: 0; }',
+    '    .cover-summary .summary-body { padding: 4mm 0 0; }',
+    '    .cover-summary .summary-overview p, .cover-summary .summary-message p { font-size: 9pt; line-height: 1.65; }',
+    '    .cover-summary .summary-message { margin-top: 4mm; padding: 3mm 5mm 2mm; border-radius: 2.5mm; background: #f4f8f4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+    '    .cover-summary .summary-message .summary-language-block:last-child > p:last-child { margin-bottom: 0; }',
+    '    .cover-summary .summary-grid { margin-top: 4mm; }',
+    '    .cover-summary .summary-group h3 { margin: 0 0 2mm; color: #65736b; font-size: 8pt; }',
+    '    .cover-summary .summary-group li { margin-bottom: 1mm; font-size: 8pt; }',
+    '    .cover-summary .keywords { display: flex; flex-wrap: wrap; gap: 1mm; }',
+    '    .cover-summary .keywords span { padding: .5mm 2mm; border: 1px solid #cbd8d0; border-radius: 8mm; color: #53615b; font-size: 7pt; }',
+    '    .toc { page-break-before: always; break-before: page; page-break-after: always; break-after: page; }',
+    '    .toc-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid #d7e0da; }',
+    '    .toc-list li { border-bottom: 1px solid #d7e0da; break-inside: avoid; }',
+    '    .toc-list a { display: flex; align-items: baseline; gap: 2mm; padding: 2.5mm 0; color: inherit; text-decoration: none; }',
+    '    .toc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '    .toc-page { display: block; flex: 0 0 16mm; padding: 0 1mm; overflow: visible; color: #197052; text-align: right; font-variant-numeric: tabular-nums; }',
+    '    .pdf-chapter { margin-top: 4.5mm; }',
+    '    .pdf-chapter > header { position: relative; margin: 0 0 3mm; padding: 0 0 2mm; border-bottom: 1.2px solid #197052; break-after: avoid; }',
+    '    h2 { margin: 0; color: #14231c; font-size: 14pt; line-height: 1.3; }',
+    '    .translated-heading { margin: 1mm 0 0; color: #65736b; font-size: 8pt; }',
+    '    .pdf-page-marker { position: absolute; top: 0; left: 0; color: #fff; font-size: 1px; line-height: 1px; }',
+    '    .pdf-slide { display: block; margin: 0 0 3mm; padding: 0 0 2mm; }',
+    '    .slide-lead { page-break-inside: avoid; break-inside: avoid; }',
+    '    .slide-lead::after { content: ""; display: block; clear: both; }',
+    '    .slide-visual { float: left; width: 59mm; padding-right: 4mm; }',
+    '    .slide-lead > .prose, .slide-copy { margin-left: 59mm; }',
+    '    figure { margin: 0; break-inside: avoid; }',
+    '    figure img { display: block; width: 100%; max-height: 42.5mm; object-fit: contain; object-position: top center; }',
+    '    figcaption, .timestamp { margin: 1mm 0 0; color: #718078; font-size: 7pt; text-align: left; font-variant-numeric: tabular-nums; }',
+    '    p { margin: 0 0 1.5mm; orphans: 2; widows: 2; }',
+    '    .prose { font-size: 9pt; line-height: 1.52; }',
+    '    .translation { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px dashed #cbd8d0; }',
+    '    .translation h4 { margin: 0 0 1mm; color: #718078; font-size: 7pt; }',
+    '    h1, h2, h3, h4 { page-break-after: avoid; break-after: avoid; }',
+    '  </style>',
+    '</head>',
+    '<body>',
+    '<main>',
+    '<section class="cover">',
+    `<h1 lang="${escapeHtml(document.sourceLanguage)}">${escapeHtml(document.title)}</h1>`,
+    translations,
+    `<p class="source-meta">${escapeHtml(document.sourceName)} · ${durationLabel} ${formatTimestamp(document.durationMs)}</p>`,
+    document.summary
+      ? `<section class="cover-summary"><h2>${renderSummaryIcon()}${summaryLabel}</h2>${renderSummaryHtml(document.summary, document.sourceLanguage, labels.summary, document.translations[0]?.summary, document.translations[0]?.language)}</section>`
+      : '',
+    '</section>',
+    '<nav class="toc">',
+    `<h2>${contentsLabel}</h2>`,
+    `<ol class="toc-list">${toc}</ol>`,
+    '</nav>',
+    chapterHtml,
+    '</main>',
+    `<script id="pdf-outline-data" type="application/json">${outline}</script>`,
+    '</body>',
+    '</html>',
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 export function renderMarkdown(document: ExportDocument) {

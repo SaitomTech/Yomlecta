@@ -36,7 +36,7 @@ function getStatusMessage({ status, progress, error }: ExportController) {
   switch (status) {
     case 'running':
       if (progress.stage === 'copying-images') return 'Slide画像をアプリ内に保存しています…'
-      return 'HTML / Markdown / TXTを生成しています…'
+      return '書き出しレイアウトを準備しています…'
     case 'error':
       return error ?? '書き出しに失敗しました。'
     default:
