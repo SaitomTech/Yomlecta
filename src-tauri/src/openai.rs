@@ -21,6 +21,7 @@ const MAX_PROMPT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_OCR_IMAGE_DATA_BYTES: usize = 20 * 1024 * 1024;
 const MAX_TRANSCRIPTION_AUDIO_BYTES: u64 = 25_000_000;
 const MAX_TRANSCRIPTION_RETRIES: usize = 3;
+const MAX_ARTICLE_RETRIES: usize = 5;
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 static ACTIVE_REQUESTS: OnceLock<Mutex<HashMap<String, AbortHandle>>> = OnceLock::new();
@@ -484,6 +485,7 @@ pub async fn generate_openai_article(
         "text": { "format": { "type": "text" }, "verbosity": "medium" }
     });
 
+    let client = http_client()?;
     let (abort_handle, abort_registration) = AbortHandle::new_pair();
     active_requests()
         .lock()
@@ -491,12 +493,27 @@ pub async fn generate_openai_article(
         .insert(request.client_request_id.clone(), abort_handle);
 
     let response = Abortable::new(
-        http_client()?
-            .post(OPENAI_RESPONSES_URL)
-            .bearer_auth(api_key)
-            .header("X-Client-Request-Id", &request.client_request_id)
-            .json(&body)
-            .send(),
+        async {
+            for retry_index in 0..=MAX_ARTICLE_RETRIES {
+                let response = client
+                    .post(OPENAI_RESPONSES_URL)
+                    .bearer_auth(&api_key)
+                    .header("X-Client-Request-Id", &request.client_request_id)
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|error| format!("OpenAI APIへ接続できません: {error}"))?;
+                if response.status() != StatusCode::TOO_MANY_REQUESTS
+                    || retry_index == MAX_ARTICLE_RETRIES
+                {
+                    return Ok::<_, String>(response);
+                }
+                let delay = retry_delay(&response, retry_index);
+                drop(response);
+                tokio::time::sleep(delay).await;
+            }
+            unreachable!("the final attempt always returns its response")
+        },
         abort_registration,
     )
     .await;
@@ -506,9 +523,7 @@ pub async fn generate_openai_article(
         .map_err(|_| "OpenAI APIリクエストの終了処理に失敗しました".to_string())?
         .remove(&request.client_request_id);
 
-    let response = response
-        .map_err(|_| "OpenAI APIリクエストを停止しました".to_string())?
-        .map_err(|error| format!("OpenAI APIへ接続できません: {error}"))?;
+    let response = response.map_err(|_| "OpenAI APIリクエストを停止しました".to_string())??;
     if !response.status().is_success() {
         return Err(api_error(response).await);
     }

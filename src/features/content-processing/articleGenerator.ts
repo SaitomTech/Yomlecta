@@ -347,7 +347,7 @@ function createOpenAiArticleGenerator(
   return {
     failureMessage:
       'OpenAIによる本文生成を完了できませんでした。APIキーと通信状況を確認してください。',
-    maxConcurrentRequests: 8,
+    maxConcurrentRequests: 6,
     run: async ({ signal, onPreparationProgress, onReady, work }) => {
       await withUserFacingError(
         'OpenAI APIキーを確認できませんでした。APIキー設定を確認してください。',
