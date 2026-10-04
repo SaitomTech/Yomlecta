@@ -72,8 +72,10 @@ export function estimateOpenAiOcrCost({
 
 export function estimateOpenAiArticleCost({
   slides,
+  boundaryInputs = [],
 }: {
   slides: Array<{ transcriptCharacters: number; ocrCharacters: number }>
+  boundaryInputs?: number[]
 }): OpenAiCostEstimate {
   const inputTokens = slides.reduce(
     (total, slide) =>
@@ -87,7 +89,11 @@ export function estimateOpenAiArticleCost({
       total + Math.max(ARTICLE_OUTPUT_MIN_TOKENS, estimateTextTokens(slide.transcriptCharacters)),
     0,
   )
-  return costForTokens(inputTokens, outputTokens)
+  return costForTokens(
+    inputTokens +
+      boundaryInputs.reduce((total, characters) => total + estimateTextTokens(characters), 0),
+    outputTokens + boundaryInputs.length * 160,
+  )
 }
 
 export function estimateOpenAiSummaryCost(articleCharacters: number): OpenAiCostEstimate {

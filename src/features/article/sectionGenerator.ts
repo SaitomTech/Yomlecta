@@ -57,7 +57,7 @@ const SectionResponseSchema = z.object({
       }),
     )
     .min(1)
-    .max(12),
+    .max(20),
 })
 
 type ArticleSectionGenerator = {
@@ -107,9 +107,12 @@ function parseSectionFields(text: string) {
   }
   const result = SectionResponseSchema.safeParse(parsed)
   if (!result.success) {
-    throw new Error('セクション生成の応答形式が不正です。必要な項目が不足しています。', {
-      cause: result.error,
-    })
+    throw new Error(
+      'セクション生成の応答形式が不正です。項目の内容やセクション数を確認してください。',
+      {
+        cause: result.error,
+      },
+    )
   }
   return result.data
 }

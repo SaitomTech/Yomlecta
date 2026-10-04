@@ -408,7 +408,7 @@ fn write_pdf_outline_sync(
     use objc2::{
         msg_send, rc::autoreleasepool, rc::Retained, runtime::AnyClass, runtime::AnyObject,
     };
-    use objc2_foundation::{NSPoint, NSString, NSURL};
+    use objc2_foundation::{NSPoint, NSRect, NSString, NSURL};
     use std::ffi::{c_char, c_void};
 
     unsafe extern "C" {
@@ -470,6 +470,36 @@ fn write_pdf_outline_sync(
         let destination_class = AnyClass::get(c"PDFDestination")
             .ok_or_else(|| "PDFKitの移動先を作成できません。".to_string())?;
 
+        // WebKit prints HTML fragment links with incorrect page references.
+        // Rebind the visible TOC annotations to the same destinations as the outline.
+        let action_class = AnyClass::get(c"PDFActionGoTo")
+            .ok_or_else(|| "PDFの内部リンク機能を利用できません。".to_string())?;
+        let mut toc_links: Vec<(usize, f64, Retained<AnyObject>)> = Vec::new();
+        for page_index in 0..page_count {
+            let page: *mut AnyObject = unsafe { msg_send![&*document, pageAtIndex: page_index] };
+            let annotations: *mut AnyObject = unsafe { msg_send![page, annotations] };
+            let count: usize = unsafe { msg_send![annotations, count] };
+            for annotation_index in 0..count {
+                let annotation: *mut AnyObject =
+                    unsafe { msg_send![annotations, objectAtIndex: annotation_index] };
+                let action: *mut AnyObject = unsafe { msg_send![annotation, action] };
+                if action.is_null() {
+                    continue;
+                }
+                let internal: bool = unsafe { msg_send![action, isKindOfClass: action_class] };
+                if internal {
+                    let bounds: NSRect = unsafe { msg_send![annotation, bounds] };
+                    let retained = unsafe { Retained::retain(annotation) }
+                        .ok_or_else(|| "PDF目次リンクを取得できません。".to_string())?;
+                    toc_links.push((page_index, bounds.origin.y, retained));
+                }
+            }
+        }
+        toc_links.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.total_cmp(&a.1)));
+        if toc_links.len() != entries.len() {
+            return Err("PDF目次リンクと見出しの数が一致しません。".to_string());
+        }
+
         for (index, (entry, page_number)) in entries.iter().zip(page_numbers).enumerate() {
             if *page_number == 0 || *page_number > page_count {
                 return Err(format!("PDF目次のページ番号が範囲外です: {page_number}"));
@@ -487,6 +517,13 @@ fn write_pdf_outline_sync(
             };
             let destination = unsafe { Retained::from_raw(destination_ptr) }
                 .ok_or_else(|| format!("PDF目次の移動先を作成できません: {page_number}"))?;
+
+            let action_alloc: *mut AnyObject = unsafe { msg_send![action_class, alloc] };
+            let action_ptr: *mut AnyObject =
+                unsafe { msg_send![action_alloc, initWithDestination: &*destination] };
+            let action = unsafe { Retained::from_raw(action_ptr) }
+                .ok_or_else(|| "PDF目次リンクの移動先を作成できません。".to_string())?;
+            let _: () = unsafe { msg_send![&*toc_links[index].2, setAction: &*action] };
 
             let item_alloc: *mut AnyObject = unsafe { msg_send![outline_class, alloc] };
             let item_ptr: *mut AnyObject = unsafe { msg_send![item_alloc, init] };

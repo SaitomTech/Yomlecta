@@ -347,8 +347,10 @@ export function updateProjectSlideContent(
   result: ContentProcessingResult,
 ): MediaProject {
   const currentSlide = project.slides.find((slide) => slide.id === slideId)
-  if (!currentSlide?.transcript) return project
+  if (!currentSlide) return project
   const nextTranscript = {
+    raw: currentSlide.transcript?.raw ?? '',
+    model: currentSlide.transcript?.model ?? project.transcription?.model ?? result.article.model,
     ...currentSlide.transcript,
     articleBody: result.article.body,
     articleModel: result.article.model,
@@ -361,15 +363,15 @@ export function updateProjectSlideContent(
     articleGeneratedAt: result.article.generatedAt,
   }
   if (
-    currentSlide.transcript.articleInputFingerprint === result.article.inputFingerprint &&
-    currentSlide.transcript.articleBody === result.article.body &&
-    currentSlide.transcript.articleModel === result.article.model
+    currentSlide.transcript?.articleInputFingerprint === result.article.inputFingerprint &&
+    currentSlide.transcript?.articleBody === result.article.body &&
+    currentSlide.transcript?.articleModel === result.article.model
   )
     return project
   return {
     ...project,
     slides: project.slides.map((slide) => {
-      if (slide.id !== slideId || !slide.transcript) return slide
+      if (slide.id !== slideId) return slide
       return {
         ...slide,
         transcript: nextTranscript,

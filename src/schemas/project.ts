@@ -339,7 +339,32 @@ const ArticleTranslationSchema = z.strictObject({
   sections: z.array(ArticleSectionSchema).optional(),
 })
 
+const TranscriptBoundaryPlanSchema = z.strictObject({
+  version: z.string(),
+  sourceFingerprint: z.string(),
+  sourceText: z.string(),
+  originalRanges: z.array(
+    z.strictObject({
+      blockId: IdSchema,
+      start: z.number().int().nonnegative(),
+      end: z.number().int().nonnegative(),
+    }),
+  ),
+  boundaries: z.array(
+    z.strictObject({
+      leftBlockId: IdSchema,
+      rightBlockId: IdSchema,
+      originalOffset: z.number().int().nonnegative(),
+      resolvedOffset: z.number().int().nonnegative(),
+      status: z.enum(['accepted', 'unchanged', 'fallback']),
+      reason: z.string().optional(),
+      inputFingerprint: z.string(),
+      model: z.string().optional(),
+    }),
+  ),
+})
 const ArticleDataSchema = z.strictObject({
+  boundaryPlan: TranscriptBoundaryPlanSchema.optional(),
   title: z.string().min(1),
   summary: ArticleSummarySchema.optional(),
   sections: ArticleSectionsSchema.optional(),

@@ -186,7 +186,24 @@ export type ArticleTranslation = {
   sections?: ArticleSection[]
 }
 export type ContentProcessingResult = { article: ArticleFormattingResult }
+export type TranscriptBoundaryPlan = {
+  version: string
+  sourceFingerprint: string
+  sourceText: string
+  originalRanges: Array<{ blockId: string; start: number; end: number }>
+  boundaries: Array<{
+    leftBlockId: string
+    rightBlockId: string
+    originalOffset: number
+    resolvedOffset: number
+    status: 'accepted' | 'unchanged' | 'fallback'
+    reason?: string
+    inputFingerprint: string
+    model?: string
+  }>
+}
 export type ArticleData = {
+  boundaryPlan?: TranscriptBoundaryPlan
   title: string
   summary?: ArticleSummary
   sections?: ArticleSections

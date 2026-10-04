@@ -1,3 +1,12 @@
+import {
+  assignedArticleSlides,
+  boundarySourceSlides,
+  currentBoundaryPlan,
+  createBoundaryPlan,
+  boundaryPrompt,
+  boundaryInputFingerprint,
+} from '../../../lib/pipeline/transcriptBoundaries'
+import { BOUNDARY_PROMPT } from '../articleGenerator'
 import { RefreshCw, Square } from 'lucide-react'
 import { ArticleModelDetails } from '../../../components/ArticleModelDetails'
 import { ApiCostEstimate } from '../../../components/ApiCostEstimate'
@@ -26,6 +35,7 @@ type ContentProcessingPanelProps = {
 
 const stageLabels = {
   'preparing-model': '文章処理モデルを確認・準備中…',
+  'adjusting-boundaries': '文字起こしの区切りを調整しています…',
   processing: 'Slideごとに本文を生成中…',
 } as const
 
@@ -54,13 +64,25 @@ export function ContentProcessingPanel({
   const isRunning = processing.status === 'running'
   const isCompleted = processing.status === 'completed'
   const total = processing.progress.total
-  const targetSlides = project.slides.filter((slide) => slide.transcript?.raw.trim())
+  const contextSlides = assignedArticleSlides(project)
+  const targetSlides = contextSlides.filter((slide) => slide.transcript?.raw.trim())
   const slidesToProcess = isCompleted
     ? targetSlides
     : targetSlides.filter((slide) => !hasCurrentContent(slide, modelId))
+  const sourceSlides = boundarySourceSlides(project)
+  const savedPlan = currentBoundaryPlan(project)
+  const initialPlan = createBoundaryPlan(sourceSlides)
+  const boundaryInputs = initialPlan.boundaries.flatMap((_, index) => {
+    const cached = savedPlan?.boundaries[index]
+    return cached?.status !== 'fallback' &&
+      cached?.inputFingerprint === boundaryInputFingerprint(sourceSlides, index, modelId)
+      ? []
+      : [BOUNDARY_PROMPT.length + boundaryPrompt(sourceSlides, index).length]
+  })
   const costEstimate =
     model.provider === 'openai'
       ? estimateOpenAiArticleCost({
+          boundaryInputs,
           slides: slidesToProcess.map((slide) => ({
             transcriptCharacters: slide.transcript?.raw.length ?? 0,
             ocrCharacters: slide.ocr?.rawText.length ?? 0,
@@ -117,6 +139,32 @@ export function ContentProcessingPanel({
   )
 }
 
+function processingStatusMessage(processing: ContentProcessingController) {
+  switch (processing.status) {
+    case 'running':
+      return stageLabels[processing.stage]
+    case 'completed': {
+      const skipped = processing.skippedSlides
+        .map((slide) => `Slide ${slide.slideIndex + 1}`)
+        .join('、')
+      const message = skipped
+        ? `記事本文の生成が完了しました。${skipped}はスキップしました。`
+        : '記事本文をすべて生成しました。'
+      return processing.boundaryFallbacks > 0
+        ? `${message} ${processing.boundaryFallbacks}か所は元の区切りを使用しました。`
+        : message
+    }
+    case 'cancelled':
+      return '生成を停止しました。処理済みのSlideは保存されています。'
+    case 'error':
+      return '記事本文の生成を完了できませんでした。'
+    default:
+      return processing.progress.total === 0
+        ? '先に文字起こしを実行してください。'
+        : 'まだ開始されていません。'
+  }
+}
+
 export function ContentProcessingStatus({
   processing,
   disabled = false,
@@ -125,43 +173,26 @@ export function ContentProcessingStatus({
   disabled?: boolean
 }) {
   const isRunning = processing.status === 'running'
-  const isCompleted = processing.status === 'completed'
-  const isCancelled = processing.status === 'cancelled'
-  const skippedSlideLabel = processing.skippedSlides
-    .map((slide) => `Slide ${slide.slideIndex + 1}`)
-    .join('、')
   const progress = progressRatio(processing)
   const progressLabel =
     isRunning &&
     processing.stage === 'preparing-model' &&
     processing.progress.stageProgress !== null
       ? `モデル ${Math.round(processing.progress.stageProgress * 100)}%`
-      : `${processing.progress.completed} / ${processing.progress.total} slides`
-  const message = isRunning
-    ? stageLabels[processing.stage]
-    : isCompleted
-      ? processing.skippedSlides.length > 0
-        ? `記事本文の生成が完了しました。${skippedSlideLabel}はスキップしました。`
-        : '記事本文をすべて生成しました。'
-      : isCancelled
-        ? '生成を停止しました。処理済みのSlideは保存されています。'
-        : processing.status === 'error'
-          ? '記事本文の生成を完了できませんでした。'
-          : processing.progress.total === 0
-            ? '先に文字起こしを実行してください。'
-            : 'まだ開始されていません。'
-
+      : `${processing.progress.completed} / ${processing.progress.total} ${processing.stage === 'adjusting-boundaries' ? 'か所' : 'slides'}`
   return (
-    <ProcessingStatusRow
-      compact
-      status={processing.status}
-      message={message}
-      progress={progress}
-      progressLabel={progressLabel}
-      progressAriaLabel={isRunning ? stageLabels[processing.stage] : '記事本文生成の進捗'}
-      error={processing.error}
-      onRetry={() => processing.process()}
-      retryDisabled={disabled || isRunning || processing.progress.total === 0}
-    />
+    <div>
+      <ProcessingStatusRow
+        compact
+        status={processing.status}
+        message={processingStatusMessage(processing)}
+        progress={progress}
+        progressLabel={progressLabel}
+        progressAriaLabel={isRunning ? stageLabels[processing.stage] : '記事本文生成の進捗'}
+        error={processing.error}
+        onRetry={processing.retry}
+        retryDisabled={disabled || isRunning || processing.progress.total === 0}
+      />
+    </div>
   )
 }

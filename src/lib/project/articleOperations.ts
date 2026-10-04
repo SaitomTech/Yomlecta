@@ -1,3 +1,10 @@
+import {
+  assignedArticleSlides,
+  boundarySourceSlides,
+  boundaryPlanInputsCurrent,
+  currentBoundaryPlan,
+} from '../pipeline/transcriptBoundaries'
+import { articleInputFingerprint } from '../../features/article/article'
 import type { SlideDetectionOutput } from '../../features/slide-detection/types'
 import {
   commitOcrBatch,
@@ -26,6 +33,7 @@ import {
   updateProjectTranscription,
 } from './project'
 import type {
+  TranscriptBoundaryPlan,
   ContentProcessingResult,
   ArticleDraft,
   ArticleOutputLanguage,
@@ -52,6 +60,30 @@ function syncedArticle(project: MediaProject) {
   const article = activeArticle(next)
   if (!article) return null
   return { next, article }
+}
+
+export async function saveTranscriptBoundaryPlan(
+  project: MediaProject,
+  plan: TranscriptBoundaryPlan,
+) {
+  const slides = boundarySourceSlides(project)
+  if (!boundaryPlanInputsCurrent(plan, slides))
+    throw new Error('文字起こしやOCRが変更されました。本文生成を再実行してください。')
+  if (JSON.stringify(project.article?.boundaryPlan) === JSON.stringify(plan)) return project
+  const updated = {
+    ...project,
+    article: {
+      ...project.article,
+      title: project.article?.title ?? activeArticle(project)?.title ?? '無題の記事',
+      boundaryPlan: plan,
+    },
+    workflow: { ...project.workflow, maxReachedStep: 'article-review' as const },
+    updatedAt: new Date().toISOString(),
+  }
+  const synced = syncedArticle(updated)
+  if (!synced) throw new Error('記事が選択されていません。')
+  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
+  return synced.next
 }
 
 export async function saveArticleDraft(project: MediaProject, draft: ArticleDraft) {
@@ -174,6 +206,20 @@ export async function saveSlideContentBatch(
   project: MediaProject,
   results: Array<{ slideId: string; result: ContentProcessingResult }>,
 ) {
+  const plan = currentBoundaryPlan(project)
+  if (!plan || !boundaryPlanInputsCurrent(plan, boundarySourceSlides(project))) {
+    throw new Error('本文の生成中に文字起こしやOCRが変更されました。再実行してください。')
+  }
+  const assigned = new Map(assignedArticleSlides(project, plan).map((slide) => [slide.id, slide]))
+  for (const { slideId, result } of results) {
+    const slide = assigned.get(slideId)
+    if (
+      !slide ||
+      articleInputFingerprint(slide, result.article.model) !== result.article.inputFingerprint
+    ) {
+      throw new Error('本文の生成中に入力が変更されました。再実行してください。')
+    }
+  }
   let next = project
   for (const { slideId, result } of results) next = updateProjectSlideContent(next, slideId, result)
   if (next === project) return null

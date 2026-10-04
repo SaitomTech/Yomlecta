@@ -14,6 +14,7 @@ import type {
   ArticleTranslation,
   ArticleTranslationLanguage,
   MediaProject,
+  TranscriptBoundaryPlan,
 } from '../../types/project'
 import { ArticleSummaryCard } from './components/ArticleSummaryCard'
 import { ArticleNavigationBar } from './components/ArticleNavigationBar'
@@ -37,6 +38,7 @@ import { getArticleOutputLanguage, getCurrentTranslationForOutputLanguage } from
 
 type ArticleReviewPageProps = {
   project: MediaProject
+  onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>
   onContentSlideCompleted: ContentProcessingSlideCompleted
   onSaveSections: (sections: ArticleSections | null) => void | Promise<void>
   getCurrentProject: () => MediaProject | null
@@ -156,6 +158,7 @@ function getReviewControlState({
 
 export function ArticleReviewPage({
   project,
+  onBoundaryPlanCompleted,
   onContentSlideCompleted,
   onSaveSections,
   getCurrentProject,
@@ -246,6 +249,7 @@ export function ArticleReviewPage({
     handleContentSlideCompleted,
     textModelId,
     getCurrentProject,
+    onBoundaryPlanCompleted,
   )
   const sectionsGeneration = useArticleSections(
     project,

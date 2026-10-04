@@ -1,0 +1,85 @@
+name: Prepare macOS build cache
+
+on:
+  push:
+    branches: [develop]
+    # Warm expensive native builds; frontend-only changes reuse the existing cache.
+    paths:
+      - '.github/workflows/prepare-macos-cache.yml'
+      - '.github/workflows/release-macos.yml'
+      - 'rust-toolchain.toml'
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+      - 'src-tauri/build.rs'
+      - 'src-tauri/src/**'
+      - 'src-tauri/migrations/**'
+      - 'src-tauri/.cargo/**'
+      - 'src-tauri/tauri*.conf.json'
+      - 'src-tauri/capabilities/**'
+      - 'scripts/prepare-sidecars.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - 'bunfig.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-cache-develop
+  cancel-in-progress: false
+
+jobs:
+  prepare-cache:
+    name: Prepare shared macOS cache
+    if: github.ref == 'refs/heads/develop'
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Check runner architecture
+        run: |
+          test "$(uname -m)" = "arm64" || {
+            echo "This project currently supports macOS Apple Silicon only."
+            echo "Runner architecture: $(uname -m)"
+            exit 1
+          }
+
+      # Keep paths and keys in sync with release-macos.yml.
+      - name: Cache sidecars
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/binaries
+          key: macos-arm64-sidecars-${{ hashFiles('scripts/prepare-sidecars.ts') }}
+
+      - name: Cache Cargo build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target/release/deps
+            src-tauri/target/release/build
+            src-tauri/target/release/.fingerprint
+            src-tauri/target/.rustc_info.json
+          key: macos-arm64-cargo-build-v3-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}-${{ github.sha }}
+          restore-keys: |
+            macos-arm64-cargo-build-v3-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}-
+            macos-arm64-cargo-build-v3-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Build with the same release profile, but do not bundle or publish assets.
+      - name: Build release executable
+        run: bunx tauri build --ci --no-bundle
