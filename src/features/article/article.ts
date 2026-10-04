@@ -1,8 +1,8 @@
 import { DEFAULT_ARTICLE_MODEL_ID } from '../../lib/article/articleModel'
-import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
+import { assignedArticleSlides } from '../../lib/pipeline/transcriptBoundaries'
 import type { MediaProject, SlideData } from '../../types/project'
 
-const ARTICLE_PROMPT_VERSION = 'content-processing-v16-infer-source-language'
+const ARTICLE_PROMPT_VERSION = 'content-processing-v19-assigned-transcripts'
 const ARTICLE_SUMMARY_PROMPT_VERSION = 'article-summary-v4-infer-source-language'
 const ARTICLE_SECTIONS_PROMPT_VERSION = 'article-sections-v4-infer-source-language'
 
@@ -22,15 +22,15 @@ export function articleInputFingerprint(
 export function hasCurrentArticle(slide: SlideData, modelId?: string) {
   const articleModelId = modelId ?? slide.transcript?.articleModel ?? DEFAULT_ARTICLE_MODEL_ID
   return (
-    Boolean(slide.transcript?.articleBody?.trim()) &&
+    (slide.transcript?.raw.trim()
+      ? Boolean(slide.transcript?.articleBody?.trim())
+      : slide.transcript?.articleBody === '') &&
     slide.transcript?.articleInputFingerprint === articleInputFingerprint(slide, articleModelId)
   )
 }
 
 export function articleSlidesWithSpeech(project: MediaProject) {
-  return articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
-    Boolean(slide.transcript?.raw.trim()),
-  )
+  return assignedArticleSlides(project).filter((slide) => Boolean(slide.transcript?.raw.trim()))
 }
 
 export function articleTranscriptInput(project: MediaProject) {

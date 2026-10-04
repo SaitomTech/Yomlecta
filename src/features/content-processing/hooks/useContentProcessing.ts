@@ -1,7 +1,13 @@
+import {
+  assignedArticleSlides,
+  currentBoundaryPlan,
+  boundarySourceSlides,
+  hasCurrentBoundaryDecisions,
+} from '../../../lib/pipeline/transcriptBoundaries'
 import { useEffect, useRef, useState } from 'react'
 import { getUserErrorMessage } from '../../../lib/errors'
 import type { ArticleModelId } from '../../../lib/article/articleModel'
-import type { MediaProject } from '../../../types/project'
+import type { MediaProject, TranscriptBoundaryPlan } from '../../../types/project'
 import {
   hasCurrentContent,
   runContentProcessing,
@@ -17,17 +23,25 @@ export function useContentProcessing(
   project: MediaProject,
   onSlideCompleted: ContentProcessingSlideCompleted,
   modelId: ArticleModelId,
-  getCurrentProject?: () => MediaProject | null,
+  getCurrentProject: (() => MediaProject | null) | undefined,
+  onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>,
 ) {
   const projectRef = useRef(project)
   useEffect(() => {
     projectRef.current = project
   }, [project])
-  const targetSlides = project.slides.filter((slide) => slide.transcript?.raw.trim())
+  const contextSlides = assignedArticleSlides(project)
+  const targetSlides = contextSlides.some((slide) => slide.transcript?.raw.trim())
+    ? contextSlides
+    : []
   const completedFromProject = targetSlides.filter((slide) =>
     hasCurrentContent(slide, modelId),
   ).length
-  const isUpToDate = completedFromProject === targetSlides.length && targetSlides.length > 0
+  const plan = currentBoundaryPlan(project)
+  const sourceSlides = boundarySourceSlides(project)
+  const boundariesCurrent = hasCurrentBoundaryDecisions(plan, sourceSlides, modelId)
+  const isUpToDate =
+    boundariesCurrent && completedFromProject === targetSlides.length && targetSlides.length > 0
   const [status, setStatus] = useState<ContentProcessingStatus>('idle')
   const [stage, setStage] = useState<ContentProcessingStage>('preparing-model')
   const [progress, setProgress] = useState<ContentProcessingProgress>({
@@ -35,28 +49,32 @@ export function useContentProcessing(
     total: 0,
     stageProgress: null,
   })
+  const [boundaryFallbacks, setBoundaryFallbacks] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [skippedSlides, setSkippedSlides] = useState<
     Array<Parameters<ContentProcessingSlideSkipped>>
   >([])
+  const lastRunForce = useRef(false)
   const activeController = useRef<AbortController | null>(null)
 
   function reset() {
     setStatus('idle')
     setError(null)
     setSkippedSlides([])
+    setBoundaryFallbacks(0)
     setProgress({ completed: 0, total: 0, stageProgress: null })
     setStage('preparing-model')
   }
 
   async function process(force = false): Promise<boolean> {
     if (activeController.current) return false
-
+    lastRunForce.current = force
     const controller = new AbortController()
     activeController.current = controller
     setStatus('running')
     setError(null)
     setSkippedSlides([])
+    setBoundaryFallbacks(0)
     try {
       await runContentProcessing({
         project: getCurrentProject?.() ?? projectRef.current,
@@ -64,6 +82,8 @@ export function useContentProcessing(
         signal: controller.signal,
         onStage: setStage,
         onProgress: setProgress,
+        onBoundaryPlanCompleted,
+        onBoundaryFallbacks: setBoundaryFallbacks,
         onSlideCompleted,
         onSlideSkipped: (slideId, slideIndex, reason) => {
           setSkippedSlides((current) => [...current, [slideId, slideIndex, reason]])
@@ -117,6 +137,8 @@ export function useContentProcessing(
     stage,
     progress: visibleProgress,
     error,
+    boundaryFallbacks,
+    retry: () => process(lastRunForce.current),
     skippedSlides: skippedSlides.map(([, slideIndex, reason]) => ({ slideIndex, reason })),
     process,
     cancel,

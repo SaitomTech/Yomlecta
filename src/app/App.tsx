@@ -15,6 +15,7 @@ import { SlideDetectionPage } from '../features/slide-detection/SlideDetectionPa
 import { useProjectWorkspace } from './useProjectWorkspace'
 import { canNavigateToWorkflowStep, type WorkflowStep } from '../lib/workflow'
 import {
+  saveTranscriptBoundaryPlan,
   saveArticleDraft,
   saveArticleSections,
   saveArticleSource,
@@ -59,6 +60,7 @@ import type {
   ArticleOutputLanguage,
   ArticleSummary,
   ArticleTranslation,
+  TranscriptBoundaryPlan,
   ContentProcessingResult,
   CropRegion,
   ArticleSections,
@@ -98,7 +100,10 @@ function App() {
   const { project, projectRef, setProjectState, clearProjectState, enqueueProjectOperation } =
     useProjectWorkspace()
 
-  const regenerateArticleExport = (savedProject: MediaProject | null, reportToExportPage = false) => {
+  const regenerateArticleExport = (
+    savedProject: MediaProject | null,
+    reportToExportPage = false,
+  ) => {
     if (!savedProject?.activeArticleId) return Promise.resolve()
 
     const articleId = savedProject.activeArticleId
@@ -111,9 +116,7 @@ function App() {
           const result = await exportProject(savedProject)
           setGeneratedExport({ articleId, result })
           if (reportToExportPage) {
-            setExportPreparation((current) =>
-              current?.articleId === articleId ? null : current,
-            )
+            setExportPreparation((current) => (current?.articleId === articleId ? null : current))
           }
         } catch (error) {
           console.error('記事の書き出し結果を更新できませんでした。', error)
@@ -123,7 +126,8 @@ function App() {
                 ? {
                     articleId,
                     status: 'error',
-                    message: error instanceof Error ? error.message : '記事の書き出しに失敗しました。',
+                    message:
+                      error instanceof Error ? error.message : '記事の書き出しに失敗しました。',
                   }
                 : current,
             )
@@ -501,6 +505,17 @@ function App() {
       if (next) setProjectState(next)
     })
   }
+  const handleBoundaryPlanCompleted = async (plan: TranscriptBoundaryPlan) => {
+    const targetArticleId = route.kind === 'article' ? route.articleId : null
+    await enqueueProjectOperation(async () => {
+      const current = projectRef.current
+      if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) {
+        throw new Error('編集中の記事が変更されました。本文生成を再実行してください。')
+      }
+      const next = await saveTranscriptBoundaryPlan(current, plan)
+      setProjectState(next)
+    })
+  }
   const handleContentSlideCompleted = async (
     results: Array<{ slideId: string; result: ContentProcessingResult }>,
   ) => {
@@ -711,6 +726,7 @@ function App() {
         <ArticleReviewPage
           key={route.articleId}
           project={project}
+          onBoundaryPlanCompleted={handleBoundaryPlanCompleted}
           onContentSlideCompleted={handleContentSlideCompleted}
           onSaveSections={handleSaveArticleSections}
           getCurrentProject={() => projectRef.current}
@@ -734,9 +750,7 @@ function App() {
             : null
         }
         preparationError={
-          currentExportPreparation?.status === 'error'
-            ? currentExportPreparation.message
-            : null
+          currentExportPreparation?.status === 'error' ? currentExportPreparation.message : null
         }
         isPreparing={currentExportPreparation?.status === 'running'}
         onBackToProject={handleOpenProjects}

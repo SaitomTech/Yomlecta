@@ -1,3 +1,4 @@
+import { PDF_TEXT_FLOW_SCRIPT } from './pdfTextFlow'
 import { formatTimestamp } from '../../lib/time'
 import type { ArticleSummary, ArticleTranslationSummary } from '../../types/project'
 import { articleLanguageLabel } from '../article/articleLanguage'
@@ -296,6 +297,11 @@ function getArticleChapters(document: ExportDocument): ArticleChapter[] {
 
   for (const slide of [...document.sections].sort((first, second) => first.index - second.index)) {
     const section = sectionsBySlideId.get(slide.id)
+    // Unassigned images keep their chronological position without splitting a section.
+    if (!section && chapters.length > 0) {
+      chapters.at(-1)!.slides.push(slide)
+      continue
+    }
     const chapterId = section?.id ?? '__unassigned__'
     if (lastChapterId !== chapterId) {
       chapters.push({
@@ -503,7 +509,7 @@ export function renderHtml(document: ExportDocument) {
   ].join('\n')
 }
 
-function pdfChapterTitle(chapter: ArticleChapter, index: number, sourceLanguage: string) {
+function pdfChapterTitle(chapter: ArticleChapter) {
   const explicitHeading = safeHeading(chapter.heading ?? '')
   if (explicitHeading) return explicitHeading
 
@@ -517,8 +523,7 @@ function pdfChapterTitle(chapter: ArticleChapter, index: number, sourceLanguage:
     return title.length < firstLine.length ? `${title}…` : title
   }
 
-  const languageLabels = exportLabels(sourceLanguage)
-  return `${languageLabels.representativeImage} ${String(index + 1).padStart(2, '0')}`
+  return ''
 }
 
 function getPdfChapters(document: ExportDocument): ArticleChapter[] {
@@ -534,39 +539,62 @@ function getPdfChapters(document: ExportDocument): ArticleChapter[] {
   return chapters
 }
 
-function renderPdfSlide(slide: ExportSection, sourceLanguage: string) {
-  const labels = exportLabels(sourceLanguage)
-  const body = slide.body.trim() ? renderBodyHtml(slide.body) : `<p>${labels.noSpeech}</p>`
-  const firstParagraphEnd = body.indexOf('</p>') + 4
-  const firstParagraph = body.slice(0, firstParagraphEnd)
-  const remainingBody = body.slice(firstParagraphEnd)
-  const translations = slide.translations
+function renderPdfTranslations(slide: ExportSection) {
+  return slide.translations
     .filter((translation) => translation.body.trim())
     .map(
       (translation) =>
         `<div class="translation" lang="${escapeHtml(translation.language)}"><h4>${escapeHtml(articleLanguageLabel(translation.language))}</h4>${renderBodyHtml(translation.body)}</div>`,
     )
     .join('\n')
+}
+
+function renderPdfSlide(
+  slide: ExportSection,
+  sourceLanguage: string,
+  continuations: ExportSection[] = [],
+) {
+  const labels = exportLabels(sourceLanguage)
+  const body = slide.body.trim() ? renderBodyHtml(slide.body) : `<p>${labels.noSpeech}</p>`
+  const leadEnd = body.indexOf('</p>') + 4
+  const leadBody = body.slice(0, leadEnd)
+  const remainingBody = body.slice(leadEnd)
+  const translations = renderPdfTranslations(slide)
   const figure = slide.imagePath
     ? `<figure><img src="${escapeHtml(slide.imagePath)}" alt="${escapeHtml(labels.representativeImage)}"><figcaption>${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</figcaption></figure>`
     : `<p class="timestamp">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</p>`
 
   return [
     `<article class="pdf-slide" id="slide-${slide.index + 1}">`,
-    '<div class="slide-lead">',
-    `<div class="slide-visual">${figure}</div>`,
-    `<div class="prose" lang="${escapeHtml(sourceLanguage)}">${firstParagraph}</div>`,
-    '</div>',
-    `<div class="slide-copy"><div class="prose" lang="${escapeHtml(sourceLanguage)}">${remainingBody}</div>${translations}</div>`,
+    `<table class="slide-layout slide-start" role="presentation"><tbody><tr><td class="slide-visual">${figure}</td><td class="slide-text">`,
+    `<div class="slide-copy"><div class="prose" lang="${escapeHtml(sourceLanguage)}">${leadBody}</div></div>`,
+    '</td></tr></tbody></table>',
+    `<table class="slide-layout slide-remainder" role="presentation"><tbody><tr><td class="slide-visual"></td><td class="slide-text"><div class="slide-copy"><div class="prose" lang="${escapeHtml(sourceLanguage)}">${remainingBody}</div>${translations}${continuations.map((continuation) => renderPdfContinuation(continuation, sourceLanguage)).join('\n')}</div>`,
+    '</td></tr></tbody></table>',
     '</article>',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-function renderPdfChapter(chapter: ArticleChapter, index: number, sourceLanguage: string) {
-  const heading = pdfChapterTitle(chapter, index, sourceLanguage)
-  const marker = `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`
+function renderPdfContinuation(slide: ExportSection, sourceLanguage: string) {
+  const body = slide.body.trim() ? renderBodyHtml(slide.body) : ''
+  const translations = renderPdfTranslations(slide)
+  return `<div class="pdf-continuation" id="slide-${slide.index + 1}"><p class="timestamp">${formatTimestamp(slide.startMs)} — ${formatTimestamp(slide.endMs)}</p><div class="prose" lang="${escapeHtml(sourceLanguage)}">${body}</div>${translations}</div>`
+}
+
+function renderPdfChapter(
+  chapter: ArticleChapter,
+  index: number,
+  sourceLanguage: string,
+  marker: string,
+) {
+  const groups: Array<{ slide: ExportSection; continuations: ExportSection[] }> = []
+  for (const slide of chapter.slides) {
+    if (!slide.imagePath && groups.length > 0) groups.at(-1)!.continuations.push(slide)
+    else groups.push({ slide, continuations: [] })
+  }
+  const heading = pdfChapterTitle(chapter)
   const translatedHeading = chapter.slides[0]?.translations
     .filter((translation) => translation.heading?.trim())
     .map(
@@ -576,8 +604,10 @@ function renderPdfChapter(chapter: ArticleChapter, index: number, sourceLanguage
     .join('\n')
   return [
     `<section class="pdf-chapter" id="chapter-${index + 1}">`,
-    `<header><h2 lang="${escapeHtml(sourceLanguage)}">${escapeHtml(heading)}</h2>${translatedHeading ?? ''}<span class="pdf-page-marker" aria-hidden="true">${marker}</span></header>`,
-    chapter.slides.map((slide) => renderPdfSlide(slide, sourceLanguage)).join('\n'),
+    `<header>${heading ? `<h2 lang="${escapeHtml(sourceLanguage)}">${escapeHtml(heading)}</h2>` : ''}${translatedHeading ?? ''}${marker ? `<span class="pdf-page-marker" aria-hidden="true">${marker}</span>` : ''}</header>`,
+    groups
+      .map(({ slide, continuations }) => renderPdfSlide(slide, sourceLanguage, continuations))
+      .join('\n'),
     '</section>',
   ].join('\n')
 }
@@ -588,21 +618,26 @@ export function renderPdfHtml(document: ExportDocument) {
   const contentsLabel = document.sourceLanguage === 'en' ? 'Contents' : '目次'
   const summaryLabel = document.sourceLanguage === 'en' ? 'Overview' : 'AI要約'
   const durationLabel = document.sourceLanguage === 'en' ? 'Duration' : '動画時間'
-  const toc = chapters
-    .map((chapter, index) => {
-      const heading = pdfChapterTitle(chapter, index, document.sourceLanguage)
-      const marker = `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`
-      return `<li><a href="#chapter-${index + 1}"><span class="toc-title">${escapeHtml(heading)}</span><span class="toc-page" data-target="${marker}">—</span></a></li>`
-    })
+  let numberedChapterCount = 0
+  const chapterEntries = chapters.map((chapter, index) => {
+    const title = pdfChapterTitle(chapter)
+    const marker = title ? `YOMLECTACHAPTER${String(++numberedChapterCount).padStart(4, '0')}` : ''
+    return { chapter, index, title, marker }
+  })
+  const titledEntries = chapterEntries.filter((entry) => entry.title)
+  const toc = titledEntries
+    .map(
+      ({ index, title, marker }) =>
+        `<li><a href="#chapter-${index + 1}"><span class="toc-title">${escapeHtml(title)}</span><span class="toc-page" data-target="${marker}">—</span></a></li>`,
+    )
     .join('\n')
-  const chapterHtml = chapters
-    .map((chapter, index) => renderPdfChapter(chapter, index, document.sourceLanguage))
+  const chapterHtml = chapterEntries
+    .map(({ chapter, index, marker }) =>
+      renderPdfChapter(chapter, index, document.sourceLanguage, marker),
+    )
     .join('\n')
   const outline = JSON.stringify(
-    chapters.map((chapter, index) => ({
-      marker: `YOMLECTACHAPTER${String(index + 1).padStart(4, '0')}`,
-      title: pdfChapterTitle(chapter, index, document.sourceLanguage),
-    })),
+    titledEntries.map(({ marker, title }) => ({ marker, title })),
   ).replace(/</gu, '\\u003c')
   const translations = document.translations
     .map(
@@ -622,6 +657,7 @@ export function renderPdfHtml(document: ExportDocument) {
     '    @page { size: A4; margin: 17mm 18mm 19mm; }',
     '    html { color: #1d2924; font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 10pt; line-height: 1.72; }',
     '    body { margin: 0; background: #fff; }',
+    '    main { width: 174mm; }',
     '    h1 { margin: 0; color: #14231c; font-size: 27pt; line-height: 1.3; letter-spacing: -.04em; }',
     '    .translated-title { margin: 5mm 0 0; color: #4b5b53; font-size: 15pt; line-height: 1.4; }',
     '    .translated-title span { display: block; margin-bottom: 1mm; color: #718078; font-size: 8pt; }',
@@ -652,16 +688,23 @@ export function renderPdfHtml(document: ExportDocument) {
     '    h2 { margin: 0; color: #14231c; font-size: 14pt; line-height: 1.3; }',
     '    .translated-heading { margin: 1mm 0 0; color: #65736b; font-size: 8pt; }',
     '    .pdf-page-marker { position: absolute; top: 0; left: 0; color: #fff; font-size: 1px; line-height: 1px; }',
-    '    .pdf-slide { display: block; margin: 0 0 3mm; padding: 0 0 2mm; }',
-    '    .slide-lead { page-break-inside: avoid; break-inside: avoid; }',
-    '    .slide-lead::after { content: ""; display: block; clear: both; }',
-    '    .slide-visual { float: left; width: 59mm; padding-right: 4mm; }',
-    '    .slide-lead > .prose, .slide-copy { margin-left: 59mm; }',
+    '    .pdf-slide { display: block; margin: 0 0 3mm; padding: 0 0 2mm; break-inside: auto; }',
+    '    .slide-layout { width: 100%; table-layout: fixed; border-collapse: collapse; page-break-inside: auto; break-inside: auto; }',
+    '    .slide-layout tr, .slide-layout td { page-break-inside: auto; break-inside: auto; }',
+    '    .slide-layout td { padding: 0; vertical-align: top; }',
+    '    .slide-start, .slide-start tr, .slide-start td { page-break-inside: avoid; break-inside: avoid; }',
+    '    .slide-layout .slide-visual { width: 74mm; padding-right: 4mm; }',
+    '    .slide-copy { margin: 0; }',
+    '    .pdf-continuation { margin-top: 3mm; }',
+    '    .pdf-continuation > .timestamp { margin-bottom: 1mm; }',
     '    figure { margin: 0; break-inside: avoid; }',
-    '    figure img { display: block; width: 100%; max-height: 42.5mm; object-fit: contain; object-position: top center; }',
+    '    figure img { display: block; width: 100%; max-height: 54mm; object-fit: contain; object-position: top center; }',
     '    figcaption, .timestamp { margin: 1mm 0 0; color: #718078; font-size: 7pt; text-align: left; font-variant-numeric: tabular-nums; }',
     '    p { margin: 0 0 1.5mm; orphans: 2; widows: 2; }',
     '    .prose { font-size: 9pt; line-height: 1.52; }',
+    '    .slide-start .prose { display: flow-root; }',
+    '    .slide-start .prose > p:last-child { margin-bottom: 0; }',
+    '    .paragraph-continuation { margin-top: 0; }',
     '    .translation { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px dashed #cbd8d0; }',
     '    .translation h4 { margin: 0 0 1mm; color: #718078; font-size: 7pt; }',
     '    h1, h2, h3, h4 { page-break-after: avoid; break-after: avoid; }',
@@ -684,6 +727,7 @@ export function renderPdfHtml(document: ExportDocument) {
     chapterHtml,
     '</main>',
     `<script id="pdf-outline-data" type="application/json">${outline}</script>`,
+    `<script>${PDF_TEXT_FLOW_SCRIPT}</script>`,
     '</body>',
     '</html>',
     '',
