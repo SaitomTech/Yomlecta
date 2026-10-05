@@ -27,8 +27,10 @@ export function ArticleListRow({
       <div className="flex min-w-0 items-center gap-3">
         <ArticleThumbnail thumbnailPath={item.thumbnailPath} thumbnailUrl={item.thumbnailUrl} />
         <div className="min-w-0">
-          <span className="mb-1.5 block w-fit rounded-full border border-[#b7cbc0] bg-[#e8f2ec] px-2 py-1 text-[10px] font-semibold text-[#1d6b50]">
-            記事
+          <span
+            className={`mb-1.5 flex w-fit items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${status === 'done' ? 'border-[#b7cbc0] bg-[#e8f2ec] text-[#1d6b50]' : 'border-[#cbd9e6] bg-[#edf2f8] text-[#496580]'}`}
+          >
+            {status === 'done' ? '記事' : '記事作成フロー'}
           </span>
           <button
             className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
@@ -53,9 +55,11 @@ export function ArticleListRow({
         </div>
       </div>
       <div className="flex items-center justify-between gap-3 sm:justify-end">
-        <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}>
-          {getArticleStatusLabel(status)}
-        </span>
+        {status !== 'done' && (
+          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}>
+            {getArticleStatusLabel(status)}
+          </span>
+        )}
         <button
           className={`relative z-10 inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 ${status === 'not-started' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
           type="button"
