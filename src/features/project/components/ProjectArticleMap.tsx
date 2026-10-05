@@ -73,7 +73,7 @@ function ArticleTimelineRow({
         <ArticleThumbnail {...getArticleThumbnail(article)} />
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
-            記事
+            記事作成フロー
           </span>
           <h4 className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.02em] text-[#18211f]">
             {article.title}
