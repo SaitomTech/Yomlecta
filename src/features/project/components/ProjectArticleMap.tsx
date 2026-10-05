@@ -6,6 +6,8 @@ import { formatSize } from '../../import/utils'
 import type { Article, MediaProject, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from './VideoThumbnail'
 
+import { ArticleThumbnail, getArticleThumbnail } from '../../article/components/ArticleThumbnail'
+
 function articleStatus(article: Article) {
   if (article.workflow.lastVisitedStep === 'export' || article.workflow.maxReachedStep === 'export')
     return { label: '作成完了', tone: 'done' as const }
@@ -33,6 +35,7 @@ function ArticleTimelineRow({
   isFirst,
   isLast,
   onOpen,
+  onEdit,
   onDelete,
 }: {
   article: Article
@@ -40,6 +43,7 @@ function ArticleTimelineRow({
   isFirst: boolean
   isLast: boolean
   onOpen: (articleId: string) => void
+  onEdit: (articleId: string) => void
   onDelete: (articleId: string) => void
 }) {
   const status = articleStatus(article)
@@ -47,7 +51,7 @@ function ArticleTimelineRow({
 
   return (
     <div
-      className={`grid grid-cols-[128px_minmax(0,1fr)_auto] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[144px_minmax(0,1fr)_auto] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
+      className={`relative grid grid-cols-[128px_minmax(0,1fr)_auto] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[144px_minmax(0,1fr)_auto] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
     >
       <div className="relative flex min-h-[76px] flex-col justify-center border-r border-[#e1e9e4] pl-8 pr-2 text-[10px] text-[#71807b] sm:pl-10 sm:pr-3">
         <div
@@ -67,13 +71,21 @@ function ArticleTimelineRow({
         <span className="mt-1 text-[10px] text-[#94a19b]">{formatTimestamp(duration)}</span>
       </div>
 
-      <div className="min-w-0 px-4 py-3.5 sm:px-5">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
-            記事
+      <div className="flex min-w-0 flex-col items-start justify-center gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-start sm:px-5">
+        <ArticleThumbnail {...getArticleThumbnail(article)} />
+        <div className="min-w-0">
+          <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
+            記事作成フロー
           </span>
           <h4 className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.02em] text-[#18211f]">
-            {article.title}
+            <button
+              className="block max-w-full truncate text-left after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#496580]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#496580]/30"
+              type="button"
+              onClick={() => (status.tone === 'done' ? onEdit(article.id) : onOpen(article.id))}
+              title={article.title}
+            >
+              {article.title || '無題の記事'}
+            </button>
           </h4>
         </div>
       </div>
@@ -84,9 +96,19 @@ function ArticleTimelineRow({
         >
           {status.label}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="relative z-10 flex flex-wrap items-center justify-end gap-1.5">
+          {status.tone === 'done' && (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#b7cbc0] bg-white px-3 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
+              type="button"
+              onClick={() => onEdit(article.id)}
+            >
+              記事を編集
+              <ChevronRight size={13} strokeWidth={1.8} />
+            </button>
+          )}
           <button
-            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition ${status.label === '未着手' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition ${status.tone !== 'working' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
             type="button"
             onClick={() => onOpen(article.id)}
           >
@@ -114,6 +136,7 @@ function VideoGroup({
   highlightedArticleIds,
   onStart,
   onOpen,
+  onEdit,
   onDelete,
   onDeleteVideo,
 }: {
@@ -122,6 +145,7 @@ function VideoGroup({
   highlightedArticleIds: Set<string>
   onStart: (video: ProjectVideo) => void
   onOpen: (articleId: string) => void
+  onEdit: (articleId: string) => void
   onDelete: (articleId: string) => void
   onDeleteVideo: (videoId: string) => void
 }) {
@@ -152,14 +176,14 @@ function VideoGroup({
             onClick={() => setExpanded((value) => !value)}
           >
             <VideoThumbnail video={video} />
-            <span className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
-              <span className="flex w-fit shrink-0 items-center rounded-full border border-[#f1cbc8] bg-[#fff1f0] px-2 py-1 text-[10px] font-semibold text-[#a34f4b]">
+            <span className="min-w-0 flex-1">
+              <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#f1cbc8] bg-[#fff1f0] px-2 py-1 text-[10px] font-semibold text-[#a34f4b]">
                 動画
               </span>
-              <span className="min-w-0 truncate text-sm font-semibold tracking-[-0.02em] text-[#18211f]">
+              <span className="block min-w-0 truncate text-sm font-semibold tracking-[-0.02em] text-[#18211f]">
                 {video.title}
               </span>
-              <span className="col-start-2 mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
+              <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
                 <span>{formatTimestamp(video.media.metadata.durationMs)}</span>
                 <span className="text-[#b7cbc0]">·</span>
                 <span>
@@ -217,6 +241,7 @@ function VideoGroup({
                 isFirst={articleIndex === 0}
                 isLast={articleIndex === articles.length - 1}
                 onOpen={onOpen}
+                onEdit={onEdit}
                 onDelete={onDelete}
               />
             ))
@@ -235,12 +260,14 @@ export function ProjectArticleMap({
   project,
   onStartArticleCreator,
   onOpenArticle,
+  onEditArticle,
   onDeleteArticle,
   onDeleteVideo,
 }: {
   project: MediaProject
   onStartArticleCreator: (video?: ProjectVideo) => void
   onOpenArticle: (articleId: string) => void
+  onEditArticle: (articleId: string) => void
   onDeleteArticle: (articleId: string) => void
   onDeleteVideo: (videoId: string) => void
 }) {
@@ -291,6 +318,7 @@ export function ProjectArticleMap({
           highlightedArticleIds={highlightedArticleIds}
           onStart={onStartArticleCreator}
           onOpen={onOpenArticle}
+          onEdit={onEditArticle}
           onDelete={onDeleteArticle}
           onDeleteVideo={onDeleteVideo}
         />
@@ -309,6 +337,7 @@ export function ProjectArticleMap({
                 isFirst={articleIndex === 0}
                 isLast={articleIndex === ungrouped.length - 1}
                 onOpen={onOpenArticle}
+                onEdit={onEditArticle}
                 onDelete={onDeleteArticle}
               />
             ))}

@@ -1,3 +1,4 @@
+use super::super::assets::resolve_asset_path;
 use super::super::repositories::{
     load_project_from_indexes, load_project_summary, load_revision_snapshot, upsert_asset,
 };
@@ -92,11 +93,18 @@ fn article_list_cte() -> String {
         "WITH article_list AS (
            SELECT a.id, a.project_id, a.title, a.created_at, a.updated_at,
                   p.title AS project_title,
+                  COALESCE((SELECT image.relative_path FROM visual_segments segment
+                    JOIN assets image ON image.id = segment.representative_asset_id
+                    WHERE segment.article_id = a.id
+                    ORDER BY segment.position LIMIT 1), thumbnail.relative_path) AS thumbnail_path,
+                  json_extract(v.media_json, '$.origin.thumbnailUrl') AS thumbnail_url,
                   COALESCE(json_extract(a.workflow_json, '$.lastVisitedStep'), 'crop') AS last_visited_step,
                   COALESCE(json_extract(a.workflow_json, '$.maxReachedStep'), 'crop') AS max_reached_step,
                   {status_sql} AS status
            FROM articles a
            JOIN projects p ON p.id = a.project_id
+           LEFT JOIN videos v ON v.id = a.source_video_id
+           LEFT JOIN assets thumbnail ON thumbnail.id = v.thumbnail_asset_id
          )",
         status_sql = article_status_sql()
     )
@@ -1102,7 +1110,7 @@ async fn list_articles_page(
     let list_sql = format!(
         "{cte}
          SELECT id, project_id, title, project_title, created_at, updated_at,
-                last_visited_step, max_reached_step, status
+                last_visited_step, max_reached_step, status, thumbnail_path, thumbnail_url
          FROM article_list{filter_clause}{cursor_clause}
          ORDER BY created_at DESC, id DESC LIMIT ?"
     );
@@ -1131,6 +1139,9 @@ async fn list_articles_page(
         .iter()
         .map(|row| {
             Ok(json!({
+                "thumbnailPath": row.try_get::<Option<String>, _>("thumbnail_path").map_err(|error| error.to_string())?
+                    .map(|path| resolve_asset_path(&state.app_data_dir, &row.get::<String, _>("project_id"), &path).to_string_lossy().into_owned()),
+                "thumbnailUrl": row.try_get::<Option<String>, _>("thumbnail_url").map_err(|error| error.to_string())?,
                 "articleId": row.try_get::<String, _>("id").map_err(|error| error.to_string())?,
                 "projectId": row.try_get::<String, _>("project_id").map_err(|error| error.to_string())?,
                 "title": row.try_get::<String, _>("title").map_err(|error| error.to_string())?,
@@ -1292,6 +1303,52 @@ mod tests {
         .execute(&state.pool)
         .await
         .expect("insert article");
+    }
+
+    #[test]
+    fn article_list_resolves_thumbnail_and_falls_back_to_video() {
+        tauri::async_runtime::block_on(async {
+            let state = test_state().await;
+            insert_article(&state, "article", "2026-09-01", "Article").await;
+            for (id, path) in [
+                ("video", "video.mp4"),
+                ("thumbnail", "thumbnail.jpg"),
+                ("frame", "frame.jpg"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO assets (id, project_id, relative_path) VALUES (?, 'project', ?)",
+                )
+                .bind(id)
+                .bind(path)
+                .execute(&state.pool)
+                .await
+                .unwrap();
+            }
+            sqlx::query("INSERT INTO videos (id, project_id, asset_id, thumbnail_asset_id, title, media_json, created_at, updated_at) VALUES ('video', 'project', 'video', 'thumbnail', 'Video', '{}', '', '')")
+                .execute(&state.pool).await.unwrap();
+            sqlx::query("UPDATE articles SET source_video_id = 'video' WHERE id = 'article'")
+                .execute(&state.pool)
+                .await
+                .unwrap();
+            let page = list_articles_page(&state, 10, None, None, None)
+                .await
+                .unwrap();
+            assert_eq!(
+                page["items"][0]["thumbnailPath"],
+                "/tmp/yomlecta-list-test/projects/project/thumbnail.jpg"
+            );
+            sqlx::query("INSERT INTO analysis_runs (id, article_id, kind, started_at) VALUES ('run', 'article', 'visual_segmentation', '')")
+                .execute(&state.pool).await.unwrap();
+            sqlx::query("INSERT INTO visual_segments (id, article_id, run_id, position, start_ms, end_ms, auto_kind, person_layout, detection_json, representative_asset_id) VALUES ('segment', 'article', 'run', 0, 0, 100, 'slide', 'none', '{}', 'frame')")
+                .execute(&state.pool).await.unwrap();
+            let page = list_articles_page(&state, 10, None, None, None)
+                .await
+                .unwrap();
+            assert_eq!(
+                page["items"][0]["thumbnailPath"],
+                "/tmp/yomlecta-list-test/projects/project/frame.jpg"
+            );
+        });
     }
 
     #[test]

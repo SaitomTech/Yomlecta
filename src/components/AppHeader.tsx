@@ -24,58 +24,33 @@ function HeaderNavigation({
   onHome,
   onProjects,
   onArticles,
-  disabled,
 }: {
   activeNav: 'home' | 'projects' | 'articles'
   onHome?: () => void
   onProjects?: () => void
   onArticles?: () => void
-  disabled: boolean
 }) {
   const linkClass =
-    'cursor-pointer px-1 py-2 text-[13px] font-semibold text-[#71807b] transition hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 disabled:cursor-not-allowed disabled:opacity-45'
-  const activeClass =
-    'border-b-2 border-[#1d6b50] px-1 py-2 text-[13px] font-semibold text-[#174d3c]'
+    'cursor-pointer px-1 py-2 text-[13px] font-semibold transition hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30'
+  const items = [
+    { id: 'home', label: 'ホーム', onClick: onHome },
+    { id: 'projects', label: 'プロジェクト', onClick: onProjects },
+    { id: 'articles', label: '記事', onClick: onArticles },
+  ] as const
 
   return (
     <nav className="hidden items-center gap-8 min-[980px]:flex" aria-label="メインナビゲーション">
-      {activeNav === 'home' ? (
-        <span className={activeClass} aria-current="page">
-          ホーム
-        </span>
-      ) : (
-        <button className={linkClass} type="button" onClick={onHome} disabled={!onHome || disabled}>
-          ホーム
-        </button>
-      )}
-      {activeNav === 'projects' ? (
-        <span className={activeClass} aria-current="page">
-          プロジェクト
-        </span>
-      ) : (
+      {items.map(({ id, label, onClick }) => (
         <button
-          className={linkClass}
+          key={id}
+          className={`${linkClass} ${activeNav === id ? 'border-b-2 border-[#1d6b50] text-[#174d3c]' : 'text-[#71807b]'}`}
           type="button"
-          onClick={onProjects}
-          disabled={!onProjects || disabled}
+          onClick={onClick}
+          aria-current={activeNav === id ? 'page' : undefined}
         >
-          プロジェクト
+          {label}
         </button>
-      )}
-      {activeNav === 'articles' ? (
-        <span className={activeClass} aria-current="page">
-          記事
-        </span>
-      ) : (
-        <button
-          className={linkClass}
-          type="button"
-          onClick={onArticles}
-          disabled={!onArticles || disabled}
-        >
-          記事
-        </button>
-      )}
+      ))}
     </nav>
   )
 }
@@ -98,8 +73,6 @@ export function AppHeader({
     activateHome()
   }
 
-  const navigationDisabled = homeDisabled
-
   return (
     <header className="grid h-[76px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-[#d8e1dc]/75 bg-white px-[5.8vw]">
       <div
@@ -119,7 +92,6 @@ export function AppHeader({
           onHome={onHome}
           onProjects={onProjects}
           onArticles={onArticles}
-          disabled={navigationDisabled}
         />
       )}
       <div className="flex min-w-0 items-center justify-self-end gap-2">

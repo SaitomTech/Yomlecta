@@ -274,7 +274,7 @@ function App() {
     })
   }
 
-  const handleOpenArticle = async (articleId: string) => {
+  const handleOpenArticle = async (articleId: string, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
@@ -282,14 +282,15 @@ function App() {
       const loaded = await loadProject(current.id, articleId)
       const next = activateArticle(loaded, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
-      const opened = markProjectOpened(next, article?.workflow.lastVisitedStep ?? 'detect-slides')
+      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const opened = markProjectOpened(next, step)
       const saved = await persistProjectWorkflow(opened)
       setProjectState(saved)
       if (requestId === navigationRequestRef.current)
         setRoute({
           kind: 'article',
           articleId,
-          step: article?.workflow.lastVisitedStep ?? 'detect-slides',
+          step,
         })
     })
   }
@@ -338,6 +339,12 @@ function App() {
   const handleOpenProjects = () => {
     navigationRequestRef.current += 1
     setRoute({ kind: 'projects' })
+  }
+
+  const handleBackToProject = () => {
+    if (!projectRef.current) return
+    navigationRequestRef.current += 1
+    setRoute({ kind: 'project' })
   }
 
   const handleOpenArticles = () => {
@@ -674,6 +681,7 @@ function App() {
           onAddLocalVideo={handleAddLocalVideo}
           onAddYoutubeVideo={handleAddYoutubeVideo}
           onOpenArticle={(articleId) => void handleOpenProjectArticle(articleId)}
+          onEditArticle={(articleId) => void handleOpenArticle(articleId, 'article-review')}
           onDeleteArticle={handleDeleteArticle}
           onDeleteVideo={handleDeleteVideo}
           onCreateArticles={handleCreateArticles}
@@ -690,7 +698,7 @@ function App() {
           key={route.articleId}
           project={project}
           onCompleted={handleArticleCropCompleted}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -702,7 +710,7 @@ function App() {
           project={project}
           onCompleted={handleSlideDetectionCompleted}
           onContinue={() => void handleProjectStep('generate-notes')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -716,7 +724,7 @@ function App() {
           onOcrSlideCompleted={handleOcrSlideCompleted}
           onSaveSlideResultEdits={handleSaveSlideResultEdits}
           onOpenArticleReview={() => void handleProjectStep('article-review')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -735,7 +743,7 @@ function App() {
           onSaveTranslation={handleSaveArticleTranslation}
           onSaveOutputLanguage={handleSaveArticleOutputLanguage}
           onExport={() => void handleProjectStep('export')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -753,7 +761,7 @@ function App() {
           currentExportPreparation?.status === 'error' ? currentExportPreparation.message : null
         }
         isPreparing={currentExportPreparation?.status === 'running'}
-        onBackToProject={handleOpenProjects}
+        onBackToProject={handleBackToProject}
         onOpenArticle={handleOpenArticle}
         onGenerated={handleExportCompleted}
         {...articleProps}
@@ -773,9 +781,9 @@ function App() {
   return (
     <AppLayout
       activeNav={activeNav}
-      onHome={route.kind === 'home' ? undefined : handleBackToHome}
-      onProjects={activeNav === 'projects' ? undefined : handleOpenProjects}
-      onArticles={activeNav === 'articles' ? undefined : handleOpenArticles}
+      onHome={handleBackToHome}
+      onProjects={handleOpenProjects}
+      onArticles={handleOpenArticles}
     >
       {page}
     </AppLayout>

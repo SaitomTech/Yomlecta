@@ -39,7 +39,7 @@ export function HomePage({
   const refresh = useCallback(async () => {
     const [projectsResult, articlesResult] = await Promise.allSettled([
       listProjects({ pageSize: 5 }),
-      listArticles({ pageSize: 5 }),
+      listArticles({ pageSize: 5, status: 'done' }),
     ])
     const errors: string[] = []
     if (projectsResult.status === 'fulfilled') setEntries(projectsResult.value.items)
@@ -134,7 +134,7 @@ export function HomePage({
               </div>
             ) : articles.length === 0 ? (
               <div className="px-5 py-10 text-center text-xs leading-6 text-[#71807b]">
-                まだ記事がありません。上のエリアから動画を読み込むと、ここに表示されます。
+                まだ作成完了の記事がありません。記事の作成が完了すると、ここに表示されます。
               </div>
             ) : (
               <div>
@@ -176,7 +176,7 @@ export function HomePage({
               </button>
             )}
           </div>
-          <div className="mt-2 overflow-hidden rounded-[14px] border border-[#b7cbc0] bg-white shadow-[0_18px_52px_rgba(22,54,42,0.04)]">
+          <div className="overflow-hidden rounded-[14px] border border-[#b7cbc0] bg-white shadow-[0_18px_52px_rgba(22,54,42,0.04)]">
             {loading ? (
               <div className="flex items-center justify-center py-20 text-xs text-[#71807b]">
                 <RefreshCw className="mr-2 animate-spin" size={15} />

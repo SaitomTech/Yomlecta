@@ -62,7 +62,7 @@ export function ArticlesPage({
             </p>
             <h1 className="mt-2 text-[30px] font-bold tracking-[-0.07em] sm:text-[36px]">記事</h1>
             <p className="mt-2 text-xs text-[#71807b]">
-              すべてのプロジェクトの記事をまとめて表示します。
+              すべてのプロジェクトの記事と記事作成フローをまとめて表示します。
             </p>
           </div>
           <p className="text-xs text-[#71807b]">{pageInfo.total}件</p>
