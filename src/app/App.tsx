@@ -773,9 +773,9 @@ function App() {
   return (
     <AppLayout
       activeNav={activeNav}
-      onHome={route.kind === 'home' ? undefined : handleBackToHome}
-      onProjects={activeNav === 'projects' ? undefined : handleOpenProjects}
-      onArticles={activeNav === 'articles' ? undefined : handleOpenArticles}
+      onHome={handleBackToHome}
+      onProjects={handleOpenProjects}
+      onArticles={handleOpenArticles}
     >
       {page}
     </AppLayout>
