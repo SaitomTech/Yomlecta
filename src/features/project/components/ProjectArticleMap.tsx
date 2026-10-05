@@ -51,7 +51,7 @@ function ArticleTimelineRow({
 
   return (
     <div
-      className={`grid grid-cols-[128px_minmax(0,1fr)_auto] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[144px_minmax(0,1fr)_auto] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
+      className={`relative grid grid-cols-[128px_minmax(0,1fr)_auto] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[144px_minmax(0,1fr)_auto] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
     >
       <div className="relative flex min-h-[76px] flex-col justify-center border-r border-[#e1e9e4] pl-8 pr-2 text-[10px] text-[#71807b] sm:pl-10 sm:pr-3">
         <div
@@ -78,7 +78,14 @@ function ArticleTimelineRow({
             記事作成フロー
           </span>
           <h4 className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.02em] text-[#18211f]">
-            {article.title}
+            <button
+              className="block max-w-full truncate text-left after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
+              type="button"
+              onClick={() => (status.tone === 'done' ? onEdit(article.id) : onOpen(article.id))}
+              title={article.title}
+            >
+              {article.title || '無題の記事'}
+            </button>
           </h4>
         </div>
       </div>
@@ -89,7 +96,7 @@ function ArticleTimelineRow({
         >
           {status.label}
         </span>
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <div className="relative z-10 flex flex-wrap items-center justify-end gap-1.5">
           {status.tone === 'done' && (
             <button
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#b7cbc0] bg-white px-3 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
