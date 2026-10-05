@@ -71,8 +71,8 @@ function ArticleTimelineRow({
 
       <div className="flex min-w-0 flex-col items-start justify-center gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-start sm:px-5">
         <ArticleThumbnail {...getArticleThumbnail(article)} />
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
+        <div className="min-w-0">
+          <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
             記事作成フロー
           </span>
           <h4 className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.02em] text-[#18211f]">
@@ -155,14 +155,14 @@ function VideoGroup({
             onClick={() => setExpanded((value) => !value)}
           >
             <VideoThumbnail video={video} />
-            <span className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
-              <span className="flex w-fit shrink-0 items-center rounded-full border border-[#f1cbc8] bg-[#fff1f0] px-2 py-1 text-[10px] font-semibold text-[#a34f4b]">
+            <span className="min-w-0 flex-1">
+              <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#f1cbc8] bg-[#fff1f0] px-2 py-1 text-[10px] font-semibold text-[#a34f4b]">
                 動画
               </span>
-              <span className="min-w-0 truncate text-sm font-semibold tracking-[-0.02em] text-[#18211f]">
+              <span className="block min-w-0 truncate text-sm font-semibold tracking-[-0.02em] text-[#18211f]">
                 {video.title}
               </span>
-              <span className="col-start-2 mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
+              <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
                 <span>{formatTimestamp(video.media.metadata.durationMs)}</span>
                 <span className="text-[#b7cbc0]">·</span>
                 <span>
