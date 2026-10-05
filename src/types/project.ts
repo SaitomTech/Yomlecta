@@ -361,6 +361,8 @@ export type ProjectListEntry =
   | { kind: 'invalid'; id: string; error: string }
 
 export type ArticleListItem = {
+  thumbnailPath?: string | null
+  thumbnailUrl?: string | null
   articleId: string
   projectId: string
   title: string

@@ -6,6 +6,8 @@ import { formatSize } from '../../import/utils'
 import type { Article, MediaProject, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from './VideoThumbnail'
 
+import { ArticleThumbnail, getArticleThumbnail } from '../../article/components/ArticleThumbnail'
+
 function articleStatus(article: Article) {
   if (article.workflow.lastVisitedStep === 'export' || article.workflow.maxReachedStep === 'export')
     return { label: '作成完了', tone: 'done' as const }
@@ -67,7 +69,8 @@ function ArticleTimelineRow({
         <span className="mt-1 text-[10px] text-[#94a19b]">{formatTimestamp(duration)}</span>
       </div>
 
-      <div className="min-w-0 px-4 py-3.5 sm:px-5">
+      <div className="flex min-w-0 flex-col items-start justify-center gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-start sm:px-5">
+        <ArticleThumbnail {...getArticleThumbnail(article)} />
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
             記事

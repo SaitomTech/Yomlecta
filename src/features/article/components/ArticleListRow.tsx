@@ -1,6 +1,8 @@
-import { ArrowRight, FileText } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import type { ArticleListItem } from '../../../types/project'
 import { formatArticleDate, getArticleActionLabel, getArticleStatusLabel } from '../articleList'
+
+import { ArticleThumbnail } from './ArticleThumbnail'
 
 const statusClass = {
   done: 'bg-[#e8f2ec] text-[#1d6b50]',
@@ -23,9 +25,7 @@ export function ArticleListRow({
   return (
     <div className="grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
       <div className="flex min-w-0 items-start gap-3">
-        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-[#edf5f0] text-[#2d8062]">
-          <FileText size={15} strokeWidth={1.8} />
-        </div>
+        <ArticleThumbnail thumbnailPath={item.thumbnailPath} thumbnailUrl={item.thumbnailUrl} />
         <div className="min-w-0">
           <button
             className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
