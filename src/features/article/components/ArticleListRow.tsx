@@ -33,7 +33,7 @@ export function ArticleListRow({
             {status === 'done' ? '記事' : '記事作成フロー'}
           </span>
           <button
-            className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
+            className={`block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] after:absolute after:inset-0 after:cursor-pointer after:transition focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset ${status === 'done' ? 'hover:after:bg-[#1d6b50]/5 focus-visible:after:ring-[#1d6b50]/30' : 'hover:after:bg-[#496580]/5 focus-visible:after:ring-[#496580]/30'}`}
             type="button"
             onClick={() => (status === 'done' ? onOpen(item) : onOpenWorkflow(item))}
             title={item.title}
@@ -56,7 +56,9 @@ export function ArticleListRow({
       </div>
       <div className="flex items-center justify-between gap-3 sm:justify-end">
         {status !== 'done' && (
-          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}>
+          <span
+            className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}
+          >
             {getArticleStatusLabel(status)}
           </span>
         )}
