@@ -176,7 +176,7 @@ export function HomePage({
               </button>
             )}
           </div>
-          <div className="mt-2 overflow-hidden rounded-[14px] border border-[#b7cbc0] bg-white shadow-[0_18px_52px_rgba(22,54,42,0.04)]">
+          <div className="overflow-hidden rounded-[14px] border border-[#b7cbc0] bg-white shadow-[0_18px_52px_rgba(22,54,42,0.04)]">
             {loading ? (
               <div className="flex items-center justify-center py-20 text-xs text-[#71807b]">
                 <RefreshCw className="mr-2 animate-spin" size={15} />

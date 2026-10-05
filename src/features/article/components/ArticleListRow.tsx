@@ -27,6 +27,9 @@ export function ArticleListRow({
       <div className="flex min-w-0 items-start gap-3">
         <ArticleThumbnail thumbnailPath={item.thumbnailPath} thumbnailUrl={item.thumbnailUrl} />
         <div className="min-w-0">
+          <span className="mb-1.5 block w-fit rounded-full border border-[#b7cbc0] bg-[#e8f2ec] px-2 py-1 text-[10px] font-semibold text-[#1d6b50]">
+            記事
+          </span>
           <button
             className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
             type="button"
