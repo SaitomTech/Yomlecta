@@ -35,7 +35,7 @@ export function ArticleListRow({
           <button
             className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
             type="button"
-            onClick={() => onOpen(item)}
+            onClick={() => (status === 'done' ? onOpen(item) : onOpenWorkflow(item))}
             title={item.title}
           >
             {item.title || '無題の記事'}
