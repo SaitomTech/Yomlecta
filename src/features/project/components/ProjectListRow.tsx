@@ -36,7 +36,7 @@ export function ProjectListRow({
 }) {
   return (
     <article className="grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <ProjectThumbnail summary={summary} />
         <div className="min-w-0">
           <span className="mb-1.5 block w-fit rounded-full border border-[#d8cfee] bg-[#f1eefb] px-2 py-1 text-[10px] font-semibold text-[#65508d]">
