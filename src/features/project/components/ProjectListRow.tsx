@@ -35,7 +35,7 @@ export function ProjectListRow({
   isDisabled: boolean
 }) {
   return (
-    <article className="grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+    <article className="relative grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
       <div className="flex min-w-0 items-center gap-3">
         <ProjectThumbnail summary={summary} />
         <div className="min-w-0">
@@ -61,8 +61,9 @@ export function ProjectListRow({
       </div>
       <div className="flex items-center justify-end gap-3">
         <button
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] bg-[#1d6b50] px-3 py-2 text-xs font-semibold text-[#f3faf6] transition hover:bg-[#174d3c]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] bg-[#1d6b50] px-3 py-2 text-xs font-semibold text-[#f3faf6] transition after:absolute after:inset-0 after:cursor-pointer after:transition enabled:hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30 disabled:after:cursor-default"
           type="button"
+          aria-label={`${summary.title}を開く`}
           disabled={isDisabled}
           onClick={onOpen}
         >

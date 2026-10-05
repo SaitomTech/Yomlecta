@@ -23,7 +23,7 @@ export function ArticleListRow({
 }) {
   const status = item.status
   return (
-    <div className="grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+    <div className="relative grid gap-3 border-t border-[#e1e9e4] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
       <div className="flex min-w-0 items-center gap-3">
         <ArticleThumbnail thumbnailPath={item.thumbnailPath} thumbnailUrl={item.thumbnailUrl} />
         <div className="min-w-0">
@@ -31,7 +31,7 @@ export function ArticleListRow({
             記事
           </span>
           <button
-            className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
+            className="block max-w-full truncate text-left text-[14px] font-semibold tracking-[-0.02em] text-[#18211f] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
             type="button"
             onClick={() => onOpen(item)}
             title={item.title}
@@ -40,7 +40,7 @@ export function ArticleListRow({
           </button>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#71807b]">
             <button
-              className="truncate hover:text-[#1d6b50] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
+              className="relative z-10 truncate hover:text-[#1d6b50] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
               type="button"
               onClick={() => onOpenProject(item)}
               title={`${item.projectTitle}を開く`}
@@ -57,7 +57,7 @@ export function ArticleListRow({
           {getArticleStatusLabel(status)}
         </span>
         <button
-          className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 ${status === 'not-started' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
+          className={`relative z-10 inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 ${status === 'not-started' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
           type="button"
           onClick={() => (status === 'done' ? onOpen(item) : onOpenWorkflow(item))}
         >
