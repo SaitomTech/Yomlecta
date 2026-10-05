@@ -35,6 +35,7 @@ function ArticleTimelineRow({
   isFirst,
   isLast,
   onOpen,
+  onEdit,
   onDelete,
 }: {
   article: Article
@@ -42,6 +43,7 @@ function ArticleTimelineRow({
   isFirst: boolean
   isLast: boolean
   onOpen: (articleId: string) => void
+  onEdit: (articleId: string) => void
   onDelete: (articleId: string) => void
 }) {
   const status = articleStatus(article)
@@ -87,9 +89,19 @@ function ArticleTimelineRow({
         >
           {status.label}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {status.tone === 'done' && (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#b7cbc0] bg-white px-3 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
+              type="button"
+              onClick={() => onEdit(article.id)}
+            >
+              記事を編集
+              <ChevronRight size={13} strokeWidth={1.8} />
+            </button>
+          )}
           <button
-            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition ${status.label === '未着手' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-2 text-xs font-semibold transition ${status.tone !== 'working' ? 'bg-[#1d6b50] text-white shadow-[0_5px_12px_rgba(29,107,80,0.12)] hover:bg-[#174d3c]' : 'border border-[#b7cbc0] bg-white text-[#1d6b50] hover:bg-[#f4faf6]'}`}
             type="button"
             onClick={() => onOpen(article.id)}
           >
@@ -117,6 +129,7 @@ function VideoGroup({
   highlightedArticleIds,
   onStart,
   onOpen,
+  onEdit,
   onDelete,
   onDeleteVideo,
 }: {
@@ -125,6 +138,7 @@ function VideoGroup({
   highlightedArticleIds: Set<string>
   onStart: (video: ProjectVideo) => void
   onOpen: (articleId: string) => void
+  onEdit: (articleId: string) => void
   onDelete: (articleId: string) => void
   onDeleteVideo: (videoId: string) => void
 }) {
@@ -220,6 +234,7 @@ function VideoGroup({
                 isFirst={articleIndex === 0}
                 isLast={articleIndex === articles.length - 1}
                 onOpen={onOpen}
+                onEdit={onEdit}
                 onDelete={onDelete}
               />
             ))
@@ -238,12 +253,14 @@ export function ProjectArticleMap({
   project,
   onStartArticleCreator,
   onOpenArticle,
+  onEditArticle,
   onDeleteArticle,
   onDeleteVideo,
 }: {
   project: MediaProject
   onStartArticleCreator: (video?: ProjectVideo) => void
   onOpenArticle: (articleId: string) => void
+  onEditArticle: (articleId: string) => void
   onDeleteArticle: (articleId: string) => void
   onDeleteVideo: (videoId: string) => void
 }) {
@@ -294,6 +311,7 @@ export function ProjectArticleMap({
           highlightedArticleIds={highlightedArticleIds}
           onStart={onStartArticleCreator}
           onOpen={onOpenArticle}
+          onEdit={onEditArticle}
           onDelete={onDeleteArticle}
           onDeleteVideo={onDeleteVideo}
         />
@@ -312,6 +330,7 @@ export function ProjectArticleMap({
                 isFirst={articleIndex === 0}
                 isLast={articleIndex === ungrouped.length - 1}
                 onOpen={onOpenArticle}
+                onEdit={onEditArticle}
                 onDelete={onDeleteArticle}
               />
             ))}

@@ -274,7 +274,7 @@ function App() {
     })
   }
 
-  const handleOpenArticle = async (articleId: string) => {
+  const handleOpenArticle = async (articleId: string, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
@@ -282,14 +282,15 @@ function App() {
       const loaded = await loadProject(current.id, articleId)
       const next = activateArticle(loaded, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
-      const opened = markProjectOpened(next, article?.workflow.lastVisitedStep ?? 'detect-slides')
+      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const opened = markProjectOpened(next, step)
       const saved = await persistProjectWorkflow(opened)
       setProjectState(saved)
       if (requestId === navigationRequestRef.current)
         setRoute({
           kind: 'article',
           articleId,
-          step: article?.workflow.lastVisitedStep ?? 'detect-slides',
+          step,
         })
     })
   }
@@ -680,6 +681,7 @@ function App() {
           onAddLocalVideo={handleAddLocalVideo}
           onAddYoutubeVideo={handleAddYoutubeVideo}
           onOpenArticle={(articleId) => void handleOpenProjectArticle(articleId)}
+          onEditArticle={(articleId) => void handleOpenArticle(articleId, 'article-review')}
           onDeleteArticle={handleDeleteArticle}
           onDeleteVideo={handleDeleteVideo}
           onCreateArticles={handleCreateArticles}

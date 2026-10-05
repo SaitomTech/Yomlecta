@@ -31,6 +31,7 @@ export function ProjectDetailPage({
   onAddLocalVideo,
   onAddYoutubeVideo,
   onOpenArticle,
+  onEditArticle,
   onDeleteArticle,
   onDeleteVideo,
   onCreateArticles,
@@ -45,6 +46,7 @@ export function ProjectDetailPage({
     options: YoutubeImportOptions,
   ) => Promise<ProjectVideo>
   onOpenArticle: (articleId: string) => void
+  onEditArticle: (articleId: string) => void
   onDeleteArticle: (articleId: string) => Promise<void>
   onDeleteVideo: (videoId: string) => Promise<void>
   onCreateArticles: (
@@ -137,6 +139,7 @@ export function ProjectDetailPage({
               project={project}
               onStartArticleCreator={startArticleCreator}
               onOpenArticle={onOpenArticle}
+              onEditArticle={onEditArticle}
               onDeleteArticle={requestDeleteArticle}
               onDeleteVideo={requestDeleteVideo}
             />
