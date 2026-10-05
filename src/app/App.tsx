@@ -340,6 +340,12 @@ function App() {
     setRoute({ kind: 'projects' })
   }
 
+  const handleBackToProject = () => {
+    if (!projectRef.current) return
+    navigationRequestRef.current += 1
+    setRoute({ kind: 'project' })
+  }
+
   const handleOpenArticles = () => {
     navigationRequestRef.current += 1
     setRoute({ kind: 'articles' })
@@ -690,7 +696,7 @@ function App() {
           key={route.articleId}
           project={project}
           onCompleted={handleArticleCropCompleted}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -702,7 +708,7 @@ function App() {
           project={project}
           onCompleted={handleSlideDetectionCompleted}
           onContinue={() => void handleProjectStep('generate-notes')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -716,7 +722,7 @@ function App() {
           onOcrSlideCompleted={handleOcrSlideCompleted}
           onSaveSlideResultEdits={handleSaveSlideResultEdits}
           onOpenArticleReview={() => void handleProjectStep('article-review')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -735,7 +741,7 @@ function App() {
           onSaveTranslation={handleSaveArticleTranslation}
           onSaveOutputLanguage={handleSaveArticleOutputLanguage}
           onExport={() => void handleProjectStep('export')}
-          onBackToProject={handleOpenProjects}
+          onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
@@ -753,7 +759,7 @@ function App() {
           currentExportPreparation?.status === 'error' ? currentExportPreparation.message : null
         }
         isPreparing={currentExportPreparation?.status === 'running'}
-        onBackToProject={handleOpenProjects}
+        onBackToProject={handleBackToProject}
         onOpenArticle={handleOpenArticle}
         onGenerated={handleExportCompleted}
         {...articleProps}
