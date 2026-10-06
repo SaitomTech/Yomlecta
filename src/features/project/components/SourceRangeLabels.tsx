@@ -14,39 +14,30 @@ export function SourceRangeLabels({
   color: string
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const startRef = useRef<HTMLSpanElement>(null)
-  const endRef = useRef<HTMLSpanElement>(null)
   const combinedRef = useRef<HTMLSpanElement>(null)
-  const [sizes, setSizes] = useState({ width: 0, startWidth: 0, endWidth: 0, combinedWidth: 0 })
+  const [sizes, setSizes] = useState({ width: 0, combinedWidth: 0 })
   const start = formatPlaybackTime(startMs)
   const end = formatPlaybackTime(endMs)
   const combined = `${start} – ${end}`
 
   useEffect(() => {
     const container = containerRef.current
-    const startLabel = startRef.current
-    const endLabel = endRef.current
     const combinedLabel = combinedRef.current
-    if (!container || !startLabel || !endLabel || !combinedLabel) return
+    if (!container || !combinedLabel) return
 
     const observer = new ResizeObserver(() => {
       const next = {
         width: container.getBoundingClientRect().width,
-        startWidth: startLabel.getBoundingClientRect().width,
-        endWidth: endLabel.getBoundingClientRect().width,
         combinedWidth: combinedLabel.getBoundingClientRect().width,
       }
       setSizes((previous) =>
-        previous.width === next.width &&
-        previous.startWidth === next.startWidth &&
-        previous.endWidth === next.endWidth &&
-        previous.combinedWidth === next.combinedWidth
+        previous.width === next.width && previous.combinedWidth === next.combinedWidth
           ? previous
           : next,
       )
     })
-    for (const element of [container, startLabel, endLabel, combinedLabel])
-      observer.observe(element)
+    observer.observe(container)
+    observer.observe(combinedLabel)
     return () => observer.disconnect()
   }, [])
 
@@ -64,39 +55,19 @@ export function SourceRangeLabels({
       aria-hidden="true"
     >
       <div className="pointer-events-none invisible absolute top-0 whitespace-nowrap">
-        <span ref={startRef} className="inline-block">
-          {start}
-        </span>
-        <span ref={endRef} className="inline-block">
-          {end}
-        </span>
-        <span ref={combinedRef} className="inline-block">
+        <span ref={combinedRef} className="inline-block whitespace-pre">
           {combined}
         </span>
       </div>
-      {sizes.width > 0 &&
-        (layout.combined ? (
-          <span
-            className="absolute top-0 max-w-full truncate"
-            style={{ left: layout.combinedLeft }}
-            title={combined}
-          >
-            {combined}
-          </span>
-        ) : (
-          <>
-            {layout.showStart && (
-              <span className="absolute top-0 whitespace-nowrap" style={{ left: layout.startLeft }}>
-                {start}
-              </span>
-            )}
-            {layout.showEnd && (
-              <span className="absolute top-0 whitespace-nowrap" style={{ left: layout.endLeft }}>
-                {end}
-              </span>
-            )}
-          </>
-        ))}
+      {sizes.width > 0 && (
+        <span
+          className="absolute top-0 max-w-full truncate whitespace-nowrap"
+          style={{ left: layout.combinedLeft }}
+          title={combined}
+        >
+          {combined}
+        </span>
+      )}
     </div>
   )
 }
