@@ -5,6 +5,7 @@ import { formatTimestamp } from '../../../lib/time'
 import { formatSize } from '../../import/utils'
 import type { Article, MediaProject, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from './VideoThumbnail'
+import { VideoPreviewDialog } from '../../../components/VideoPreviewDialog'
 
 import { ArticleThumbnail, getArticleThumbnail } from '../../article/components/ArticleThumbnail'
 
@@ -150,12 +151,13 @@ function VideoGroup({
   onDeleteVideo: (videoId: string) => void
 }) {
   const [expanded, setExpanded] = useState(true)
+  const [isVideoOpen, setIsVideoOpen] = useState(false)
 
   return (
     <section className="overflow-hidden rounded-[12px] border border-[#cbdcd2] bg-white">
-      <div className="grid min-h-[94px] grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 bg-[#f5faf7] px-4 py-3.5 sm:grid-cols-[36px_minmax(0,1fr)_auto] sm:gap-4 sm:px-5">
+      <div className="relative isolate grid min-h-[94px] grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 bg-[#f5faf7] px-4 py-3.5 sm:grid-cols-[36px_minmax(0,1fr)_auto] sm:gap-4 sm:px-5">
         <button
-          className="flex h-full min-h-[76px] w-full items-center justify-center rounded-[8px] text-[#53615b] transition hover:bg-[#f1f6f3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
+          className="relative z-10 flex h-full min-h-[76px] w-full items-center justify-center rounded-[8px] text-[#53615b] transition hover:bg-[#f1f6f3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25"
           type="button"
           aria-label={expanded ? `${video.title}を折りたたむ` : `${video.title}を展開`}
           aria-expanded={expanded}
@@ -170,19 +172,21 @@ function VideoGroup({
         </button>
 
         <div className="min-w-0">
-          <button
-            className="flex min-w-0 w-full items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25 sm:gap-4"
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-          >
+          <div className="flex min-w-0 w-full items-center gap-3 text-left sm:gap-4">
             <VideoThumbnail video={video} />
-            <span className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1">
               <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#f1cbc8] bg-[#fff1f0] px-2 py-1 text-[10px] font-semibold text-[#a34f4b]">
                 動画
               </span>
-              <span className="block min-w-0 truncate text-sm font-semibold tracking-[-0.02em] text-[#18211f]">
+              <button
+                className="block max-w-full truncate text-left text-sm font-semibold tracking-[-0.02em] text-[#1d6b50] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
+                type="button"
+                onClick={() => setIsVideoOpen(true)}
+                aria-label={`${video.title}を再生`}
+                title={video.title}
+              >
                 {video.title}
-              </span>
+              </button>
               <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
                 <span>{formatTimestamp(video.media.metadata.durationMs)}</span>
                 <span className="text-[#b7cbc0]">·</span>
@@ -195,7 +199,7 @@ function VideoGroup({
                   <>
                     <span className="text-[#b7cbc0]">·</span>
                     <a
-                      className="text-[#71807b] underline decoration-[#b7cbc0] underline-offset-2 hover:text-[#1d6b50] hover:decoration-[#1d6b50]"
+                      className="relative z-10 text-[#71807b] underline decoration-[#b7cbc0] underline-offset-2 hover:text-[#1d6b50] hover:decoration-[#1d6b50]"
                       href={video.media.origin.canonicalUrl}
                       target="_blank"
                       rel="noreferrer"
@@ -205,11 +209,11 @@ function VideoGroup({
                   </>
                 )}
               </span>
-            </span>
-          </button>
+            </div>
+          </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="relative z-10 flex shrink-0 flex-wrap items-center justify-end gap-2">
           <button
             className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#b7cbc0] bg-white px-3 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
             type="button"
@@ -230,6 +234,13 @@ function VideoGroup({
         </div>
       </div>
 
+      {isVideoOpen && (
+        <VideoPreviewDialog
+          path={video.media.path}
+          title={video.title}
+          onClose={() => setIsVideoOpen(false)}
+        />
+      )}
       {expanded && (
         <div id={`video-articles-${video.id}`}>
           {articles.length > 0 ? (
