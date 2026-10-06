@@ -10,9 +10,11 @@ export function getArticleThumbnail(article: ArticleMetadata) {
 export function ArticleThumbnail({
   thumbnailPath,
   thumbnailUrl,
+  size = 'default',
 }: {
   thumbnailPath?: string | null
   thumbnailUrl?: string | null
+  size?: 'default' | 'large'
 }) {
   const [failedSources, setFailedSources] = useState<string[]>([])
   const source = [thumbnailPath ? convertFileSrc(thumbnailPath) : null, thumbnailUrl].find(
@@ -20,7 +22,9 @@ export function ArticleThumbnail({
   )
 
   return (
-    <div className="grid aspect-video w-20 shrink-0 place-items-center overflow-hidden rounded-[7px] border border-[#d8e1dc] bg-[#e8f2ec] sm:w-24">
+    <div
+      className={`grid aspect-video shrink-0 place-items-center overflow-hidden rounded-[7px] border border-[#d8e1dc] bg-[#e8f2ec] ${size === 'large' ? 'w-28 sm:w-40' : 'w-20 sm:w-24'}`}
+    >
       {source ? (
         <img
           className="h-full w-full object-cover"

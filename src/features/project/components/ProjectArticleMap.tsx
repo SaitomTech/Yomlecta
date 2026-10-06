@@ -1,11 +1,11 @@
 import { articleMetadata } from '../../../lib/project/articleSelectors'
-import { ChevronDown, ChevronRight, CircleDot, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Film, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { formatPlaybackTime } from '../article-creator/rangeDraft'
 import { formatTimestamp } from '../../../lib/time'
 import { formatSize } from '../../import/utils'
 import type { ArticleMetadata, Project, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from './VideoThumbnail'
+import { SourceRangeBar } from './SourceRangeBar'
 import { VideoPreviewDialog } from '../../../components/VideoPreviewDialog'
 
 import { ArticleThumbnail, getArticleThumbnail } from '../../article/components/ArticleThumbnail'
@@ -34,48 +34,31 @@ function toneClass(tone: ReturnType<typeof articleStatus>['tone']) {
 function ArticleTimelineRow({
   article,
   highlighted,
-  isFirst,
-  isLast,
+  colorIndex,
+  sourceDurationMs,
   onOpen,
   onEdit,
   onDelete,
 }: {
   article: ArticleMetadata
   highlighted: boolean
-  isFirst: boolean
-  isLast: boolean
+  colorIndex: number
+  sourceDurationMs?: number
   onOpen: (articleId: string) => void
   onEdit: (articleId: string) => void
   onDelete: (articleId: string) => void
 }) {
   const status = articleStatus(article)
-  const duration = Math.max(0, article.sourceRange.endMs - article.sourceRange.startMs)
 
   return (
     <div
-      className={`relative grid grid-cols-[128px_minmax(0,1fr)_auto] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[144px_minmax(0,1fr)_auto] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
+      className={`relative grid grid-cols-[128px_minmax(0,1fr)] border-t border-[#e1e9e4] transition-colors duration-700 sm:grid-cols-[180px_minmax(0,1fr)] md:grid-cols-[180px_minmax(0,1fr)_286px] ${highlighted ? 'bg-[#fff8e7]' : 'bg-white/75'}`}
     >
-      <div className="relative flex min-h-[76px] flex-col justify-center border-r border-[#e1e9e4] pl-8 pr-2 text-[10px] text-[#71807b] sm:pl-10 sm:pr-3">
-        <div
-          aria-hidden="true"
-          className={`absolute bottom-0 left-[25px] top-0 border-l border-[#a8c9b9] ${isFirst ? 'top-1/2' : ''} ${isLast ? 'bottom-1/2' : ''}`}
-        />
-        <CircleDot
-          aria-hidden="true"
-          className="absolute left-[19px] top-1/2 -translate-y-1/2 text-[#2d8062]"
-          size={13}
-          strokeWidth={1.8}
-        />
-        <span className="whitespace-nowrap font-mono font-medium text-[#50625a]">
-          {formatPlaybackTime(article.sourceRange.startMs)} —{' '}
-          {formatPlaybackTime(article.sourceRange.endMs)}
-        </span>
-        <span className="mt-1 text-[10px] text-[#94a19b]">{formatTimestamp(duration)}</span>
+      <div className="flex items-center justify-center py-4 pl-4 sm:pl-5">
+        <ArticleThumbnail {...getArticleThumbnail(article)} size="large" />
       </div>
-
-      <div className="flex min-w-0 flex-col items-start justify-center gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-start sm:px-5">
-        <ArticleThumbnail {...getArticleThumbnail(article)} />
-        <div className="min-w-0">
+      <div className="min-w-0 self-center py-3.5 pl-3 pr-2 sm:pr-2.5">
+        <div className="min-w-0 flex-1">
           <span className="mb-1.5 flex w-fit items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-2 py-1 text-[10px] font-semibold text-[#496580]">
             記事作成フロー
           </span>
@@ -90,15 +73,25 @@ function ArticleTimelineRow({
             </button>
           </h4>
         </div>
+        {sourceDurationMs !== undefined && (
+          <div className="mt-3">
+            <SourceRangeBar
+              ranges={[
+                { id: article.id, title: article.title, range: article.sourceRange, colorIndex },
+              ]}
+              durationMs={sourceDurationMs}
+              showRangeLabels
+            />
+          </div>
+        )}
       </div>
-
-      <div className="flex shrink-0 flex-col items-end gap-2 px-3 py-3.5 sm:px-4">
+      <div className="col-span-2 flex min-w-0 flex-col items-end justify-between gap-3 self-stretch pb-3.5 pl-2 pr-4 sm:pl-2.5 sm:pr-5 md:col-span-1 md:col-start-3 md:py-3.5">
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass(status.tone)}`}
         >
           {status.label}
         </span>
-        <div className="relative z-10 flex flex-wrap items-center justify-end gap-1.5">
+        <div className="relative z-10 flex items-center justify-end gap-1.5 whitespace-nowrap [&>button]:shrink-0">
           {status.tone === 'done' && (
             <button
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#b7cbc0] bg-white px-3 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
@@ -180,13 +173,14 @@ function VideoGroup({
                 動画
               </span>
               <button
-                className="block max-w-full truncate text-left text-sm font-semibold tracking-[-0.02em] text-[#1d6b50] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
+                className="flex max-w-full items-center gap-1.5 text-left text-sm font-semibold tracking-[-0.02em] text-[#1d6b50] after:absolute after:inset-0 after:cursor-pointer after:transition hover:after:bg-[#1d6b50]/5 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[#1d6b50]/30"
                 type="button"
                 onClick={() => setIsVideoOpen(true)}
                 aria-label={`${video.title}を再生`}
                 title={video.title}
               >
-                {video.title}
+                <Film size={13} className="shrink-0" aria-hidden="true" />
+                <span className="truncate">{video.title}</span>
               </button>
               <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[#71807b]">
                 <span>{formatTimestamp(video.media.metadata.durationMs)}</span>
@@ -250,8 +244,8 @@ function VideoGroup({
                 key={article.id}
                 article={article}
                 highlighted={highlightedArticleIds.has(article.id)}
-                isFirst={articleIndex === 0}
-                isLast={articleIndex === articles.length - 1}
+                colorIndex={articleIndex}
+                sourceDurationMs={video.media.metadata.durationMs}
                 onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -348,8 +342,7 @@ export function ProjectArticleMap({
                 key={article.id}
                 article={article}
                 highlighted={highlightedArticleIds.has(article.id)}
-                isFirst={articleIndex === 0}
-                isLast={articleIndex === ungrouped.length - 1}
+                colorIndex={articleIndex}
                 onOpen={onOpenArticle}
                 onEdit={onEditArticle}
                 onDelete={onDeleteArticle}
