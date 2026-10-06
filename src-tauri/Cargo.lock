@@ -6727,7 +6727,7 @@ dependencies = [
 
 [[package]]
 name = "yomlecta"
-version = "0.31.3"
+version = "0.32.0"
 dependencies = [
  "futures-util",
  "keyring",
