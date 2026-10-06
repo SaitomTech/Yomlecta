@@ -1,5 +1,6 @@
 import type { VideoTrimRange } from '../../../types/project'
 import { formatPlaybackTime, rangeColor } from '../article-creator/rangeDraft'
+import { SourceRangeLabels } from './SourceRangeLabels'
 
 export function SourceRangeBar({
   ranges,
@@ -31,24 +32,12 @@ export function SourceRangeBar({
       aria-label={`動画全体 ${formatPlaybackTime(durationMs)} の記事区間${label ? `、${label}` : 'なし'}`}
     >
       {showRangeLabels && segments.length === 1 && (
-        <div
-          className="relative mb-1 h-3 font-mono text-[9px] leading-none"
-          style={{ color: segments[0].color.text }}
-          aria-hidden="true"
-        >
-          <span
-            className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
-            style={{ left: `${(segments[0].startMs / durationMs) * 100}%` }}
-          >
-            {formatPlaybackTime(segments[0].startMs)}
-          </span>
-          <span
-            className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
-            style={{ left: `${(segments[0].endMs / durationMs) * 100}%` }}
-          >
-            {formatPlaybackTime(segments[0].endMs)}
-          </span>
-        </div>
+        <SourceRangeLabels
+          startMs={segments[0].startMs}
+          endMs={segments[0].endMs}
+          durationMs={durationMs}
+          color={segments[0].color.text}
+        />
       )}
       <div className="relative h-2 overflow-hidden rounded-full bg-[#e5ebe8]" aria-hidden="true">
         {segments.map(({ id, title, startMs, endMs, color }) => (
