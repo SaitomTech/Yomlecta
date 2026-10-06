@@ -40,6 +40,9 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "externalBin": [
       "binaries/ffmpeg",
       "binaries/ffprobe",
