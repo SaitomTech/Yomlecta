@@ -10,7 +10,6 @@ import {
   removeAbsolutePath,
   writeTextFile,
 } from '../../lib/tauri/filesystem'
-import { hasCurrentArticleSections, hasCurrentArticleSummary } from '../article/article'
 import {
   getActiveArticle,
   getActiveMediaSource,
@@ -235,17 +234,8 @@ function buildExportDocument(
     ? primaryLanguage
     : sourceLanguage
   const secondaryLanguage = bilingual ? 'en' : undefined
-  const currentSummary =
-    project.article?.summary && hasCurrentArticleSummary(project, project.article.summary.model)
-      ? project.article.summary
-      : undefined
-  const currentSections =
-    project.article?.sections &&
-    project.article.sections.sections.length > 0 &&
-    (project.article.sections.model === 'manual' ||
-      hasCurrentArticleSections(project, project.article.sections.model))
-      ? project.article.sections.sections
-      : undefined
+  const currentSummary = project.article?.summary
+  const currentSections = project.article?.sections?.sections
   const translatedSectionById = new Map(
     (translation?.sections ?? []).map((section) => [section.id, section]),
   )

@@ -16,7 +16,6 @@ import {
   openAppleTranslation,
   translateBatchWithApple,
 } from '../../lib/translation/appleTranslation'
-import { hasCurrentArticleSections, hasCurrentArticleSummary } from './article'
 import {
   ARTICLE_LANGUAGES,
   articleLanguageLabel,
@@ -66,16 +65,11 @@ function sourceTitle(project: MediaProject) {
 }
 
 function currentSummary(project: MediaProject) {
-  const summary = project.article?.summary
-  return summary && hasCurrentArticleSummary(project, summary.model) ? summary : undefined
+  return project.article?.summary
 }
 
 function currentSections(project: MediaProject) {
-  const sections = project.article?.sections
-  return sections &&
-    (sections.model === 'manual' || hasCurrentArticleSections(project, sections.model))
-    ? sections.sections
-    : undefined
+  return project.article?.sections?.sections
 }
 
 export function articleTranslationInputFingerprint(

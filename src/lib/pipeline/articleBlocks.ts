@@ -239,6 +239,7 @@ export function assignTranscriptToArticleBlocks(
   return blocks.map((block, index) => ({
     ...block,
     transcript: {
+      ...block.transcript,
       raw: assigned[index]
         .toSorted((first, second) => first.startMs - second.startMs)
         .map((segment) => segment.text.trim())

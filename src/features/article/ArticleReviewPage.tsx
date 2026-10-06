@@ -32,7 +32,6 @@ import type { ContentProcessingSlideCompleted } from '../content-processing/cont
 import { useContentProcessing } from '../content-processing/hooks/useContentProcessing'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
-import { hasCurrentArticleSections } from './article'
 import { getTranslationEngineId, normalizeLanguage, type TranslationEngineId } from './translation'
 import { getArticleOutputLanguage, getCurrentTranslationForOutputLanguage } from './outputLanguage'
 
@@ -96,11 +95,7 @@ function cancelArticleBatch(
 }
 
 function getCurrentArticleSections(project: MediaProject) {
-  const sections = project.article?.sections
-  return sections &&
-    (sections.model === 'manual' || hasCurrentArticleSections(project, sections.model))
-    ? sections
-    : undefined
+  return project.article?.sections
 }
 
 function getReviewControlState({
