@@ -1,19 +1,10 @@
-import {
-  ArrowLeft,
-  ArrowRight,
-  BookOpen,
-  ExternalLink,
-  Film,
-  Maximize2,
-  PencilLine,
-  X,
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpen, Film, Maximize2, PencilLine, X } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { useExport } from '../export/hooks/useExport'
 import { ArticleExportControls } from '../export/ArticleExportControls'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { useVideoSourceUrl } from '../../lib/media/useVideoSourceUrl'
+import { VideoPreviewDialog } from '../../components/VideoPreviewDialog'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 import { formatTimestamp } from '../../lib/time'
 import { useDialogA11y } from '../../lib/ui/useDialogA11y'
@@ -24,12 +15,7 @@ import type {
   ArticleTranslation,
   MediaProject,
 } from '../../types/project'
-import {
-  formatArticleDate,
-  getArticleActionLabel,
-  getArticleStatus,
-  getArticleStatusLabel,
-} from './articleList'
+import { formatArticleDate, getArticleActionLabel, getArticleStatus } from './articleList'
 import {
   getArticleOutputLanguage,
   getArticleSourceLanguage,
@@ -37,12 +23,6 @@ import {
 } from './outputLanguage'
 import { articleLanguageLabel, resolveArticleLanguageVisibility } from './articleLanguage'
 import { ArticleSummaryResult } from './components/ArticleSummaryResult'
-
-const statusClass = {
-  done: 'bg-[#e8f2ec] text-[#1d6b50]',
-  working: 'bg-[#e8f0f5] text-[#315f75]',
-  'not-started': 'bg-[#edf2f0] text-[#53615b]',
-} as const
 
 function renderParagraphs(value: string) {
   return value
@@ -193,6 +173,7 @@ export function ArticleDetailPage({
   const summary = project.article?.summary
   const sections = article?.article?.sections?.sections ?? []
   const slides = article ? articleBlockViews(article.slides, article.articleBlocks) : []
+  const sourceOffsetMs = article?.sourceRange.startMs ?? 0
   const outputLanguage = getArticleOutputLanguage(project)
   const translation = getCurrentTranslationForOutputLanguage(project, outputLanguage)
   const sourceLanguage = getArticleSourceLanguage(project, translation)
@@ -203,7 +184,6 @@ export function ArticleDetailPage({
     hasTranslation: Boolean(translation),
   })
   const sourceTitle = article?.title.trim() || item.title || '無題の記事'
-  const videoSource = useVideoSourceUrl(project.source.path)
   const exporter = useExport(project, onGenerated, Boolean(article && slides.length > 0))
   const isExportBusy = exporter.isBusy
   useNavigationDisabled(isExportBusy)
@@ -212,10 +192,6 @@ export function ArticleDetailPage({
   const expandedDialogRef = useDialogA11y<HTMLDivElement>({
     open: expandedImage !== null,
     onClose: () => setExpandedImage(null),
-  })
-  const videoDialogRef = useDialogA11y<HTMLDivElement>({
-    open: isVideoOpen,
-    onClose: () => setIsVideoOpen(false),
   })
 
   return (
@@ -232,7 +208,21 @@ export function ArticleDetailPage({
       </div>
       <section className="mx-auto w-[calc(100%-32px)] max-w-[1200px] pb-16">
         <header className="mb-8 border-b border-[#d8e1dc] pb-6 pt-6">
-          <p className="mb-1.5 text-xs font-semibold text-[#1d6b50]">生成された記事</p>
+          <div className="mb-3 flex items-start justify-between gap-4">
+            <p className="text-xs font-semibold text-[#1d6b50]">生成された記事</p>
+            <button
+              className="inline-flex shrink-0 items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c]"
+              type="button"
+              onClick={onEdit}
+              disabled={isExportBusy}
+            >
+              <PencilLine size={14} />
+              {getArticleActionLabel(status) === '記事を見る'
+                ? '記事を編集'
+                : getArticleActionLabel(status)}
+              <ArrowRight size={14} />
+            </button>
+          </div>
           {titleVisibility.showSource && (
             <>
               {outputLanguage === 'both' && <LanguageLabel language={sourceLanguage} />}
@@ -256,55 +246,33 @@ export function ArticleDetailPage({
             </div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[#71807b]">
+            <span>
+              プロジェクト:{' '}
+              <button
+                className="font-semibold text-[#1d6b50] hover:underline"
+                type="button"
+                onClick={onOpenProject}
+                disabled={isExportBusy}
+              >
+                {item.projectTitle}
+              </button>
+            </span>
+            <span aria-hidden="true">·</span>
             <button
               className="inline-flex items-center gap-1 font-semibold text-[#1d6b50] hover:underline"
               type="button"
               onClick={() => setIsVideoOpen(true)}
               aria-label="元動画を再生"
             >
-              <Film size={13} aria-hidden="true" /> {project.source.name}
-            </button>
-            <span aria-hidden="true">·</span>
-            <span>{formatTimestamp(project.source.metadata.durationMs)}</span>
-            <span aria-hidden="true">·</span>
-            <button
-              className="font-semibold text-[#1d6b50] hover:underline"
-              type="button"
-              onClick={onOpenProject}
-              disabled={isExportBusy}
-            >
-              {item.projectTitle}
+              <Film size={13} aria-hidden="true" /> {project.source.name.replace(/\.[^.]+$/, '')}
             </button>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
-            <span
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}
-            >
-              {getArticleStatusLabel(status)}
-            </span>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <button
-              className="inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c]"
-              type="button"
-              onClick={onEdit}
-              disabled={isExportBusy}
-            >
-              <PencilLine size={14} />
-              {getArticleActionLabel(status) === '記事を見る'
-                ? '記事を編集'
-                : getArticleActionLabel(status)}
-              <ArrowRight size={14} />
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[9px] border border-[#b7cbc0] bg-white px-4 py-3 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
-              type="button"
-              onClick={onOpenProject}
-              disabled={isExportBusy}
-            >
-              <ExternalLink size={14} /> プロジェクト詳細へ
-            </button>
-            {article && slides.length > 0 && <ArticleExportControls exporter={exporter} />}
-          </div>
+          {article && slides.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <ArticleExportControls exporter={exporter} />
+            </div>
+          )}
         </header>
 
         {!article ? (
@@ -319,7 +287,10 @@ export function ArticleDetailPage({
                   <BookOpen size={14} className="text-[#2d8062]" /> 目次
                 </div>
                 {sections.length > 0 ? (
-                  <nav className="mt-3 space-y-1.5" aria-label="記事の目次">
+                  <nav
+                    className="mt-3 max-h-[50svh] space-y-1.5 overflow-y-auto overscroll-contain pr-1 lg:max-h-[calc(100svh-112px)]"
+                    aria-label="記事の目次"
+                  >
                     {sections.map((section) => (
                       <a
                         key={section.id}
@@ -386,7 +357,7 @@ export function ArticleDetailPage({
                   </button>
                 </div>
               ) : (
-                <div>
+                <div className={summary ? 'mt-8' : undefined}>
                   {slides.map((slide, index) => {
                     const section = sections.find((candidate) =>
                       candidate.slideIds.includes(slide.id),
@@ -440,14 +411,16 @@ export function ArticleDetailPage({
                                   </span>
                                 </button>
                                 <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
-                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                  {formatTimestamp(sourceOffsetMs + slide.startMs)} —{' '}
+                                  {formatTimestamp(sourceOffsetMs + slide.endMs)}
                                 </figcaption>
                               </figure>
                             )}
                             <div className="content min-w-0 text-[#35443e]">
                               {!slide.image.representativeFramePath && (
                                 <p className="mb-3 font-mono text-[11px] text-[#71807b]">
-                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                  {formatTimestamp(sourceOffsetMs + slide.startMs)} —{' '}
+                                  {formatTimestamp(sourceOffsetMs + slide.endMs)}
                                 </p>
                               )}
                               <ArticleSlideBody
@@ -500,48 +473,11 @@ export function ArticleDetailPage({
         </div>
       )}
       {isVideoOpen && (
-        <div
-          ref={videoDialogRef}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#07110d]/82 p-5 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-label="元動画プレビュー"
-          tabIndex={-1}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setIsVideoOpen(false)
-          }}
-        >
-          <div className="relative w-[min(960px,calc(100vw-40px))] overflow-hidden border border-[#d8e1dc]/40 bg-[#0b1712] shadow-[0_24px_80px_rgba(0,0,0,0.38)]">
-            <div className="flex items-center justify-between gap-4 border-b border-[#d8e1dc]/25 px-4 py-3 text-xs font-semibold text-[#f3faf6]">
-              <span className="truncate">{project.source.name}</span>
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center bg-[#18211f]/78 text-[#f3faf6] transition hover:bg-[#18211f]/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                onClick={() => setIsVideoOpen(false)}
-                aria-label="動画プレビューを閉じる"
-                title="閉じる"
-              >
-                <X size={17} strokeWidth={1.8} />
-              </button>
-            </div>
-            {videoSource.src ? (
-              <video
-                key={videoSource.src}
-                className="block max-h-[78vh] w-full bg-black object-contain"
-                src={videoSource.src}
-                controls
-                autoPlay
-                playsInline
-                preload="metadata"
-                aria-label="元動画プレビュー"
-              />
-            ) : (
-              <div className="grid aspect-video place-items-center bg-black px-5 text-xs text-[#d8e1dc]">
-                {videoSource.error ? '動画を読み込めませんでした。' : '動画を読み込んでいます…'}
-              </div>
-            )}
-          </div>
-        </div>
+        <VideoPreviewDialog
+          path={project.source.path}
+          title={project.source.name}
+          onClose={() => setIsVideoOpen(false)}
+        />
       )}
     </main>
   )
