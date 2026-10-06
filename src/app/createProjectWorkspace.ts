@@ -1,13 +1,14 @@
 import * as articleOperations from '../lib/project/articleOperations'
 import * as projectOperations from '../lib/project/projectOperations'
 import * as storage from '../lib/storage/projectStorage'
+import { createEmptyProject, replaceLoadedArticle } from '../lib/project/project'
+import { getLoadedArticle, articleContext } from '../lib/project/articleSelectors'
 import {
-  activateArticle,
-  createEmptyProject,
-  markProjectOpened,
-  markProjectExported,
-  updateProjectWorkflow,
-} from '../lib/project/project'
+  markArticleOpened,
+  markArticleExported,
+  updateArticleWorkflow,
+} from '../lib/project/article'
+
 import { removeProjectSourceAssetDirectory } from '../lib/storage/projectAssets'
 import { downloadYoutubeVideo } from '../lib/youtube/downloader'
 import type {
@@ -24,7 +25,9 @@ import type {
   ArticleTranslation,
   ContentProcessingResult,
   CropRegion,
-  MediaProject,
+  Project,
+  Article,
+  ArticleContext,
   PerspectiveCrop,
   ProjectStep,
   SlideOcrResult,
@@ -43,13 +46,13 @@ type WorkspaceDependencies = {
 }
 
 export function createProjectWorkspace(
-  publish: (project: MediaProject | null) => void,
+  publish: (project: Project | null) => void,
   dependencies: WorkspaceDependencies = {},
 ) {
   const db = { ...storage, ...dependencies.storage }
   const projects = { ...projectOperations, ...dependencies.projectOperations }
   const articles = { ...articleOperations, ...dependencies.articleOperations }
-  let project: MediaProject | null = null
+  let project: Project | null = null
   let queue: Promise<unknown> = Promise.resolve()
 
   function enqueue<T>(operation: () => Promise<T>) {
@@ -61,7 +64,7 @@ export function createProjectWorkspace(
     return next
   }
 
-  function apply(next: MediaProject | null) {
+  function apply(next: Project | null) {
     project = next
     publish(next)
     return next
@@ -75,18 +78,31 @@ export function createProjectWorkspace(
 
   function requireArticle(target: ArticleTarget) {
     const current = requireProject(target.projectId)
-    if (
-      current.activeArticleId !== target.articleId ||
-      !current.articles.some((article) => article.id === target.articleId)
-    ) {
+    const article = getLoadedArticle(current)
+    if (!article || article.id !== target.articleId)
       throw new Error('操作対象の記事が変更されました。処理を再実行してください。')
-    }
-    return current
+    return { project: current, article }
+  }
+
+  function applyArticle(context: ArticleContext, article: Article, markOpened = false) {
+    const next = replaceLoadedArticle(
+      {
+        ...context.project,
+        updatedAt:
+          article.updatedAt > context.project.updatedAt
+            ? article.updatedAt
+            : context.project.updatedAt,
+        lastOpenedArticleId: markOpened ? article.id : context.project.lastOpenedArticleId,
+      },
+      article,
+    )
+    apply(next)
+    return next
   }
 
   function updateProject<T>(
     projectId: string,
-    operation: (current: MediaProject) => Promise<{ project: MediaProject; value: T }>,
+    operation: (current: Project) => Promise<{ project: Project; value: T }>,
   ) {
     return enqueue(async () => {
       const result = await operation(requireProject(projectId))
@@ -97,12 +113,13 @@ export function createProjectWorkspace(
 
   function updateArticle(
     target: ArticleTarget,
-    operation: (current: MediaProject) => Promise<MediaProject | null>,
+    operation: (current: ArticleContext) => Promise<Article>,
+    markOpened = false,
   ) {
     return enqueue(async () => {
       const current = requireArticle(target)
-      const next = (await operation(current)) ?? current
-      if (next !== current) apply(next)
+      const next = await operation(current)
+      if (next !== current.article) applyArticle(current, next, markOpened)
       return next
     })
   }
@@ -130,7 +147,8 @@ export function createProjectWorkspace(
   async function createFromVideo(video: SelectedVideo, fallbackTitle?: string) {
     const title = video.name.replace(/\.[^.]+$/, '').trim() || fallbackTitle || '無題のプロジェクト'
     const created = await projects.createProjectFromVideo(createEmptyProject(title), video)
-    if (!created.project.activeArticleId) throw new Error('記事作成フローを開始できませんでした。')
+    if (!getLoadedArticle(created.project)?.id)
+      throw new Error('記事作成フローを開始できませんでした。')
     apply(created.project)
     return created
   }
@@ -139,9 +157,13 @@ export function createProjectWorkspace(
     get project() {
       return project
     },
+    get activeArticle() {
+      return project ? getLoadedArticle(project) : null
+    },
     getArticleWorkspace(target: ArticleTarget) {
-      return project?.id === target.projectId && project.activeArticleId === target.articleId
-        ? project
+      const article = project ? getLoadedArticle(project) : null
+      return project?.id === target.projectId && article?.id === target.articleId
+        ? { project, article }
         : null
     },
     createProject(title: string) {
@@ -163,32 +185,36 @@ export function createProjectWorkspace(
     openProject(projectId: string) {
       return enqueue(async () => {
         const loaded = await db.loadProject(projectId)
-        const opened = markProjectOpened(
-          loaded,
-          loaded.activeArticleId ? loaded.workflow.lastVisitedStep : 'detect-slides',
+        const article = getLoadedArticle(loaded)
+        if (!article) {
+          apply(loaded)
+          return loaded
+        }
+        const saved = await articles.saveArticleWorkflow(
+          { project: loaded, article },
+          markArticleOpened(article, article.workflow.lastVisitedStep),
         )
-        const saved = await projects.persistProjectWorkflow(opened)
-        apply(saved)
-        return saved
+        return applyArticle({ project: loaded, article }, saved, true)
       })
     },
     openArticle(target: ArticleTarget, preferredStep?: ProjectStep) {
       return enqueue(async () => {
         const loaded = await db.loadProject(target.projectId, target.articleId)
-        const next = activateArticle(loaded, target.articleId)
-        const savedStep = preferredStep ?? next.workflow.lastVisitedStep
+        const context = articleContext(loaded)
+        const savedStep = preferredStep ?? context.article.workflow.lastVisitedStep
         const step = savedStep === 'export' ? 'article-review' : savedStep
-        const saved = await projects.persistProjectWorkflow(markProjectOpened(next, step))
-        apply(saved)
-        return { project: saved, step }
+        const saved = await articles.saveArticleWorkflow(
+          context,
+          markArticleOpened(context.article, step),
+        )
+        return { project: applyArticle(context, saved, true), step }
       })
     },
     openArticleDetail(target: ArticleTarget) {
       return enqueue(async () => {
         const loaded = await db.loadProject(target.projectId, target.articleId)
-        const next = activateArticle(loaded, target.articleId)
-        apply(next)
-        return next
+        apply(loaded)
+        return loaded
       })
     },
     deleteProject(projectId: string) {
@@ -256,15 +282,23 @@ export function createProjectWorkspace(
       }))
     },
     visitStep(target: ArticleTarget, step: Exclude<ProjectStep, 'export'>, advance = false) {
-      return updateArticle(target, (current) =>
-        projects.persistProjectWorkflow(
-          advance ? updateProjectWorkflow(current, step) : markProjectOpened(current, step),
-        ),
+      return updateArticle(
+        target,
+        (current) =>
+          articles.saveArticleWorkflow(
+            current,
+            advance
+              ? updateArticleWorkflow(current.article, step)
+              : markArticleOpened(current.article, step),
+          ),
+        true,
       )
     },
     markExported(target: ArticleTarget) {
-      return updateArticle(target, (current) =>
-        projects.persistProjectWorkflow(markProjectExported(current)),
+      return updateArticle(
+        target,
+        (current) => articles.saveArticleWorkflow(current, markArticleExported(current.article)),
+        true,
       )
     },
     saveArticleSource: (

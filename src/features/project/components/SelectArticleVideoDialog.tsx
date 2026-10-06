@@ -1,7 +1,8 @@
+import { articleMetadata } from '../../../lib/project/articleSelectors'
 import { ChevronRight, FolderOpen, Link, Upload, X } from 'lucide-react'
 import { useDialogA11y } from '../../../lib/ui/useDialogA11y'
 import { formatTimestamp } from '../../../lib/time'
-import type { MediaProject, ProjectVideo } from '../../../types/project'
+import type { Project, ProjectVideo } from '../../../types/project'
 import type { VideoImportSource } from '../VideoImportPanel'
 import { VideoThumbnail } from './VideoThumbnail'
 export function SelectArticleVideoDialog({
@@ -10,7 +11,7 @@ export function SelectArticleVideoDialog({
   onSelect,
   onOpenVideos,
 }: {
-  project: MediaProject
+  project: Project
   onClose: () => void
   onSelect: (video: ProjectVideo) => void
   onOpenVideos: (source: VideoImportSource) => void
@@ -88,9 +89,9 @@ export function SelectArticleVideoDialog({
               <p className="text-sm font-semibold">プロジェクトに追加済みの動画を使う</p>
               <div className="mt-3 space-y-1">
                 {project.videos.map((video) => {
-                  const articleCount = project.articles.filter(
-                    (article) => article.sourceVideoId === video.id,
-                  ).length
+                  const articleCount = project.articles
+                    .map(articleMetadata)
+                    .filter((article) => article.sourceVideoId === video.id).length
                   const isYoutube = video.media.origin?.kind === 'youtube'
                   return (
                     <button

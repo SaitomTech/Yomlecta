@@ -15,7 +15,6 @@ pub async fn db_update_article_title(
     updated_at: String,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
-    expected_document_revision: Option<i64>,
 ) -> Result<Value, String> {
     update_article_title(
         &state,
@@ -25,7 +24,6 @@ pub async fn db_update_article_title(
         updated_at,
         expected_project_revision,
         expected_article_revision,
-        expected_document_revision,
     )
     .await
 }
@@ -38,7 +36,6 @@ pub(crate) async fn update_article_title(
     updated_at: String,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
-    expected_document_revision: Option<i64>,
 ) -> Result<Value, String> {
     validate_id(&project_id, "プロジェクトID")?;
     validate_id(&article_id, "記事ID")?;
@@ -55,9 +52,6 @@ pub(crate) async fn update_article_title(
     ensure_article_in_project(&mut tx, &project_id, &article_id).await?;
     let article_revision =
         ensure_article_revision(&mut tx, &article_id, expected_article_revision).await?;
-    let document_revision =
-        ensure_document_revision(&mut tx, &article_id, expected_document_revision).await?;
-
     let article_update = sqlx::query(
         "UPDATE articles SET title = ?, updated_at = ?, revision = ?
          WHERE id = ? AND project_id = ? AND revision = ?",
@@ -72,22 +66,6 @@ pub(crate) async fn update_article_title(
     .await
     .map_err(|error| format!("記事タイトルを更新できませんでした: {error}"))?;
     require_rows_affected(&article_update, "記事タイトル")?;
-
-    let document_update = sqlx::query(
-        "UPDATE documents SET article_json = CASE
-           WHEN article_json IS NULL THEN json_object('title', ?)
-           ELSE json_set(article_json, '$.title', ?)
-         END, revision = ? WHERE article_id = ? AND revision = ?",
-    )
-    .bind(title)
-    .bind(title)
-    .bind(document_revision + 1)
-    .bind(&article_id)
-    .bind(document_revision)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("原稿タイトルを更新できませんでした: {error}"))?;
-    require_rows_affected(&document_update, "原稿タイトル")?;
 
     let project_update = sqlx::query(
         "UPDATE projects SET updated_at = ?, revision = ? WHERE id = ? AND revision = ?",
@@ -106,8 +84,7 @@ pub(crate) async fn update_article_title(
         .map_err(|error| format!("記事タイトル更新をcommitできませんでした: {error}"))?;
     Ok(json!({
         "projectRevision": project_revision + 1,
-        "articleRevision": article_revision + 1,
-        "documentRevision": document_revision + 1
+        "articleRevision": article_revision + 1
     }))
 }
 
@@ -118,6 +95,7 @@ pub async fn db_update_article_workflow(
     article_id: String,
     active_article_id: Option<String>,
     workflow: Value,
+    project_updated_at: String,
     updated_at: String,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
@@ -128,6 +106,7 @@ pub async fn db_update_article_workflow(
         article_id,
         active_article_id,
         workflow,
+        project_updated_at,
         updated_at,
         expected_project_revision,
         expected_article_revision,
@@ -141,6 +120,7 @@ pub(crate) async fn update_article_workflow(
     article_id: String,
     active_article_id: Option<String>,
     workflow: Value,
+    project_updated_at: String,
     updated_at: String,
     expected_project_revision: Option<i64>,
     expected_article_revision: Option<i64>,
@@ -150,7 +130,7 @@ pub(crate) async fn update_article_workflow(
     if !workflow.is_object() {
         return Err("VALIDATION_ERROR: workflowはオブジェクトで指定してください。".to_string());
     }
-    if updated_at.trim().is_empty() {
+    if updated_at.trim().is_empty() || project_updated_at.trim().is_empty() {
         return Err("VALIDATION_ERROR: 更新日時を指定してください。".to_string());
     }
     let workflow_json = serde_json::to_string(&workflow)
@@ -188,7 +168,7 @@ pub(crate) async fn update_article_workflow(
          WHERE id = ? AND revision = ?",
     )
     .bind(active_article_id)
-    .bind(&updated_at)
+    .bind(&project_updated_at)
     .bind(project_revision + 1)
     .bind(&project_id)
     .bind(project_revision)

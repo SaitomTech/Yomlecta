@@ -1,3 +1,4 @@
+import { getActiveArticle, getActiveMediaSource } from '../../lib/project/articleSelectors'
 import { invoke } from '@tauri-apps/api/core'
 import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -11,15 +12,13 @@ import {
   writeTextFile,
 } from '../../lib/tauri/filesystem'
 import {
-  getActiveArticle,
-  getActiveMediaSource,
   effectiveVisualKind,
   type ArticleSection,
   type ArticleOutputLanguage,
   type ArticleSummary,
   type ArticleTranslation,
   type ArticleTranslationSummary,
-  type MediaProject,
+  type ArticleContext,
 } from '../../types/project'
 import { getActiveArticleDuration } from '../../lib/project/articleSource'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
@@ -161,11 +160,10 @@ async function removeStaleExportAssets(
   )
 }
 
-function defaultArticleTitle(project: MediaProject) {
+function defaultArticleTitle(project: ArticleContext) {
   return (
     getActiveArticle(project)?.title.trim() ||
-    project.article?.title?.trim() ||
-    project.source.name.replace(/\.[^.]+$/, '')
+    project.article.inputMedia.name.replace(/\.[^.]+$/, '')
   )
 }
 
@@ -194,10 +192,10 @@ function translatedSummary(
 }
 
 function buildExportDocument(
-  project: MediaProject,
+  project: ArticleContext,
   imagePathFor: (sourceImagePath: string, index: number) => string,
 ): ExportDocument {
-  const articleSlides = articleBlockViews(project.slides, project.articleBlocks)
+  const articleSlides = articleBlockViews(project.article.visualSegments, project.article.blocks)
   if (articleSlides.length === 0) {
     throw new Error('書き出すSlideがありません。先にスライド検出を実行してください。')
   }
@@ -227,8 +225,8 @@ function buildExportDocument(
     ? primaryLanguage
     : sourceLanguage
   const secondaryLanguage = bilingual ? 'en' : undefined
-  const currentSummary = project.article?.summary
-  const currentSections = project.article?.sections?.sections
+  const currentSummary = project.article.document?.summary
+  const currentSections = project.article.document?.sections?.sections
   const translatedSectionById = new Map(
     (translation?.sections ?? []).map((section) => [section.id, section]),
   )
@@ -341,8 +339,8 @@ function pdfFilename(title: string) {
   return `${basename}.pdf`
 }
 
-export async function exportProject(project: MediaProject): Promise<ExportResult> {
-  const destination = await getExportDirectory(project.id, project.activeArticleId)
+export async function exportProject(project: ArticleContext): Promise<ExportResult> {
+  const destination = await getExportDirectory(project.project.id, project.article.id)
   const document = buildExportDocument(
     project,
     (_sourceImagePath, index) => `./assets/${imageFilename(index)}`,

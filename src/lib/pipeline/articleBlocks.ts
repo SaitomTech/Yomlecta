@@ -2,6 +2,7 @@ import type {
   ArticleBlock,
   TranscriptSegment,
   VisualSegment,
+  ArticleBlockView,
   VisualSegmentKind,
 } from '../../types/project'
 import { effectiveVisualKind } from '../../types/project'
@@ -250,21 +251,6 @@ export function assignTranscriptToArticleBlocks(
   }))
 }
 
-export function applyArticleBlocksToSegments(
-  segments: VisualSegment[],
-  blocks: ArticleBlock[],
-): VisualSegment[] {
-  const transcriptByHost = new Map<string, ArticleBlock['transcript']>()
-  for (const block of blocks) {
-    const hostId = articleBlockHostSegmentId(block)
-    if (hostId && block.transcript) transcriptByHost.set(hostId, block.transcript)
-  }
-  return segments.map((segment) => ({
-    ...segment,
-    transcript: transcriptByHost.get(segment.id),
-  }))
-}
-
 export function ocrEligibleSegments(
   segments: VisualSegment[],
   blocks: ArticleBlock[],
@@ -279,8 +265,8 @@ export function ocrEligibleSegments(
 export function articleBlockViews(
   segments: VisualSegment[],
   blocks: ArticleBlock[],
-): VisualSegment[] {
-  if (blocks.length === 0) return segments.filter((segment) => Boolean(segment.transcript))
+): ArticleBlockView[] {
+  if (blocks.length === 0) return []
   const segmentById = new Map(segments.map((segment) => [segment.id, segment]))
   return blocks.flatMap((block) => {
     const hostId = articleBlockHostSegmentId(block)

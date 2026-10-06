@@ -1,13 +1,13 @@
 import { DEFAULT_ARTICLE_MODEL_ID } from '../../lib/article/articleModel'
 import { assignedArticleSlides } from '../../lib/pipeline/transcriptBoundaries'
-import type { MediaProject, SlideData } from '../../types/project'
+import type { ArticleContext, ArticleBlockView } from '../../types/project'
 
 const ARTICLE_PROMPT_VERSION = 'content-processing-v19-assigned-transcripts'
 const ARTICLE_SUMMARY_PROMPT_VERSION = 'article-summary-v4-infer-source-language'
 const ARTICLE_SECTIONS_PROMPT_VERSION = 'article-sections-v4-infer-source-language'
 
 export function articleInputFingerprint(
-  slide: SlideData,
+  slide: ArticleBlockView,
   modelId = slide.transcript?.articleModel ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
   return JSON.stringify([
@@ -19,7 +19,7 @@ export function articleInputFingerprint(
   ])
 }
 
-export function hasCurrentArticle(slide: SlideData, modelId?: string) {
+export function hasCurrentArticle(slide: ArticleBlockView, modelId?: string) {
   const articleModelId = modelId ?? slide.transcript?.articleModel ?? DEFAULT_ARTICLE_MODEL_ID
   return (
     (slide.transcript?.raw.trim()
@@ -29,24 +29,24 @@ export function hasCurrentArticle(slide: SlideData, modelId?: string) {
   )
 }
 
-export function articleSlidesWithSpeech(project: MediaProject) {
+export function articleSlidesWithSpeech(project: ArticleContext) {
   return assignedArticleSlides(project).filter((slide) => Boolean(slide.transcript?.raw.trim()))
 }
 
-export function articleTranscriptInput(project: MediaProject) {
+export function articleTranscriptInput(project: ArticleContext) {
   return articleSlidesWithSpeech(project)
     .map((slide) => slide.transcript?.raw ?? '')
     .join('\n\n')
 }
 
-export function hasAllSpeechArticleBodies(project: MediaProject) {
+export function hasAllSpeechArticleBodies(project: ArticleContext) {
   const slides = articleSlidesWithSpeech(project)
   return (
     slides.length > 0 && slides.every((slide) => Boolean(slide.transcript?.articleBody?.trim()))
   )
 }
 
-export function articleSummaryInput(project: MediaProject) {
+export function articleSummaryInput(project: ArticleContext) {
   return articleSlidesWithSpeech(project)
     .flatMap((slide) => {
       const body = slide.transcript?.articleBody?.trim()
@@ -60,8 +60,8 @@ export function articleSummaryInput(project: MediaProject) {
 }
 
 export function articleSummaryInputFingerprint(
-  project: MediaProject,
-  modelId = project.article?.summary?.model ?? DEFAULT_ARTICLE_MODEL_ID,
+  project: ArticleContext,
+  modelId = project.article.document?.summary?.model ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
   return JSON.stringify([
     articleSlidesWithSpeech(project).map((slide) => [
@@ -73,7 +73,7 @@ export function articleSummaryInputFingerprint(
   ])
 }
 
-export function articleSectionsInput(project: MediaProject) {
+export function articleSectionsInput(project: ArticleContext) {
   return articleSlidesWithSpeech(project)
     .map((slide) => {
       return [
@@ -86,8 +86,8 @@ export function articleSectionsInput(project: MediaProject) {
 }
 
 export function articleSectionsInputFingerprint(
-  project: MediaProject,
-  modelId = project.article?.sections?.model ?? DEFAULT_ARTICLE_MODEL_ID,
+  project: ArticleContext,
+  modelId = project.article.document?.sections?.model ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
   return JSON.stringify([
     articleSlidesWithSpeech(project).map((slide) => [
@@ -101,10 +101,10 @@ export function articleSectionsInputFingerprint(
 }
 
 export function hasCurrentArticleSections(
-  project: MediaProject,
-  modelId = project.article?.sections?.model ?? DEFAULT_ARTICLE_MODEL_ID,
+  project: ArticleContext,
+  modelId = project.article.document?.sections?.model ?? DEFAULT_ARTICLE_MODEL_ID,
 ) {
-  const sections = project.article?.sections
+  const sections = project.article.document?.sections
   return Boolean(
     sections?.sections.length &&
     sections.inputFingerprint === articleSectionsInputFingerprint(project, modelId),

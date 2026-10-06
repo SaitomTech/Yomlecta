@@ -1,7 +1,7 @@
 use super::assets::inspect_asset;
 use super::repositories::{load_project_from_indexes, load_project_summary};
 use super::services::documents::{update_article_title, update_article_workflow};
-use super::services::projects::create_project_bundle;
+use super::services::projects::{create_project_bundle, load_workspace};
 use super::services::validate_run_kind;
 use super::DbState;
 use serde_json::json;
@@ -48,7 +48,7 @@ fn normalized_indexes_round_trip_a_project() {
                 "createdAt": "2026-09-19T00:00:00.000Z",
                 "updatedAt": "2026-09-19T00:00:00.000Z"
             }],
-            "articles": [{
+            "articles": [{"kind": "loaded", "article": {
                 "id": "article-1",
                 "title": "Notes",
                 "sourceVideoId": "video-1",
@@ -67,7 +67,7 @@ fn normalized_indexes_round_trip_a_project() {
                 "sourceRange": {"startMs": 0, "endMs": 1000},
                 "crop": {"x": 0, "y": 0, "width": 1280, "height": 720},
                 "settings": {"slideDetection": {"sampleIntervalMs": 500, "threshold": 12}, "transcription": true, "ocr": true, "correction": true, "articleFormatting": true},
-                "slides": [{
+                "visualSegments": [{
                     "id": "slide-1",
                     "index": 0,
                     "startMs": 0,
@@ -75,16 +75,17 @@ fn normalized_indexes_round_trip_a_project() {
                     "detection": {"source": "auto", "hash": "abc"},
                     "image": {"representativeFramePath": "/tmp/slide.jpg"},
                     "ocr": {"rawText": "OCR", "model": "vision"},
-                    "transcript": {"raw": "hello", "articleBody": "本文", "model": "whisper"}
+                    "autoKind": "slide", "personLayout": "none"
                 }],
+                "blocks": [],
                 "slideDetection": {"sampleIntervalMs": 500, "threshold": 12, "framesAnalyzed": 2, "boundaries": [], "detectedAt": "2026-09-19T00:00:00.000Z"},
                 "transcription": {"model": "whisper", "audioPath": "/tmp/audio.wav", "segments": [{"id": "segment-1", "startMs": 0, "endMs": 1000, "text": "hello"}], "transcribedAt": "2026-09-19T00:00:00.000Z", "inputFingerprint": "fp"},
-                "article": {"title": "Notes", "summary": {"overview": "概要", "mainMessage": "主題", "keyPoints": ["要点"], "keywords": ["key"], "model": "llm", "inputFingerprint": "fp"}, "sections": {"sections": [{"id": "section-1", "heading": "見出し", "slideIds": ["slide-1"]}], "model": "llm", "inputFingerprint": "fp"}},
+                "document": {"summary": {"overview": "概要", "mainMessage": "主題", "keyPoints": ["要点"], "keywords": ["key"], "model": "llm", "inputFingerprint": "fp"}, "sections": {"sections": [{"id": "section-1", "heading": "見出し", "slideIds": ["slide-1"]}], "model": "llm", "inputFingerprint": "fp"}},
                 "workflow": {"lastVisitedStep": "article-review", "maxReachedStep": "article-review", "lastOpenedAt": "2026-09-19T00:00:00.000Z"},
                 "createdAt": "2026-09-19T00:00:00.000Z",
                 "updatedAt": "2026-09-19T00:00:00.000Z"
-            }],
-            "activeArticleId": "article-1",
+            }}],
+            "lastOpenedArticleId": "article-1",
             "createdAt": "2026-09-19T00:00:00.000Z",
             "updatedAt": "2026-09-19T00:00:00.000Z"
         });
@@ -99,7 +100,7 @@ fn normalized_indexes_round_trip_a_project() {
             &state,
             project.clone(),
             project["videos"][0].clone(),
-            project["articles"][0].clone(),
+            project["articles"][0]["article"].clone(),
         )
         .await
         .expect("create project bundle through production service");
@@ -143,21 +144,83 @@ fn normalized_indexes_round_trip_a_project() {
         .execute(&pool)
         .await
         .expect("select visual run");
-        let loaded = load_project_from_indexes(&pool, "project-1", None)
-            .await
-            .expect("load normalized project");
-        assert_eq!(loaded["articles"][0]["title"], "Notes");
+        let loaded = load_project_from_indexes(
+            &mut *pool.acquire().await.expect("acquire connection"),
+            "project-1",
+            None,
+        )
+        .await
+        .expect("load normalized project");
+        assert_eq!(loaded["articles"][0]["article"]["title"], "Notes");
         assert_eq!(loaded["videos"][0]["media"]["path"], "/tmp/lecture.mp4");
-        assert_eq!(loaded["articles"][0]["slides"][0]["id"], "segment-1");
-        assert_eq!(loaded["articles"][0]["slides"][0]["autoKind"], "slide");
         assert_eq!(
-            loaded["articles"][0]["articleBlocks"][0]["visualSegmentIds"],
+            loaded["articles"][0]["article"]["visualSegments"][0]["id"],
+            "segment-1"
+        );
+        assert_eq!(
+            loaded["articles"][0]["article"]["visualSegments"][0]["autoKind"],
+            "slide"
+        );
+        assert_eq!(
+            loaded["articles"][0]["article"]["blocks"][0]["visualSegmentIds"],
             json!(["segment-1"])
         );
         assert_eq!(
-            loaded["articles"][0]["articleBlocks"][0]["transcript"]["raw"],
+            loaded["articles"][0]["article"]["blocks"][0]["transcript"]["raw"],
             "hello"
         );
+        assert!(loaded.get("source").is_none());
+        assert!(loaded["articles"][0]["article"]["visualSegments"][0]
+            .get("transcript")
+            .is_none());
+        assert_eq!(
+            loaded["articles"][0]["article"]["document"]["summary"]["overview"],
+            "概要"
+        );
+        assert!(loaded["articles"][0]["article"]["document"]
+            .get("title")
+            .is_none());
+        sqlx::query("INSERT INTO articles (id, project_id, source_video_id, title, source_range_json, settings_json, workflow_json, created_at, updated_at, revision) SELECT 'article-2', project_id, source_video_id, 'Second', source_range_json, settings_json, workflow_json, created_at, updated_at, 7 FROM articles WHERE id = 'article-1'").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO documents (article_id, article_json, revision) VALUES ('article-2', NULL, 9)").execute(&pool).await.unwrap();
+        let second = load_workspace(&state, "project-1", Some("article-2"))
+            .await
+            .unwrap();
+        assert_eq!(second["loadedArticleId"], "article-2");
+        assert_eq!(second["project"]["lastOpenedArticleId"], "article-1");
+        let entries = second["project"]["articles"].as_array().unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry["kind"] == "loaded")
+                .count(),
+            1
+        );
+        assert_eq!(entries[0]["kind"], "metadata");
+        for field in [
+            "inputMedia",
+            "settings",
+            "visualSegments",
+            "blocks",
+            "document",
+        ] {
+            assert!(entries[0]["metadata"].get(field).is_none());
+        }
+        assert_eq!(second["revisions"]["articleRevisions"]["article-2"], 7);
+        assert_eq!(
+            second["revisions"]["documentRevisions"],
+            json!({"article-2": 9})
+        );
+        assert_eq!(second["revisions"]["slideRevisions"], json!({}));
+        assert!(load_workspace(&state, "project-1", Some("missing"))
+            .await
+            .is_err());
+        let first = load_workspace(&state, "project-1", None).await.unwrap();
+        assert_eq!(first["loadedArticleId"], "article-1");
+        assert_eq!(
+            first["revisions"]["documentRevisions"],
+            json!({"article-1": 0})
+        );
+        assert_eq!(first["revisions"]["slideRevisions"]["segment-1"], 0);
         let summary = load_project_summary(&pool, "project-1")
             .await
             .expect("load project summary");
@@ -165,6 +228,22 @@ fn normalized_indexes_round_trip_a_project() {
         assert_eq!(summary["summary"]["slideCount"], 1);
         assert_eq!(summary["summary"]["ocrCompleted"], 0);
         assert_eq!(summary["summary"]["articleCompleted"], 1);
+        sqlx::query("INSERT INTO projects (id, title, version, created_at, updated_at) VALUES ('empty', 'Empty', 12, 'created', 'updated')").execute(&pool).await.unwrap();
+        let empty = load_workspace(&state, "empty", None).await.unwrap();
+        assert!(empty["loadedArticleId"].is_null());
+        assert_eq!(empty["project"]["articles"], json!([]));
+        for field in [
+            "source",
+            "crop",
+            "settings",
+            "workflow",
+            "lastOpenedArticleId",
+        ] {
+            assert!(empty["project"].get(field).is_none());
+        }
+        assert!(load_workspace(&state, "empty", Some("article-1"))
+            .await
+            .is_err());
         fs::remove_dir_all(root).expect("cleanup app data directory");
     });
 }
@@ -235,7 +314,7 @@ fn revision_condition_prevents_stale_update() {
 }
 
 #[test]
-fn article_title_service_updates_article_and_document_atomically() {
+fn article_title_service_preserves_document_and_rolls_back_atomically() {
     tauri::async_runtime::block_on(async {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -262,7 +341,7 @@ fn article_title_service_updates_article_and_document_atomically() {
         .expect("insert article");
         sqlx::query(
             "INSERT INTO documents (article_id, article_json, revision)
-             VALUES ('a', json('{\"title\":\"Old title\",\"summary\":{\"overview\":\"keep\"}}'), 0)",
+             VALUES ('a', json('{\"summary\":{\"overview\":\"keep\"}}'), 0)",
         )
         .execute(&pool)
         .await
@@ -283,13 +362,12 @@ fn article_title_service_updates_article_and_document_atomically() {
             "saved".to_string(),
             Some(0),
             Some(0),
-            Some(0),
         )
         .await
         .expect("update title through production service");
         assert_eq!(result["projectRevision"], 1);
         assert_eq!(result["articleRevision"], 1);
-        assert_eq!(result["documentRevision"], 1);
+        assert!(result.get("documentRevision").is_none());
 
         let article_title: String = sqlx::query_scalar("SELECT title FROM articles WHERE id = 'a'")
             .fetch_one(&pool)
@@ -303,7 +381,13 @@ fn article_title_service_updates_article_and_document_atomically() {
                 .expect("read document");
         let document: serde_json::Value =
             serde_json::from_str(&document_json).expect("parse document");
-        assert_eq!(document["title"], "New title");
+        assert!(document.get("title").is_none());
+        let document_revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM documents WHERE article_id = 'a'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(document_revision, 0);
         assert_eq!(document["summary"]["overview"], "keep");
 
         let workflow_result = update_article_workflow(
@@ -312,7 +396,8 @@ fn article_title_service_updates_article_and_document_atomically() {
             "a".to_string(),
             Some("a".to_string()),
             json!({ "lastVisitedStep": "export", "maxReachedStep": "export" }),
-            "workflow".to_string(),
+            "2026-10-06T00:00:00.000Z".to_string(),
+            "2026-09-15T00:00:00.000Z".to_string(),
             Some(1),
             Some(1),
         )
@@ -320,6 +405,9 @@ fn article_title_service_updates_article_and_document_atomically() {
         .expect("update workflow through production service");
         assert_eq!(workflow_result["projectRevision"], 2);
         assert_eq!(workflow_result["articleRevision"], 2);
+        let timestamps: (String, String) = sqlx::query_as("SELECT p.updated_at, a.updated_at FROM projects p JOIN articles a ON a.project_id = p.id WHERE a.id = 'a'").fetch_one(&pool).await.unwrap();
+        assert_eq!(timestamps.0, "2026-10-06T00:00:00.000Z");
+        assert_eq!(timestamps.1, "2026-09-15T00:00:00.000Z");
         let workflow_json: String =
             sqlx::query_scalar("SELECT workflow_json FROM articles WHERE id = 'a'")
                 .fetch_one(&pool)
@@ -351,7 +439,6 @@ fn article_title_service_updates_article_and_document_atomically() {
             "rollback".to_string(),
             Some(2),
             Some(2),
-            Some(1),
         )
         .await
         .expect_err("project failure must roll back the title update");
@@ -373,7 +460,6 @@ fn article_title_service_updates_article_and_document_atomically() {
             "a".to_string(),
             "Stale title".to_string(),
             "stale".to_string(),
-            Some(0),
             Some(0),
             Some(0),
         )
@@ -569,18 +655,88 @@ fn project_summary_uses_the_same_effective_ocr_as_project_load() {
         assert_eq!(summary["summary"]["articleCompleted"], 2);
         assert_eq!(summary["summary"]["resumeStep"], "crop");
 
-        let loaded = load_project_from_indexes(&pool, "p", None)
-            .await
-            .expect("load project");
-        assert_eq!(loaded["articles"][0]["slides"][0]["ocr"]["rawText"], "");
-        assert_eq!(loaded["articles"][0]["slides"][1]["ocr"]["rawText"], " ");
+        let loaded = load_project_from_indexes(
+            &mut *pool.acquire().await.expect("acquire connection"),
+            "p",
+            None,
+        )
+        .await
+        .expect("load project");
         assert_eq!(
-            loaded["articles"][0]["slides"][2]["ocr"]["rawText"],
+            loaded["articles"][0]["article"]["visualSegments"][0]["ocr"]["rawText"],
+            ""
+        );
+        assert_eq!(
+            loaded["articles"][0]["article"]["visualSegments"][1]["ocr"]["rawText"],
+            " "
+        );
+        assert_eq!(
+            loaded["articles"][0]["article"]["visualSegments"][2]["ocr"]["rawText"],
             "edited"
         );
         assert_eq!(
-            loaded["articles"][0]["slides"][3]["ocr"]["rawText"],
+            loaded["articles"][0]["article"]["visualSegments"][3]["ocr"]["rawText"],
             "latest"
         );
+    });
+}
+
+#[test]
+fn document_title_migration_preserves_content_and_invalid_json() {
+    tauri::async_runtime::block_on(async {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE documents (article_id TEXT PRIMARY KEY, article_json TEXT, revision INTEGER)").execute(&pool).await.unwrap();
+        let original = json!({"title": "obsolete", "summary": {"overview": "keep"}, "sections": {"sections": []}, "boundaryPlan": {"version": "v1"}, "translations": {"en": {"title": "Translated"}}, "outputLanguage": "both"});
+        for (id, content) in [
+            ("valid", Some(original.to_string())),
+            ("null", None),
+            ("broken", Some("{broken".to_string())),
+            ("plain", Some("{}".to_string())),
+        ] {
+            sqlx::query("INSERT INTO documents VALUES (?, ?, 8)")
+                .bind(id)
+                .bind(content)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0007_remove_document_title.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let valid: String =
+            sqlx::query_scalar("SELECT article_json FROM documents WHERE article_id = 'valid'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let mut expected = original;
+        expected.as_object_mut().unwrap().remove("title");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&valid).unwrap(),
+            expected
+        );
+        let broken: String =
+            sqlx::query_scalar("SELECT article_json FROM documents WHERE article_id = 'broken'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(broken, "{broken");
+        let null: Option<String> =
+            sqlx::query_scalar("SELECT article_json FROM documents WHERE article_id = 'null'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(null.is_none());
+        let revisions: Vec<i64> = sqlx::query_scalar("SELECT revision FROM documents")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(revisions, vec![8, 8, 8, 8]);
     });
 }

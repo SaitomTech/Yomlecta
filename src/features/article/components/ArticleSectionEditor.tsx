@@ -1,11 +1,11 @@
 import { Save, X } from 'lucide-react'
 import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { SegmentVideoPlayer } from '../../../components/SegmentVideoPlayer'
-import type { ArticleOutputLanguage, SlideData } from '../../../types/project'
+import type { ArticleOutputLanguage, ArticleBlockView } from '../../../types/project'
 import { articleLanguageLabel, resolveArticleLanguageVisibility } from '../articleLanguage'
 
 type ArticleSectionEditorProps = {
-  slide: SlideData
+  slide: ArticleBlockView
   videoSrc: string | null
   sourceOffsetMs: number
   videoOpen: boolean
@@ -31,7 +31,7 @@ function SegmentVideoPreview({
   videoSrc,
   sourceOffsetMs,
 }: {
-  slide: SlideData
+  slide: ArticleBlockView
   videoSrc: string | null
   sourceOffsetMs: number
 }) {
@@ -121,7 +121,7 @@ function SourceBodyDisplay({
   editDisabled,
   onEdit,
 }: {
-  slide: SlideData
+  slide: ArticleBlockView
   body: string
   language: string
   showLanguageLabel: boolean
@@ -178,7 +178,7 @@ function OriginalData({
   videoOpen,
   onVideoToggle,
 }: {
-  slide: SlideData
+  slide: ArticleBlockView
   videoSrc: string | null
   sourceOffsetMs: number
   videoOpen: boolean

@@ -1,15 +1,16 @@
+import { articleMetadata } from '../../../lib/project/articleSelectors'
 import { ChevronDown, ChevronRight, CircleDot, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { formatPlaybackTime } from '../article-creator/rangeDraft'
 import { formatTimestamp } from '../../../lib/time'
 import { formatSize } from '../../import/utils'
-import type { Article, MediaProject, ProjectVideo } from '../../../types/project'
+import type { ArticleMetadata, Project, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from './VideoThumbnail'
 import { VideoPreviewDialog } from '../../../components/VideoPreviewDialog'
 
 import { ArticleThumbnail, getArticleThumbnail } from '../../article/components/ArticleThumbnail'
 
-function articleStatus(article: Article) {
+function articleStatus(article: ArticleMetadata) {
   if (article.workflow.lastVisitedStep === 'export' || article.workflow.maxReachedStep === 'export')
     return { label: '作成完了', tone: 'done' as const }
   if (article.workflow.lastVisitedStep === 'crop')
@@ -17,7 +18,7 @@ function articleStatus(article: Article) {
   return { label: '作業中', tone: 'working' as const }
 }
 
-function articleActionLabel(article: Article) {
+function articleActionLabel(article: ArticleMetadata) {
   if (article.workflow.lastVisitedStep === 'export' || article.workflow.maxReachedStep === 'export')
     return '記事を見る'
   if (article.workflow.lastVisitedStep === 'crop') return '作成を開始'
@@ -39,7 +40,7 @@ function ArticleTimelineRow({
   onEdit,
   onDelete,
 }: {
-  article: Article
+  article: ArticleMetadata
   highlighted: boolean
   isFirst: boolean
   isLast: boolean
@@ -142,7 +143,7 @@ function VideoGroup({
   onDeleteVideo,
 }: {
   video: ProjectVideo
-  articles: Article[]
+  articles: ArticleMetadata[]
   highlightedArticleIds: Set<string>
   onStart: (video: ProjectVideo) => void
   onOpen: (articleId: string) => void
@@ -275,14 +276,14 @@ export function ProjectArticleMap({
   onDeleteArticle,
   onDeleteVideo,
 }: {
-  project: MediaProject
+  project: Project
   onStartArticleCreator: (video?: ProjectVideo) => void
   onOpenArticle: (articleId: string) => void
   onEditArticle: (articleId: string) => void
   onDeleteArticle: (articleId: string) => void
   onDeleteVideo: (videoId: string) => void
 }) {
-  const compareArticleRanges = (left: Article, right: Article) =>
+  const compareArticleRanges = (left: ArticleMetadata, right: ArticleMetadata) =>
     left.sourceRange.startMs - right.sourceRange.startMs ||
     left.sourceRange.endMs - right.sourceRange.endMs ||
     left.createdAt.localeCompare(right.createdAt)
@@ -290,10 +291,12 @@ export function ProjectArticleMap({
   const grouped = project.videos.map((video) => ({
     video,
     articles: project.articles
+      .map(articleMetadata)
       .filter((article) => article.sourceVideoId === video.id)
       .sort(compareArticleRanges),
   }))
   const ungrouped = project.articles
+    .map(articleMetadata)
     .filter(
       (article) =>
         !article.sourceVideoId ||
@@ -304,7 +307,7 @@ export function ProjectArticleMap({
   const [highlightedArticleIds, setHighlightedArticleIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    const currentIds = new Set(project.articles.map((article) => article.id))
+    const currentIds = new Set(project.articles.map(articleMetadata).map((article) => article.id))
     const previousIds = knownArticleIds.current
     knownArticleIds.current = currentIds
     if (!previousIds) return

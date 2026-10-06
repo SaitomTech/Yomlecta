@@ -22,15 +22,17 @@ export function AppPages({
   actions: AppActions
 }) {
   const project = workspace.project
+  const context =
+    project && workspace.activeArticle ? { project, article: workspace.activeArticle } : null
   if (route.kind === 'project' && project?.id !== route.projectId) return null
   if (
     route.kind === 'article' &&
-    (!project || project.id !== route.projectId || project.activeArticleId !== route.articleId)
+    (!project || project.id !== route.projectId || context?.article.id !== route.articleId)
   )
     return null
   if (
     route.kind === 'article-detail' &&
-    (!project || project.id !== route.projectId || project.activeArticleId !== route.articleId)
+    (!project || project.id !== route.projectId || context?.article.id !== route.articleId)
   )
     return null
   if (route.kind === 'home')
@@ -62,7 +64,7 @@ export function AppPages({
     )
   if (!project) return null
   if (route.kind === 'article-detail') {
-    const article = project.articles.find((candidate) => candidate.id === route.articleId)
+    const article = context!.article
     const item: ArticleListItem = {
       articleId: route.articleId,
       projectId: route.projectId,
@@ -77,7 +79,7 @@ export function AppPages({
     return (
       <ArticleDetailPage
         key={route.articleId}
-        project={project}
+        project={context!}
         item={item}
         onBack={actions.handleOpenArticles}
         onEdit={() =>
@@ -108,7 +110,7 @@ export function AppPages({
       />
     )
   const articleProps = {
-    maxReachedStep: project.workflow.maxReachedStep,
+    maxReachedStep: context!.article.workflow.maxReachedStep,
     onStepClick: actions.handleWorkflowStep,
     onSaveTitle: actions.handleSaveArticleTitle,
   }
@@ -116,7 +118,7 @@ export function AppPages({
     return (
       <CropTrimPage
         key={route.articleId}
-        project={project}
+        project={context!}
         onCompleted={actions.handleArticleCropCompleted}
         onBackToProject={actions.handleBackToProject}
         onOpenArticle={actions.handleOpenArticle}
@@ -127,7 +129,7 @@ export function AppPages({
     return (
       <SlideDetectionPage
         key={route.articleId}
-        project={project}
+        project={context!}
         onCompleted={actions.handleSlideDetectionCompleted}
         onContinue={() => void actions.handleProjectStep('generate-notes')}
         onBackToProject={actions.handleBackToProject}
@@ -139,7 +141,7 @@ export function AppPages({
     return (
       <GenerateNotesPage
         key={route.articleId}
-        project={project}
+        project={context!}
         onCompleted={actions.handleTranscriptionCompleted}
         onOcrSlideCompleted={actions.handleOcrSlideCompleted}
         onSaveSlideResultEdits={actions.handleSaveSlideResultEdits}
@@ -153,7 +155,7 @@ export function AppPages({
     return (
       <ArticleReviewPage
         key={route.articleId}
-        project={project}
+        project={context!}
         onBoundaryPlanCompleted={actions.handleBoundaryPlanCompleted}
         onContentSlideCompleted={actions.handleContentSlideCompleted}
         onSaveSections={actions.handleSaveArticleSections}

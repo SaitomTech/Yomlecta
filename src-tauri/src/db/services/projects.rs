@@ -207,7 +207,7 @@ async fn insert_article_row(
     .map_err(|error| format!("記事を作成できませんでした: {error}"))?;
     sqlx::query("INSERT INTO documents (article_id, article_json, revision) VALUES (?, ?, 0)")
         .bind(article_id)
-        .bind(json_text(article.get("article"))?)
+        .bind(json_text(article.get("document"))?)
         .execute(&mut **tx)
         .await
         .map_err(|error| format!("記事documentを作成できませんでした: {error}"))?;
@@ -385,7 +385,7 @@ pub(crate) async fn create_project_bundle(
         .bind(value_string(&project, "updatedAt")?)
         .execute(&mut *tx).await
         .map_err(|error| format!("プロジェクトを作成できませんでした: {error}"))?;
-    if value_string(&article, "id")? != value_string(&project, "activeArticleId")? {
+    if value_string(&article, "id")? != value_string(&project, "lastOpenedArticleId")? {
         return Err("VALIDATION_ERROR: active articleが取り込み対象と一致しません。".to_string());
     }
     let video_id = value_string(&video, "id")?;
@@ -562,7 +562,7 @@ pub async fn db_update_article_content(
     sqlx::query(
         "UPDATE documents SET article_json = ?, revision = ? WHERE article_id = ? AND revision = ?",
     )
-    .bind(json_text(article.get("article"))?)
+    .bind(json_text(article.get("document"))?)
     .bind(document_revision + 1)
     .bind(article_id)
     .bind(document_revision)
@@ -895,23 +895,35 @@ pub async fn db_load_project(
     if let Some(article_id) = article_id.as_deref() {
         validate_id(article_id, "記事ID")?;
     }
-    let project =
-        load_project_from_indexes(&state.pool, &project_id, article_id.as_deref()).await?;
-    let revision: i64 = sqlx::query_scalar("SELECT revision FROM projects WHERE id = ?")
-        .bind(&project_id)
-        .fetch_one(&state.pool)
+    load_workspace(&state, &project_id, article_id.as_deref()).await
+}
+
+pub(crate) async fn load_workspace(
+    state: &DbState,
+    project_id: &str,
+    article_id: Option<&str>,
+) -> Result<Value, String> {
+    let mut tx = state
+        .pool
+        .begin()
         .await
-        .map_err(|error| format!("プロジェクトrevisionを読めませんでした: {error}"))?;
-    let revision_snapshot =
-        load_revision_snapshot(&state.pool, &project_id, article_id.as_deref()).await?;
-    Ok(json!({
-        "project": project,
-        "revision": revision,
-        "articleRevisions": revision_snapshot["articleRevisions"].clone(),
-        "documentRevisions": revision_snapshot["documentRevisions"].clone(),
-        "slideRevisions": revision_snapshot["slideRevisions"].clone(),
-        "ocrRevisions": revision_snapshot["ocrRevisions"].clone()
-    }))
+        .map_err(|error| error.to_string())?;
+    let project = load_project_from_indexes(&mut tx, project_id, article_id).await?;
+    let loaded_article_id = project["articles"]
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["kind"] == "loaded"))
+        .and_then(|entry| entry["article"]["id"].as_str());
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM projects WHERE id = ?")
+        .bind(project_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut revisions = load_revision_snapshot(&mut tx, project_id, loaded_article_id).await?;
+    revisions["revision"] = json!(revision);
+    let payload =
+        json!({"project": project, "loadedArticleId": loaded_article_id, "revisions": revisions});
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(payload)
 }
 
 #[tauri::command]

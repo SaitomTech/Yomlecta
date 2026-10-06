@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getErrorDetail, withUserFacingError } from '../../../lib/errors'
 import type { TranscriptionModelId } from '../../../lib/transcription/transcriptionModel'
-import type { MediaProject, TranscriptionResult } from '../../../types/project'
+import type { ArticleContext, TranscriptionResult } from '../../../types/project'
 import {
   runTranscription,
   type TranscriptionChunkProgress,
@@ -12,16 +12,16 @@ import {
 export type TranscriptionStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
 export function useTranscription(
-  project: MediaProject,
+  project: ArticleContext,
   modelId: TranscriptionModelId,
   onCompleted: (result: TranscriptionResult) => void | Promise<void>,
-  getCurrentProject?: () => MediaProject | null,
+  getCurrentProject?: () => ArticleContext | null,
 ) {
   const projectRef = useRef(project)
   useEffect(() => {
     projectRef.current = project
   }, [project])
-  const hasCurrentTranscription = project.transcription?.model === modelId
+  const hasCurrentTranscription = project.article.transcription?.model === modelId
   const [status, setStatus] = useState<TranscriptionStatus>(
     hasCurrentTranscription ? 'completed' : 'idle',
   )

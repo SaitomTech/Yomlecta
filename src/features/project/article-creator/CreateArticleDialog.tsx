@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useDialogA11y } from '../../../lib/ui/useDialogA11y'
 import { formatTimestamp } from '../../../lib/time'
 import type {
-  Article,
+  ArticleMetadata,
   CropRegion,
   PerspectiveCrop,
   ProjectVideo,
@@ -14,7 +14,7 @@ import { RangeEditor } from './RangeEditor'
 import { RangeList } from './RangeList'
 import { useArticleRangeEditor } from './useArticleRangeEditor'
 
-type ArticleRange = { title: string; range: VideoTrimRange }
+type ArticleMetadataRange = { title: string; range: VideoTrimRange }
 
 export function CreateArticleDialog({
   projectId,
@@ -26,10 +26,10 @@ export function CreateArticleDialog({
   video: ProjectVideo
   onClose: () => void
   onSubmit: (
-    ranges: ArticleRange[],
+    ranges: ArticleMetadataRange[],
     crop: CropRegion,
     perspectiveCrop?: PerspectiveCrop,
-  ) => Promise<Article[] | void>
+  ) => Promise<ArticleMetadata[] | void>
 }) {
   const [isCropPreviewOpen, setIsCropPreviewOpen] = useState(true)
   const editor = useArticleRangeEditor({

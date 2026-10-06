@@ -1,8 +1,8 @@
+import { getActiveArticle } from '../../lib/project/articleSelectors'
 import { normalizeTrimRange } from './videoRange'
-import { getActiveArticle } from '../../types/project'
 import type {
   CropRegion,
-  MediaProject,
+  ArticleContext,
   MediaSource,
   PerspectiveCrop,
   VideoTrimRange,
@@ -43,13 +43,13 @@ export function normalizeArticleCrop(
  * New reference articles point at the project video and keep their range/crop
  * as metadata; legacy prepared articles continue to use their prepared input.
  */
-export function getActiveArticleSourceContext(project: MediaProject): ArticleSourceContext {
+export function getActiveArticleSourceContext(project: ArticleContext): ArticleSourceContext {
   const article = getActiveArticle(project)
   const sourceVideo = article?.sourceVideoId
-    ? project.videos.find((video) => video.id === article.sourceVideoId)
+    ? project.project.videos.find((video) => video.id === article.sourceVideoId)
     : undefined
   const usesOriginalVideo = article?.inputMedia.preparation === 'reference' && Boolean(sourceVideo)
-  const source = usesOriginalVideo ? sourceVideo!.media : project.source
+  const source = usesOriginalVideo ? sourceVideo!.media : project.article.inputMedia
   const duration = Math.max(1, source.metadata.durationMs)
   const range = normalizeTrimRange(
     usesOriginalVideo
@@ -67,7 +67,7 @@ export function getActiveArticleSourceContext(project: MediaProject): ArticleSou
   }
 }
 
-export function getActiveArticleDuration(project: MediaProject) {
+export function getActiveArticleDuration(project: ArticleContext) {
   const context = getActiveArticleSourceContext(project)
   return context.range.endMs - context.range.startMs
 }

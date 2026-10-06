@@ -14,7 +14,7 @@ import { generateOpenAiArticle, getOpenAiApiKeyStatus } from '../../lib/openai/o
 import type {
   ArticleFormattingResult,
   ContentProcessingResult,
-  SlideData,
+  ArticleBlockView,
 } from '../../types/project'
 import { articleInputFingerprint } from '../article/article'
 import {
@@ -140,7 +140,7 @@ const ContentResponseSchema = z.object({
 })
 
 type GenerateArticle = (
-  slide: SlideData,
+  slide: ArticleBlockView,
   signal?: AbortSignal,
 ) => Promise<ContentProcessingResult | undefined>
 
@@ -178,7 +178,7 @@ function promptWithSourceLanguage(
   ].join('\n')
 }
 
-export function userPromptFor(slide: SlideData, sourceLanguage: string | undefined) {
+export function userPromptFor(slide: ArticleBlockView, sourceLanguage: string | undefined) {
   const transcript = slide.transcript?.raw.trim() || ''
   const inferredLanguage = inferArticleLanguage(sourceLanguage, transcript)
   return [
@@ -216,7 +216,7 @@ function articleBodyFromResponse(text: string) {
 
 function parseContentResponse(
   text: string,
-  slide: SlideData,
+  slide: ArticleBlockView,
   modelId: string,
   metadata: Pick<
     ArticleFormattingResult,

@@ -14,12 +14,12 @@ import {
   type OcrModel,
   type OcrModelId,
 } from '../../../lib/ocr/modelManager'
-import type { MediaProject } from '../../../types/project'
+import type { ArticleContext } from '../../../types/project'
 import type { OcrController } from '../hooks/useOcr'
 import { ocrInputFingerprint } from '../ocr'
 
 type OcrPanelProps = {
-  project: MediaProject
+  project: ArticleContext
   ocr: OcrController
   modelId: OcrModelId
   onModelChange: (modelId: OcrModelId) => void
@@ -95,15 +95,15 @@ export function OcrPanel({
   const isCompleted = ocr.status === 'completed'
   const total = ocr.progress.total
   const model = getOcrModel(modelId)
-  const eligibleSlides = ocrEligibleSegments(project.slides, project.articleBlocks)
+  const eligibleSlides = ocrEligibleSegments(project.article.visualSegments, project.article.blocks)
   const slidesToProcess = isCompleted
     ? eligibleSlides
     : eligibleSlides.filter(
         (slide) => slide.ocr?.inputFingerprint !== ocrInputFingerprint(slide, modelId),
       )
   const frameSize = representativeFrameDimensions(
-    project.source.metadata.width,
-    project.source.metadata.height,
+    project.article.inputMedia.metadata.width,
+    project.article.inputMedia.metadata.height,
   )
   const costEstimate =
     model.provider === 'openai'

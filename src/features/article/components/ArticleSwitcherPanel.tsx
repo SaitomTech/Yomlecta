@@ -1,3 +1,4 @@
+import { articleMetadata } from '../../../lib/project/articleSelectors'
 import {
   Check,
   CheckCircle2,
@@ -14,22 +15,19 @@ import { useMemo, useState } from 'react'
 import { useDialogA11y } from '../../../lib/ui/useDialogA11y'
 import { formatTimestamp } from '../../../lib/time'
 import { formatPlaybackTime } from '../../project/article-creator/rangeDraft'
-import type { Article, MediaProject, ProjectVideo } from '../../../types/project'
+import type { ArticleMetadata, Project, ProjectVideo } from '../../../types/project'
 import { VideoThumbnail } from '../../project/components/VideoThumbnail'
 
 type ArticleSwitcherPanelProps = {
-  project: MediaProject
+  project: Project
   onClose: () => void
   onSelect: (articleId: string) => void | Promise<void>
   selectedArticleId?: string
   disabled?: boolean
 }
 
-function ArticleThumbnail({ article }: { article: Article }) {
-  const imagePath = [
-    article.inputMedia.thumbnailPath,
-    ...article.slides.map((slide) => slide.image.representativeFramePath),
-  ].find((path): path is string => Boolean(path))
+function ArticleThumbnail({ article }: { article: ArticleMetadata }) {
+  const imagePath = [article.thumbnailPath].find((path): path is string => Boolean(path))
 
   return (
     <div className="grid h-12 w-[76px] shrink-0 place-items-center overflow-hidden rounded-[7px] border border-[#d8e1dc] bg-[#e8f2ec]">
@@ -47,7 +45,7 @@ function ArticleThumbnail({ article }: { article: Article }) {
   )
 }
 
-function articleStatus(article: Article) {
+function articleStatus(article: ArticleMetadata) {
   if (
     article.workflow.lastVisitedStep === 'export' ||
     article.workflow.maxReachedStep === 'export'
@@ -72,7 +70,7 @@ function articleStatus(article: Article) {
   }
 }
 
-function sortArticles(left: Article, right: Article) {
+function sortArticles(left: ArticleMetadata, right: ArticleMetadata) {
   return (
     left.sourceRange.startMs - right.sourceRange.startMs ||
     left.sourceRange.endMs - right.sourceRange.endMs ||
@@ -80,7 +78,7 @@ function sortArticles(left: Article, right: Article) {
   )
 }
 
-function matchesArticle(article: Article, normalizedQuery: string) {
+function matchesArticle(article: ArticleMetadata, normalizedQuery: string) {
   if (!normalizedQuery) return true
   return article.title.toLocaleLowerCase().includes(normalizedQuery)
 }
@@ -91,7 +89,7 @@ function ArticleRow({
   onSelect,
   disabled,
 }: {
-  article: Article
+  article: ArticleMetadata
   selected: boolean
   onSelect: (articleId: string) => void
   disabled: boolean
@@ -155,7 +153,7 @@ function VideoArticleGroup({
   disabled,
 }: {
   video: ProjectVideo
-  articles: Article[]
+  articles: ArticleMetadata[]
   selectedArticleId?: string
   collapsed: boolean
   onToggle: () => void
@@ -250,6 +248,7 @@ export function ArticleSwitcherPanel({
       .map((video) => {
         const videoMatches = matchesVideo(video)
         const articles = project.articles
+          .map(articleMetadata)
           .filter(
             (article) =>
               article.sourceVideoId === video.id &&
@@ -261,6 +260,7 @@ export function ArticleSwitcherPanel({
       .filter(({ articles }) => articles.length > 0)
 
     const ungrouped = project.articles
+      .map(articleMetadata)
       .filter(
         (article) =>
           (!article.sourceVideoId || !knownVideoIds.has(article.sourceVideoId)) &&
@@ -338,7 +338,7 @@ export function ArticleSwitcherPanel({
             />
           </label>
           <span className="shrink-0 rounded-full bg-[#edf4ef] px-2.5 py-1.5 text-[10px] font-semibold text-[#1d6b50]">
-            すべて {project.articles.length}
+            すべて {project.articles.map(articleMetadata).length}
           </span>
         </div>
 

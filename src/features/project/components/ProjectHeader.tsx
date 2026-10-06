@@ -1,5 +1,5 @@
 import { PencilLine, Trash2 } from 'lucide-react'
-import type { MediaProject } from '../../../types/project'
+import type { Project } from '../../../types/project'
 
 export function ProjectHeader({
   project,
@@ -15,7 +15,7 @@ export function ProjectHeader({
   onTitleCompositionEnd,
   onRequestDelete,
 }: {
-  project: MediaProject
+  project: Project
   isEditingTitle: boolean
   titleDraft: string
   isSavingTitle: boolean

@@ -1,10 +1,11 @@
+import { articleMetadata } from '../../lib/project/articleSelectors'
 import { useRef, useState } from 'react'
 import { ArticleNavigationBar } from '../article/components/ArticleNavigationBar'
 import type { SelectedVideo, YoutubeImportOptions, YoutubeImportRequest } from '../import/types'
 import type {
-  Article,
+  ArticleMetadata,
   CropRegion,
-  MediaProject,
+  Project,
   PerspectiveCrop,
   ProjectVideo,
   VideoTrimRange,
@@ -36,7 +37,7 @@ export function ProjectDetailPage({
   onDeleteVideo,
   onCreateArticles,
 }: {
-  project: MediaProject
+  project: Project
   onBackToProjects: () => void
   onDeleteProject: () => Promise<void>
   onRenameProject: (title: string) => Promise<void>
@@ -54,13 +55,13 @@ export function ProjectDetailPage({
     ranges: Array<{ title: string; range: VideoTrimRange }>,
     crop: CropRegion,
     perspectiveCrop?: PerspectiveCrop,
-  ) => Promise<Article[]>
+  ) => Promise<ArticleMetadata[]>
 }) {
   const [createVideo, setCreateVideo] = useState<ProjectVideo | null>(null)
   const [showVideoPicker, setShowVideoPicker] = useState(false)
   const [prepareAfterImport, setPrepareAfterImport] = useState(false)
   const [deleteVideo, setDeleteVideo] = useState<ProjectVideo | null>(null)
-  const [deleteArticle, setDeleteArticle] = useState<Article | null>(null)
+  const [deleteArticle, setDeleteArticle] = useState<ArticleMetadata | null>(null)
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isDeletingProject, setIsDeletingProject] = useState(false)
   const [projectDeleteError, setProjectDeleteError] = useState<string | null>(null)
@@ -102,7 +103,9 @@ export function ProjectDetailPage({
   }
 
   const requestDeleteArticle = (articleId: string) => {
-    const article = project.articles.find((candidate) => candidate.id === articleId)
+    const article = project.articles
+      .map(articleMetadata)
+      .find((candidate) => candidate.id === articleId)
     if (article) setDeleteArticle(article)
   }
   const requestDeleteVideo = (videoId: string) => {

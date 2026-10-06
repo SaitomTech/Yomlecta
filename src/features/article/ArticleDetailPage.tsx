@@ -13,7 +13,7 @@ import type {
   ArticleOutputLanguage,
   ArticleSection,
   ArticleTranslation,
-  MediaProject,
+  ArticleContext,
 } from '../../types/project'
 import { formatArticleDate, getArticleActionLabel, getArticleStatus } from './articleList'
 import {
@@ -161,18 +161,18 @@ export function ArticleDetailPage({
   onGenerated,
   onOpenProject,
 }: {
-  project: MediaProject
+  project: ArticleContext
   item: ArticleListItem
   onBack: () => void
   onEdit: () => void
   onGenerated: () => void | Promise<void>
   onOpenProject: () => void
 }) {
-  const article = project.articles.find((candidate) => candidate.id === item.articleId)
+  const article = project.article
   const status = getArticleStatus(item)
-  const summary = project.article?.summary
-  const sections = article?.article?.sections?.sections ?? []
-  const slides = article ? articleBlockViews(article.slides, article.articleBlocks) : []
+  const summary = project.article.document?.summary
+  const sections = article.document?.sections?.sections ?? []
+  const slides = article ? articleBlockViews(article.visualSegments, article.blocks) : []
   const sourceOffsetMs = article?.sourceRange.startMs ?? 0
   const outputLanguage = getArticleOutputLanguage(project)
   const translation = getCurrentTranslationForOutputLanguage(project, outputLanguage)
@@ -264,7 +264,8 @@ export function ArticleDetailPage({
               onClick={() => setIsVideoOpen(true)}
               aria-label="元動画を再生"
             >
-              <Film size={13} aria-hidden="true" /> {project.source.name.replace(/\.[^.]+$/, '')}
+              <Film size={13} aria-hidden="true" />{' '}
+              {project.article.inputMedia.name.replace(/\.[^.]+$/, '')}
             </button>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
           </div>
@@ -474,8 +475,8 @@ export function ArticleDetailPage({
       )}
       {isVideoOpen && (
         <VideoPreviewDialog
-          path={project.source.path}
-          title={project.source.name}
+          path={project.article.inputMedia.path}
+          title={project.article.inputMedia.name}
           onClose={() => setIsVideoOpen(false)}
         />
       )}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getErrorDetail, getUserErrorMessage } from '../../../lib/errors'
 import { DEFAULT_OCR_MODEL, type OcrModelId } from '../../../lib/ocr/modelManager'
 import { ocrEligibleSegments } from '../../../lib/pipeline/articleBlocks'
-import type { MediaProject } from '../../../types/project'
+import type { ArticleContext } from '../../../types/project'
 import {
   ocrInputFingerprint,
   runOcr,
@@ -14,16 +14,16 @@ import {
 export type OcrStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
 export function useOcr(
-  project: MediaProject,
+  project: ArticleContext,
   onSlideCompleted: OcrSlideCompleted,
   modelId: OcrModelId = DEFAULT_OCR_MODEL.id,
-  getCurrentProject?: () => MediaProject | null,
+  getCurrentProject?: () => ArticleContext | null,
 ) {
   const projectRef = useRef(project)
   useEffect(() => {
     projectRef.current = project
   }, [project])
-  const eligibleSlides = ocrEligibleSegments(project.slides, project.articleBlocks)
+  const eligibleSlides = ocrEligibleSegments(project.article.visualSegments, project.article.blocks)
   const initialCompleted = eligibleSlides.filter(
     (slide) => slide.ocr?.inputFingerprint === ocrInputFingerprint(slide, modelId),
   ).length

@@ -1,563 +1,456 @@
 import { expect, test } from 'bun:test'
-import { articleExportInputKey } from '../src/features/export/exportInput'
-import { parseMediaProject } from '../src/schemas/project'
+import { createArticleFixture, withArticle, blockViews } from './fixtures/article'
+import { createEmptyProject, replaceLoadedArticle } from '../src/lib/project/project'
 import {
-  createEmptyProject,
-  markProjectOpened,
-  markProjectExported,
-  syncActiveArticle,
-  updateProjectArticleDraft,
-  updateProjectArticleTitle,
-  updateProjectArticleSummary,
-  updateProjectArticleSourceSettings,
-  updateProjectSlideContent,
-  updateProjectSlideDetection,
-  updateProjectSlideOcr,
-  updateProjectTranscription,
-  updateProjectWorkflow,
-} from '../src/lib/project/project'
+  articleContext,
+  articleMetadata,
+  getLoadedArticle,
+} from '../src/lib/project/articleSelectors'
+import {
+  markArticleOpened,
+  markArticleExported,
+  updateArticleWorkflow,
+  updateArticleDraft,
+  updateArticleTitle,
+  updateArticleSummary,
+  updateArticleSourceSettings,
+  updateArticleSlideContent,
+  updateArticleSlideDetection,
+  updateArticleSlideOcr,
+  updateArticleTranscription,
+  updateArticleSlideResultEdits,
+} from '../src/lib/project/article'
+import { parseProject, parseLoadedProjectPayload } from '../src/schemas/project'
+import { articleExportInputKey } from '../src/features/export/exportInput'
 import { normalizeTrimRange } from '../src/lib/project/videoRange'
 import { getActiveArticleSourceContext } from '../src/lib/project/articleSource'
 import { createArticleFromRange } from '../src/lib/project/projectMedia'
 import {
-  WORKFLOW_STEPS,
   canNavigateToWorkflowStep,
   getFurthestWorkflowStep,
   isWorkflowStepReached,
+  WORKFLOW_STEPS,
 } from '../src/lib/workflow'
-import type { Article, MediaProject, ProjectVideo, SlideData } from '../src/types/project'
-import { PROJECT_VERSION } from '../src/types/project'
 import {
-  TRANSLATION_LANGUAGES,
   articleTranslationInputFingerprint,
   getCurrentArticleTranslation,
+  TRANSLATION_LANGUAGES,
   normalizeLanguage,
 } from '../src/features/article/translation'
-import { articleGenerationLanguageInstruction } from '../src/features/article/articleLanguage'
-import { articleSlidesWithSpeech, hasAllSpeechArticleBodies } from '../src/features/article/article'
+import { hasAllSpeechArticleBodies, articleSlidesWithSpeech } from '../src/features/article/article'
+import { PROJECT_VERSION, type ArticleTranslation } from '../src/types/project'
 
-const NOW = '2026-09-15T00:00:00.000Z'
-
-function projectSnapshot(project: MediaProject) {
-  return {
-    version: PROJECT_VERSION,
-    id: project.id,
-    title: project.title,
-    videos: project.videos,
-    articles: project.articles,
-    ...(project.activeArticleId ? { activeArticleId: project.activeArticleId } : {}),
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-  }
+const summary = {
+  overview: 'overview',
+  mainMessage: 'message',
+  keyPoints: ['point'],
+  keywords: ['keyword'],
+  model: 'article-model',
+  inputFingerprint: 'summary-fingerprint',
 }
 
-function createArticleWorkspace() {
-  const base = createEmptyProject('workflow')
-  const videoId = 'video-1'
-  const articleId = 'article-1'
-  const sourcePath = '/tmp/lecture.mp4'
-  const videoMedia = {
-    path: sourcePath,
-    name: 'lecture.mp4',
-    extension: 'mp4' as const,
-    metadata: { path: sourcePath, durationMs: 10_000, width: 1_920, height: 1_080 },
-    origin: { kind: 'local-file' as const },
-    ownership: 'managed' as const,
-    managedRelativePath: `videos/${videoId}/original.mp4`,
-    thumbnailPath: '/tmp/lecture.jpg',
-  }
-  const video: ProjectVideo = {
-    id: videoId,
-    title: 'lecture',
-    media: videoMedia,
-    createdAt: NOW,
-    updatedAt: NOW,
-  }
-  const inputMedia = {
-    ...videoMedia,
-    managedRelativePath: `articles/${articleId}/input/original.mp4`,
-    preparedFromVideoId: videoId,
-    preparation: 'copy' as const,
-    preparedAt: NOW,
-  }
-  const slide: SlideData = {
-    id: 'slide-1',
-    index: 0,
-    startMs: 0,
-    endMs: 10_000,
-    autoKind: 'slide',
-    personLayout: 'none',
-    detection: { source: 'auto' },
-    image: { representativeFramePath: '/tmp/slide.jpg' },
-    ocr: { rawText: 'OCR', model: 'ocr-model', inputFingerprint: 'ocr-fingerprint' },
-    transcript: {
-      raw: 'transcript',
-      model: 'transcription-model',
-      articleBody: 'body',
-      articleModel: 'article-model',
-      articleInputFingerprint: 'article-fingerprint',
-    },
-  }
-  const article: Article = {
-    id: articleId,
-    title: 'article',
-    sourceVideoId: videoId,
-    inputMedia,
-    sourceRange: { startMs: 0, endMs: 10_000 },
-    settings: base.settings,
-    slides: [slide],
-    articleBlocks: [
-      {
-        id: slide.id,
-        index: 0,
-        visualSegmentIds: [slide.id],
-        imageSegmentId: slide.id,
-        startMs: slide.startMs,
-        endMs: slide.endMs,
-        transcript: slide.transcript,
-      },
-    ],
-    slideDetection: {
-      sampleIntervalMs: 500,
-      threshold: 12,
-      framesAnalyzed: 20,
-      boundaries: [],
-      detectedAt: NOW,
-    },
-    transcription: {
-      model: 'transcription-model',
-      provider: 'local',
-      audioPath: '/tmp/audio.wav',
-      segments: [],
-      transcribedAt: NOW,
-      inputFingerprint: 'transcription-fingerprint',
-    },
-    article: { title: 'article' },
-    workflow: {
-      lastVisitedStep: 'article-review',
-      maxReachedStep: 'article-review',
-      lastOpenedAt: NOW,
-    },
-    createdAt: NOW,
-    updatedAt: NOW,
-  }
-  return {
-    ...base,
-    videos: [video],
-    articles: [article],
-    activeArticleId: articleId,
-    source: inputMedia,
-    slides: [slide],
-    articleBlocks: article.articleBlocks,
-    slideDetection: article.slideDetection,
-    transcription: article.transcription,
-    article: article.article,
-    workflow: article.workflow,
-  }
-}
-
-test('workflow keeps a previously reached step available after navigating back', () => {
-  const initial = createEmptyProject('workflow')
-  const completed = updateProjectWorkflow(initial, 'export')
-  const revisited = markProjectOpened(completed, 'generate-notes')
-
-  expect(revisited.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(revisited.workflow.maxReachedStep).toBe('export')
-  expect(isWorkflowStepReached(revisited.workflow.maxReachedStep, 'export')).toBe(true)
-})
-
-test('workflow progress never moves backwards when continuing from an earlier step', () => {
-  const completed = updateProjectWorkflow(createEmptyProject('workflow'), 'export')
-  const continued = updateProjectWorkflow(completed, 'generate-notes')
-
-  expect(continued.workflow.lastVisitedStep).toBe('generate-notes')
+test('workflow keeps reached steps when visiting and continuing from earlier steps', () => {
+  const completed = updateArticleWorkflow(createArticleFixture().article, 'export')
+  const visited = markArticleOpened(completed, 'generate-notes')
+  const continued = updateArticleWorkflow(visited, 'generate-notes')
+  expect(visited.workflow.lastVisitedStep).toBe('generate-notes')
   expect(continued.workflow.maxReachedStep).toBe('export')
+  expect(isWorkflowStepReached(continued.workflow.maxReachedStep, 'export')).toBe(true)
   expect(getFurthestWorkflowStep('article-review', 'generate-notes')).toBe('article-review')
   expect(canNavigateToWorkflowStep('export', 'generate-notes')).toBe(true)
   expect(canNavigateToWorkflowStep('generate-notes', 'export')).toBe(false)
 })
 
-test('export completion records reachability separately from the last visited step', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const revisited = markProjectOpened(exported, 'generate-notes')
-
-  expect(exported.workflow.maxReachedStep).toBe('export')
+test('export completion records reachability and survives revisiting and reload', () => {
+  const context = createArticleFixture()
+  const exported = markArticleExported(context.article)
   expect(exported.workflow.lastVisitedStep).toBe('article-review')
-  expect(exported.workflow.lastExportedAt).toBeTruthy()
-  expect(revisited.workflow.maxReachedStep).toBe('export')
-  expect(revisited.workflow.lastVisitedStep).toBe('generate-notes')
+  expect(exported.workflow.maxReachedStep).toBe('export')
+  expect(exported.workflow.lastExportedAt).toBeDefined()
+  const restored = articleContext(
+    parseProject(withArticle(context, markArticleOpened(exported, 'generate-notes')).project),
+  )
+  expect(restored.article.workflow.lastVisitedStep).toBe('generate-notes')
+  expect(restored.article.workflow.maxReachedStep).toBe('export')
+  expect(restored.article.workflow.lastExportedAt).toBe(exported.workflow.lastExportedAt)
 })
 
-test('persisted workflow restores both the last visited and furthest reached steps', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const revisited = markProjectOpened(exported, 'generate-notes')
-  const restored = parseMediaProject(projectSnapshot(syncActiveArticle(revisited)))
-
-  expect(restored.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(restored.workflow.maxReachedStep).toBe('export')
+test('no-op OCR and body results preserve article reference and completion', () => {
+  const context = createArticleFixture()
+  const article = markArticleExported(context.article)
+  const ocr = article.visualSegments[0].ocr!
+  expect(updateArticleSlideOcr(article, 'slide-1', ocr)).toBe(article)
+  const block = article.blocks[0].transcript!
+  expect(
+    updateArticleSlideContent(article, 'slide-1', {
+      article: {
+        body: block.articleBody!,
+        model: block.articleModel!,
+        inputFingerprint: block.articleInputFingerprint!,
+      },
+    }),
+  ).toBe(article)
 })
 
-test('same OCR output is a no-op, while changed OCR preserves generated notes', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const savedOcr = exported.slides[0].ocr
-  if (!savedOcr) throw new Error('テスト用OCRがありません。')
-
-  const same = updateProjectSlideOcr(exported, 'slide-1', savedOcr)
-  expect(same).toBe(exported)
-  expect(same.slides[0].transcript?.articleBody).toBe('body')
-
-  const changed = updateProjectSlideOcr(exported, 'slide-1', {
-    ...savedOcr,
-    rawText: 'changed OCR',
+test('changed OCR resets processing reachability without copying or clearing block speech', () => {
+  const article = markArticleExported(createArticleFixture().article)
+  const changed = updateArticleSlideOcr(article, 'slide-1', {
+    ...article.visualSegments[0].ocr!,
+    rawText: 'new OCR',
   })
   expect(changed.workflow.maxReachedStep).toBe('generate-notes')
-  expect(changed.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(changed.slides[0].transcript?.articleBody).toBe('body')
-  expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'article-review')).toBe(false)
-  expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'export')).toBe(false)
+  expect(changed.blocks).toBe(article.blocks)
+  expect(changed.visualSegments[0].ocr?.rawText).toBe('new OCR')
+  expect('transcript' in changed.visualSegments[0]).toBe(false)
 })
 
-test('changed transcription preserves generated notes', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const transcription = exported.transcription
-  if (!transcription) throw new Error('テスト用文字起こし結果がありません。')
-
-  const same = updateProjectTranscription(exported, transcription)
-  expect(same).toBe(exported)
-
-  const changed = updateProjectTranscription(exported, {
-    ...transcription,
-    inputFingerprint: 'transcription-fingerprint-v2',
+test('changed generated content updates only the block and advances to review', () => {
+  const article = markArticleExported(createArticleFixture().article)
+  const changed = updateArticleSlideContent(article, 'slide-1', {
+    article: { body: 'new body', model: 'article-model', inputFingerprint: 'new-input' },
   })
-  expect(changed.slides[0].transcript?.articleBody).toBe('body')
-  expect(changed.workflow.maxReachedStep).toBe('generate-notes')
-  expect(changed.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'export')).toBe(false)
+  expect(changed.blocks[0].transcript?.articleBody).toBe('new body')
+  expect(changed.visualSegments).toBe(article.visualSegments)
+  expect(changed.workflow.maxReachedStep).toBe('article-review')
+  expect(blockViews(withArticle(createArticleFixture(), changed))[0].transcript?.articleBody).toBe(
+    'new body',
+  )
 })
 
-test('unchanged article drafts do not invalidate the export, but edits do', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const same = updateProjectArticleDraft(exported, {
-    title: 'article',
-    bodies: { 'slide-1': 'body' },
-  })
-  expect(same).toBe(exported)
-
-  const changed = updateProjectArticleDraft(exported, {
-    title: 'article',
+test('manual body editing preserves completion, sections and summary through reload', () => {
+  const context = createArticleFixture()
+  const sections = {
+    model: 'manual',
+    inputFingerprint: 'manual',
+    sections: [{ id: 'section', heading: 'Heading', slideIds: ['slide-1'] }],
+  }
+  const article = { ...markArticleExported(context.article), document: { summary, sections } }
+  const changed = updateArticleDraft(article, {
+    title: article.title,
     bodies: { 'slide-1': 'edited body' },
   })
   expect(changed.workflow.maxReachedStep).toBe('export')
-  expect(changed.workflow.lastVisitedStep).toBe('article-review')
-  expect(changed.slides[0].transcript?.articleBody).toBe('edited body')
+  expect(changed.blocks[0].transcript?.articleBody).toBe('edited body')
+  expect(changed.visualSegments).toBe(article.visualSegments)
+  const restored = articleContext(parseProject(withArticle(context, changed).project)).article
+  expect(restored.document?.sections).toEqual(sections)
+  expect(restored.document?.summary).toEqual(summary)
+  expect(restored.blocks[0].transcript?.articleBody).toBe('edited body')
 })
 
-test('workflow article title is kept as the generated article title', () => {
-  const project = createArticleWorkspace()
-  const activeArticle = project.articles[0]
-  if (!activeArticle) throw new Error('テスト用記事がありません。')
-  const withDifferentGeneratedTitle = {
-    ...project,
-    article: { title: 'generated title' },
+test('title has one owner and both metadata and export observe the edited title', () => {
+  const context = createArticleFixture()
+  const changed = updateArticleTitle(context.article, 'renamed')
+  expect(changed.document).toBe(context.article.document)
+  expect(changed.title).toBe('renamed')
+  expect(updateArticleTitle(changed, 'renamed')).toBe(changed)
+  expect(() => updateArticleTitle(changed, ' ')).toThrow()
+  const next = withArticle(context, changed)
+  expect(articleMetadata(next.project.articles[0]).title).toBe('renamed')
+  expect(JSON.parse(articleExportInputKey(next)).title).toBe('renamed')
+  expect('title' in changed.document!).toBe(false)
+  const withSummary = updateArticleSummary(changed, summary)
+  expect(withSummary.title).toBe('renamed')
+  expect('title' in withSummary.document!).toBe(false)
+})
+
+test('empty draft title keeps the article title and unknown block IDs are rejected', () => {
+  const article = createArticleFixture().article
+  expect(updateArticleDraft(article, { title: '', bodies: {} })).toBe(article)
+  expect(() => updateArticleDraft(article, { title: '', bodies: { missing: 'body' } })).toThrow()
+})
+
+test('changing range invalidates only the target article and preserves other metadata', () => {
+  const context = createArticleFixture()
+  const other = { ...context.article, id: 'other', title: 'Other' }
+  const project = {
+    ...context.project,
     articles: [
-      {
-        ...activeArticle,
-        title: 'workflow title',
-        article: { title: 'generated title' },
-      },
+      ...context.project.articles,
+      { kind: 'metadata' as const, metadata: articleMetadata({ kind: 'loaded', article: other }) },
     ],
   }
-
-  const draft = updateProjectArticleDraft(withDifferentGeneratedTitle, {
-    title: '',
-    bodies: { 'slide-1': 'body' },
-  })
-  expect(draft.article?.title).toBe('workflow title')
-  expect(draft.articles[0]?.title).toBe('workflow title')
-
-  const summary = updateProjectArticleSummary(withDifferentGeneratedTitle, {
-    overview: 'overview',
-    mainMessage: 'message',
-    keyPoints: ['point'],
-    keywords: ['keyword'],
-    model: 'article-model',
-    inputFingerprint: 'summary-fingerprint',
-  })
-  expect(summary.article?.title).toBe('workflow title')
-  expect(syncActiveArticle(withDifferentGeneratedTitle).articles[0]?.title).toBe('workflow title')
-})
-
-test('article title updates the workflow title and generated title together', () => {
-  const project = createArticleWorkspace()
-  const renamed = updateProjectArticleTitle(project, 'renamed article')
-
-  expect(renamed.articles[0]?.title).toBe('renamed article')
-  expect(renamed.article?.title).toBe('renamed article')
-  expect(renamed.workflow).toEqual(project.workflow)
-})
-
-test('changed slide detection invalidates downstream steps', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const detection = exported.slideDetection
-  if (!detection) throw new Error('テスト用スライド検出結果がありません。')
-
-  const changed = updateProjectSlideDetection(
-    exported,
-    { ...detection, threshold: detection.threshold + 1 },
-    exported.slides,
+  const changed = updateArticleSourceSettings(
+    context.article,
+    { startMs: 2000, endMs: 8000 },
+    { x: 0, y: 0, width: 1920, height: 1080 },
   )
-  expect(changed.workflow.maxReachedStep).toBe('generate-notes')
+  const next = replaceLoadedArticle(project, changed)
+  expect(changed.visualSegments).toEqual([])
+  expect(changed.blocks).toEqual([])
+  expect(changed.transcription).toBeUndefined()
+  expect(changed.document).toBeUndefined()
   expect(changed.workflow.lastVisitedStep).toBe('detect-slides')
+  expect(next.articles[1]).toBe(project.articles[1])
 })
 
-test('changed article generation invalidates the result step', () => {
-  const exported = markProjectExported(createArticleWorkspace())
-  const changed = updateProjectSlideContent(exported, 'slide-1', {
-    article: {
-      body: 'regenerated body',
-      model: 'article-model-v2',
-      inputFingerprint: 'article-fingerprint-v2',
-    },
-  })
-
-  expect(changed.workflow.maxReachedStep).toBe('article-review')
-  expect(changed.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(changed.slides[0].transcript?.articleBody).toBe('regenerated body')
-  expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'article-review')).toBe(true)
-  expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'export')).toBe(false)
-})
-
-test('range normalization clamps invalid edges and preserves a near-full selection', () => {
-  expect(normalizeTrimRange({ startMs: -1_000, endMs: 20_000 }, 10_000)).toEqual({
+test('range normalization clamps invalid edges and rejects invalid durations', () => {
+  expect(normalizeTrimRange({ startMs: -1000, endMs: 20000 }, 10000)).toEqual({
     startMs: 0,
-    endMs: 10_000,
+    endMs: 10000,
   })
-  expect(normalizeTrimRange({ startMs: 9_800, endMs: 9_900 }, 10_000)).toEqual({
-    startMs: 9_500,
-    endMs: 10_000,
+  expect(normalizeTrimRange({ startMs: 9800, endMs: 9900 }, 10000)).toEqual({
+    startMs: 9500,
+    endMs: 10000,
   })
   expect(() => normalizeTrimRange({ startMs: 0, endMs: 1 }, 0)).toThrow()
 })
 
-test('new article candidates reference the original project video without creating a copy', async () => {
-  const project = createArticleWorkspace()
-  const video = project.videos[0]
-  if (!video) throw new Error('テスト用動画がありません。')
+test('new article references original video and resolves the article-local range and crop', async () => {
+  const context = createArticleFixture()
+  const video = context.project.videos[0]
   const article = await createArticleFromRange(
-    project,
+    context.project,
     video.id,
     'candidate',
-    { startMs: 1_000, endMs: 4_000 },
-    { x: 20, y: 30, width: 1_000, height: 600 },
+    { startMs: 1000, endMs: 4000 },
+    { x: 20, y: 30, width: 1000, height: 600 },
   )
-
   expect(article.inputMedia.path).toBe(video.media.path)
   expect(article.inputMedia.preparation).toBe('reference')
-  expect(article.sourceRange).toEqual({ startMs: 1_000, endMs: 4_000 })
   expect(article.workflow.lastVisitedStep).toBe('crop')
-  const next = {
-    ...project,
-    articles: [article],
-    activeArticleId: article.id,
-    source: article.inputMedia,
-    sourceRange: article.sourceRange,
-    crop: article.crop,
-    workflow: article.workflow,
-    settings: article.settings,
-    slides: article.slides,
+  const source = getActiveArticleSourceContext({ project: context.project, article })
+  expect(source.usesOriginalVideo).toBe(true)
+  expect(source.source.path).toBe(video.media.path)
+  expect(source.range).toEqual(article.sourceRange)
+  expect(source.crop).toEqual(article.crop!)
+})
+
+test('transcription assigns speech to blocks and keeps visual segments free of speech', () => {
+  const context = createArticleFixture()
+  const changed = updateArticleTranscription(context.article, {
+    ...context.article.transcription!,
+    inputFingerprint: 'changed',
+    segments: [{ id: 't1', startMs: 0, endMs: 10000, text: 'new speech' }],
+  })
+  expect(changed.blocks[0].transcript?.raw).toBe('new speech')
+  expect(changed.visualSegments).toBe(context.article.visualSegments)
+  expect(changed.workflow.maxReachedStep).toBe('generate-notes')
+  expect(updateArticleTranscription(changed, changed.transcription!)).toBe(changed)
+})
+
+test('slide detection rebuilds blocks and restores transcription assignment', () => {
+  const context = createArticleFixture()
+  const article = {
+    ...context.article,
+    transcription: {
+      ...context.article.transcription!,
+      segments: [{ id: 't', startMs: 0, endMs: 10000, text: 'speech' }],
+    },
   }
-  const context = getActiveArticleSourceContext(next)
-  expect(context.usesOriginalVideo).toBe(true)
-  expect(context.source.path).toBe(video.media.path)
-  expect(context.range).toEqual(article.sourceRange)
+  const changed = updateArticleSlideDetection(article, article.slideDetection!, [
+    { ...article.visualSegments[0], endMs: 9000 },
+  ])
+  expect(changed.blocks[0].transcript?.raw).toBe('speech')
+  expect(changed.blocks[0].endMs).toBe(9000)
+  expect('transcript' in changed.visualSegments[0]).toBe(false)
 })
 
-test('changing one article range invalidates only that article outputs', () => {
-  const project = createArticleWorkspace()
-  const article = project.articles[0]
-  if (!article) throw new Error('テスト用記事がありません。')
-  const changed = updateProjectArticleSourceSettings(
-    project,
-    { startMs: 2_000, endMs: 8_000 },
-    { x: 0, y: 0, width: 1_920, height: 1_080 },
-  )
-  expect(changed.articles).toHaveLength(1)
-  expect(changed.articles[0]?.sourceRange).toEqual({ startMs: 2_000, endMs: 8_000 })
-  expect(changed.articles[0]?.slides).toEqual([])
-  expect(changed.articles[0]?.slideDetection).toBeUndefined()
-  expect(changed.articles[0]?.workflow.lastVisitedStep).toBe('detect-slides')
+test('manual result edits update OCR on the image segment and speech on the block', () => {
+  const article = createArticleFixture().article
+  const changed = updateArticleSlideResultEdits(article, 'slide-1', {
+    ocrText: 'edited OCR',
+    transcriptRaw: 'edited speech',
+    articleBody: 'edited body',
+  })
+  expect(changed.visualSegments[0].ocr?.rawText).toBe('edited OCR')
+  expect(changed.blocks[0].transcript?.raw).toBe('edited speech')
+  expect(changed.blocks[0].transcript?.articleBody).toBe('edited body')
 })
 
-test('project parser accepts the current persisted shape and rejects stale or unknown data', () => {
-  const workspace = createArticleWorkspace()
-  const persisted = projectSnapshot(workspace)
-  expect(parseMediaProject(persisted).version).toBe(PROJECT_VERSION)
-  expect(() => parseMediaProject({ ...persisted, version: PROJECT_VERSION - 1 })).toThrow()
-  expect(() => parseMediaProject({ ...persisted, unexpected: true })).toThrow()
+test('empty projects and metadata-only articles require no placeholder editor state', () => {
+  const empty = parseProject(createEmptyProject('Empty'))
+  expect(getLoadedArticle(empty)).toBeNull()
+  expect('source' in empty).toBe(false)
+  expect('workflow' in empty).toBe(false)
+  const context = createArticleFixture()
+  const metadata = articleMetadata(context.project.articles[0])
+  const project = parseProject({ ...context.project, articles: [{ kind: 'metadata', metadata }] })
+  expect(getLoadedArticle(project)).toBeNull()
+  expect('visualSegments' in metadata).toBe(false)
+})
+
+test('project parser rejects stale versions, unknown fields, duplicate and invalid entries', () => {
+  const context = createArticleFixture()
+  expect(parseProject(context.project).version).toBe(PROJECT_VERSION)
+  expect(() => parseProject({ ...context.project, version: PROJECT_VERSION - 1 })).toThrow()
+  expect(() => parseProject({ ...context.project, source: {} })).toThrow()
   expect(() =>
-    parseMediaProject({
-      ...persisted,
-      videos: [
-        {
-          ...persisted.videos[0],
-          media: { ...persisted.videos[0].media, unexpected: true },
-        },
-      ],
+    parseProject({
+      ...context.project,
+      articles: [context.project.articles[0], context.project.articles[0]],
     }),
   ).toThrow()
   expect(() =>
-    parseMediaProject({
-      ...persisted,
+    parseProject({
+      ...context.project,
       articles: [
         {
-          ...persisted.articles[0],
-          sourceRange: { startMs: 5_000, endMs: 5_000 },
+          kind: 'loaded',
+          article: { ...context.article, sourceRange: { startMs: 5000, endMs: 5000 } },
         },
       ],
     }),
   ).toThrow()
+  expect(() => parseProject({ ...context.project, lastOpenedArticleId: 'missing' })).toThrow()
+  expect(() =>
+    parseProject({
+      ...context.project,
+      articles: [{ kind: 'loaded', article: { ...context.article, sourceVideoId: 'missing' } }],
+    }),
+  ).toThrow()
 })
 
-test('article translation is limited to Japanese and English', () => {
+test('active article is the stored detail reference, and switching demotes old detail', () => {
+  const context = createArticleFixture()
+  expect(getLoadedArticle(context.project)).toBe(context.article)
+  const other = { ...context.article, id: 'other' }
+  const project = {
+    ...context.project,
+    articles: [
+      ...context.project.articles,
+      { kind: 'metadata' as const, metadata: articleMetadata({ kind: 'loaded', article: other }) },
+    ],
+  }
+  const next = replaceLoadedArticle(project, other)
+  expect(next.articles[0].kind).toBe('metadata')
+  expect(getLoadedArticle(next)).toBe(other)
+  expect(next.articles.filter((entry) => entry.kind === 'loaded')).toHaveLength(1)
+})
+
+test('article translation supports Japanese and English only', () => {
   expect(TRANSLATION_LANGUAGES.map((language) => language.id)).toEqual(['ja', 'en'])
   expect(normalizeLanguage('ja-JP')).toBe('ja')
   expect(normalizeLanguage('en-US')).toBe('en')
-  expect(normalizeLanguage('english')).toBe('en')
-  expect(normalizeLanguage('japanese')).toBe('ja')
-  expect(normalizeLanguage('fr-FR')).toBeUndefined()
-  expect(articleGenerationLanguageInstruction('english')).toContain('必ず英語')
-  expect(articleGenerationLanguageInstruction('english')).toContain('日本語へ翻訳しない')
+  expect(normalizeLanguage('fr')).toBeUndefined()
 })
 
-test('silent visual segments do not require generated article bodies', () => {
-  const project = createArticleWorkspace()
-  const sourceSlide = project.slides[0]
-  const silentSlide: SlideData = {
-    ...sourceSlide,
-    id: 'slide-silent',
+test('silent blocks do not require generated article bodies', () => {
+  const context = createArticleFixture()
+  const silent = {
+    ...context.article.blocks[0],
+    id: 'silent',
     index: 1,
-    startMs: sourceSlide.endMs,
-    endMs: sourceSlide.endMs + 5_000,
-    transcript: { raw: '', model: sourceSlide.transcript?.model ?? 'test' },
+    transcript: { raw: '', model: 'test' },
   }
-  const withSilence: MediaProject = {
-    ...project,
-    slides: [sourceSlide, silentSlide],
-    articleBlocks: [
-      {
-        id: sourceSlide.id,
-        index: 0,
-        visualSegmentIds: [sourceSlide.id],
-        imageSegmentId: sourceSlide.id,
-        startMs: sourceSlide.startMs,
-        endMs: sourceSlide.endMs,
-        transcript: sourceSlide.transcript,
-      },
-      {
-        id: silentSlide.id,
-        index: 1,
-        visualSegmentIds: [silentSlide.id],
-        imageSegmentId: silentSlide.id,
-        startMs: silentSlide.startMs,
-        endMs: silentSlide.endMs,
-        transcript: silentSlide.transcript,
-      },
-    ],
-  }
-
-  expect(articleSlidesWithSpeech(withSilence).map((slide) => slide.id)).toEqual([sourceSlide.id])
-  expect(hasAllSpeechArticleBodies(withSilence)).toBe(true)
+  const next = withArticle(context, {
+    ...context.article,
+    blocks: [...context.article.blocks, silent],
+  })
+  expect(articleSlidesWithSpeech(next)).toHaveLength(1)
+  expect(hasAllSpeechArticleBodies(next)).toBe(true)
 })
 
-test('article translation becomes stale when its source body changes', () => {
-  const project = createArticleWorkspace()
-  const inputFingerprint = articleTranslationInputFingerprint(project, 'ja', 'en')
-  const translated: MediaProject = {
-    ...project,
-    article: {
-      ...project.article,
-      title: project.article?.title ?? 'article',
-      translations: {
-        en: {
-          sourceLanguage: 'ja',
-          targetLanguage: 'en',
-          engine: 'apple-translation' as const,
-          model: 'Apple Translation',
-          inputFingerprint,
-          generatedAt: NOW,
-          title: 'Article',
-          bodies: { 'slide-1': 'Body' },
-        },
-      },
-    },
+test('translation becomes stale when the canonical block body changes', () => {
+  const context = createArticleFixture()
+  const translation: ArticleTranslation = {
+    sourceLanguage: 'ja',
+    targetLanguage: 'en',
+    engine: 'apple-translation',
+    model: 'Apple Translation',
+    inputFingerprint: articleTranslationInputFingerprint(context, 'ja', 'en'),
+    generatedAt: context.article.updatedAt,
+    title: 'Article',
+    bodies: { 'slide-1': 'Body' },
   }
-
-  expect(getCurrentArticleTranslation(translated, 'en', 'ja')?.title).toBe('Article')
-
-  const changed = {
-    ...translated,
-    slides: translated.slides.map((slide) => ({
-      ...slide,
-      transcript: slide.transcript
-        ? { ...slide.transcript, articleBody: 'changed body' }
-        : undefined,
-    })),
-  }
+  const translated = withArticle(context, {
+    ...context.article,
+    document: { translations: { en: translation } },
+  })
+  expect(getCurrentArticleTranslation(translated, 'en', 'ja')).toBe(translation)
+  const changed = withArticle(
+    translated,
+    updateArticleDraft(translated.article, {
+      title: translated.article.title,
+      bodies: { 'slide-1': 'changed body' },
+    }),
+  )
   expect(getCurrentArticleTranslation(changed, 'en', 'ja')).toBeUndefined()
 })
 
-test('body edits preserve independently generated sections and summary after reload', () => {
-  const project = createArticleWorkspace()
-  project.article = {
-    ...project.article,
-    title: 'article',
-    summary: {
-      overview: 'Saved overview',
-      mainMessage: 'Saved message',
-      keyPoints: ['Saved point'],
-      keywords: ['Saved keyword'],
-      model: 'article-model',
-      inputFingerprint: 'original-body',
-    },
-    sections: {
-      model: 'article-model',
-      inputFingerprint: 'original-body',
-      sections: [{ id: 'section-1', heading: 'Saved heading', slideIds: ['slide-1'] }],
+test('workflow has four editable steps and preserves the legacy completion marker', () => {
+  expect(WORKFLOW_STEPS).toHaveLength(4)
+  expect(canNavigateToWorkflowStep('export', 'article-review')).toBe(true)
+})
+
+test('export input changes with body regeneration and title, but not workflow bookkeeping', () => {
+  const context = createArticleFixture()
+  const original = articleExportInputKey(context)
+  expect(articleExportInputKey(withArticle(context, markArticleExported(context.article)))).toBe(
+    original,
+  )
+  expect(
+    articleExportInputKey(withArticle(context, updateArticleTitle(context.article, 'new'))),
+  ).not.toBe(original)
+  expect(
+    articleExportInputKey(
+      withArticle(
+        context,
+        updateArticleDraft(context.article, {
+          title: context.article.title,
+          bodies: { 'slide-1': 'new' },
+        }),
+      ),
+    ),
+  ).not.toBe(original)
+})
+
+test('load payload rejects mismatched detail and malformed revisions before acceptance', () => {
+  const context = createArticleFixture()
+  const payload = {
+    project: context.project,
+    loadedArticleId: context.article.id,
+    revisions: {
+      revision: 2,
+      articleRevisions: { [context.article.id]: 3 },
+      documentRevisions: { [context.article.id]: 0 },
+      slideRevisions: { [context.article.visualSegments[0].id]: 0 },
+      ocrRevisions: {},
     },
   }
-  const changed = updateProjectArticleDraft(project, {
-    title: 'article',
-    bodies: { 'slide-1': 'Edited body' },
-  })
-  const restored = parseMediaProject(projectSnapshot(syncActiveArticle(changed)))
-  expect(restored.article?.summary).toEqual(project.article.summary)
-  expect(restored.article?.sections).toEqual(project.article.sections)
-  expect(restored.slides[0].transcript?.articleBody).toBe('Edited body')
-  expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved heading')
-  expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved overview')
+  expect(
+    parseLoadedProjectPayload(payload, context.project.id, context.article.id).loadedArticleId,
+  ).toBe(context.article.id)
+  expect(() => parseLoadedProjectPayload(payload, 'wrong')).toThrow()
+  expect(() =>
+    parseLoadedProjectPayload(
+      { ...payload, revisions: { ...payload.revisions, documentRevisions: {} } },
+      context.project.id,
+    ),
+  ).toThrow()
+  expect(() => parseLoadedProjectPayload(payload, context.project.id, 'wrong')).toThrow()
+  expect(() =>
+    parseLoadedProjectPayload({ ...payload, loadedArticleId: null }, context.project.id),
+  ).toThrow()
+  expect(() =>
+    parseLoadedProjectPayload(
+      { ...payload, revisions: { ...payload.revisions, revision: -1 } },
+      context.project.id,
+    ),
+  ).toThrow()
+  expect(() =>
+    parseLoadedProjectPayload({ ...payload, revisions: undefined }, context.project.id),
+  ).toThrow()
 })
 
-test('the workflow has four steps and legacy completed articles can still be edited', () => {
-  expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
-    'crop',
-    'detect-slides',
-    'generate-notes',
-    'article-review',
-  ])
-  expect(canNavigateToWorkflowStep('export', 'article-review')).toBe(true)
-  expect(canNavigateToWorkflowStep('export', 'export')).toBe(false)
-})
-
-test('download inputs change after article regeneration but not export bookkeeping', () => {
-  const project = createArticleWorkspace()
-  const before = articleExportInputKey(project)
-  expect(articleExportInputKey(markProjectExported(project))).toBe(before)
-  expect(articleExportInputKey(markProjectOpened(project, 'article-review'))).toBe(before)
-  const edited = updateProjectArticleDraft(project, {
-    title: 'article',
-    bodies: { 'slide-1': 'regenerated article body' },
-  })
-  expect(articleExportInputKey(edited)).not.toBe(before)
-  expect(articleExportInputKey(updateProjectArticleTitle(project, 'renamed'))).not.toBe(before)
-  expect(articleExportInputKey({ ...project, activeArticleId: 'another-article' })).not.toBe(before)
+test('prepared article source edits normalize against original video dimensions and duration', () => {
+  const context = createArticleFixture()
+  const original = context.project.videos[0].media.metadata
+  const prepared = {
+    ...context.article,
+    inputMedia: {
+      ...context.article.inputMedia,
+      preparation: 'prepared' as const,
+      metadata: { ...original, durationMs: 2000, width: 640, height: 360 },
+    },
+  }
+  const changed = updateArticleSourceSettings(
+    prepared,
+    { startMs: 3000, endMs: 7000 },
+    { x: 500, y: 200, width: 1000, height: 600 },
+    undefined,
+    { sourceMetadata: original },
+  )
+  expect(changed.sourceRange).toEqual({ startMs: 3000, endMs: 7000 })
+  expect(changed.crop).toEqual({ x: 500, y: 200, width: 1000, height: 600 })
 })

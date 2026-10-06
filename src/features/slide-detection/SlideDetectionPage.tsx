@@ -1,3 +1,4 @@
+import { requireActiveArticleId } from '../../lib/project/articleSelectors'
 import { ArrowRight, Check } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
@@ -6,8 +7,7 @@ import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
 import type { WorkflowStep } from '../../lib/workflow'
 import {
-  requireActiveArticleId,
-  type MediaProject,
+  type ArticleContext,
   type SlideBoundary,
   type VisualSegmentKind,
 } from '../../types/project'
@@ -26,7 +26,7 @@ import type { PendingSlideDetectionOutput, SlideDetectionOutput } from './types'
 import { slideRangeKey } from './utils'
 
 type SlideDetectionPageProps = {
-  project: MediaProject
+  project: ArticleContext
   onCompleted: (output: SlideDetectionOutput) => void | Promise<void>
   onContinue: () => void
   onBackToProject: () => void
@@ -51,14 +51,16 @@ export function SlideDetectionPage({
   const durationMs = sourceContext.range.endMs - sourceContext.range.startMs
   const slideIdPrefix = `segment-${requireActiveArticleId(project)}`
   const [reviewBoundaries, setReviewBoundaries] = useState<SlideBoundary[]>(
-    () => project.slideDetection?.boundaries ?? [],
+    () => project.article.slideDetection?.boundaries ?? [],
   )
   const [hasUnsavedReview, setHasUnsavedReview] = useState(false)
   const [kindOverrides, setKindOverrides] = useState<Record<string, VisualSegmentKind>>({})
   const [savedOutput, setSavedOutput] = useState<SlideDetectionOutput | null>(() =>
-    project.slideDetection ? { result: project.slideDetection, slides: project.slides } : null,
+    project.article.slideDetection
+      ? { result: project.article.slideDetection, slides: project.article.visualSegments }
+      : null,
   )
-  const savedSlides = savedOutput?.slides ?? project.slides
+  const savedSlides = savedOutput?.slides ?? project.article.visualSegments
   const hasSavedReview = Boolean(
     savedOutput &&
     savedSlides.length > 0 &&
@@ -173,9 +175,11 @@ export function SlideDetectionPage({
       const pendingOutput = await createManualSlideDetectionOutput({
         project,
         boundaries: reviewBoundaries,
-        threshold: savedOutput?.result.threshold ?? project.settings.slideDetection.threshold,
+        threshold:
+          savedOutput?.result.threshold ?? project.article.settings.slideDetection.threshold,
         sampleIntervalMs:
-          savedOutput?.result.sampleIntervalMs ?? project.settings.slideDetection.sampleIntervalMs,
+          savedOutput?.result.sampleIntervalMs ??
+          project.article.settings.slideDetection.sampleIntervalMs,
         segments: slides,
       })
       const nextOutput = await commitSlideDetectionOutput(project, pendingOutput, onCompleted)

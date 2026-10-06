@@ -1,3 +1,4 @@
+import { getActiveMediaSource } from '../../lib/project/articleSelectors'
 import { Play, Square } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
@@ -11,8 +12,7 @@ import {
   type TranscriptionModelId,
 } from '../../lib/transcription/transcriptionModel'
 import {
-  getActiveMediaSource,
-  type MediaProject,
+  type ArticleContext,
   type SlideResultEdits,
   type TranscriptionResult,
 } from '../../types/project'
@@ -30,7 +30,7 @@ import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
 
 type GenerateNotesPageProps = {
-  project: MediaProject
+  project: ArticleContext
   onCompleted: (result: TranscriptionResult) => void | Promise<void>
   onOcrSlideCompleted: OcrSlideCompleted
   onSaveSlideResultEdits: (slideId: string, edits: SlideResultEdits) => void | Promise<void>
@@ -60,14 +60,15 @@ export function GenerateNotesPage({
   const sourceContext = getActiveArticleSourceContext(project)
   const durationMs = sourceContext.range.endMs - sourceContext.range.startMs
   const [language, setLanguage] = useState<TranscriptionLanguage>(
-    project.transcription?.language === 'ja' || project.transcription?.language === 'en'
-      ? project.transcription.language
+    project.article.transcription?.language === 'ja' ||
+      project.article.transcription?.language === 'en'
+      ? project.article.transcription.language
       : 'auto',
   )
   const [transcriptionModelId, setTranscriptionModelId] = useState<TranscriptionModelId>(
-    () => getTranscriptionModel(project.transcription?.model).id,
+    () => getTranscriptionModel(project.article.transcription?.model).id,
   )
-  const storedOcrModelId = project.slides
+  const storedOcrModelId = project.article.visualSegments
     .map((slide) => slide.ocr?.model)
     .find((modelId): modelId is string => Boolean(modelId))
   const [ocrModelId, setOcrModelId] = useState<OcrModelId>(() => getOcrModel(storedOcrModelId).id)
@@ -150,7 +151,9 @@ export function GenerateNotesPage({
                     }
                     void handleRunAll()
                   }}
-                  disabled={!isBatchRunning && (isProcessing || project.slides.length === 0)}
+                  disabled={
+                    !isBatchRunning && (isProcessing || project.article.visualSegments.length === 0)
+                  }
                   aria-label={isBatchRunning ? '一括実行を停止' : undefined}
                 >
                   {isBatchRunning ? (
@@ -201,14 +204,16 @@ export function GenerateNotesPage({
                       disabled={isBatchRunning || isOcrRunning}
                       onRetry={handleTranscribe}
                     />
-                    <TranscriptionKeywordsPanel context={project.transcription?.keywordContext} />
+                    <TranscriptionKeywordsPanel
+                      context={project.article.transcription?.keywordContext}
+                    />
                   </div>
                 </div>
               </div>
             </section>
 
             <AnalysisResultPreview
-              slides={articleBlockViews(project.slides, project.articleBlocks)}
+              slides={articleBlockViews(project.article.visualSegments, project.article.blocks)}
               videoPath={sourceContext.source.path}
               sourceOffsetMs={sourceContext.range.startMs}
               onEdit={onOpenArticleReview}

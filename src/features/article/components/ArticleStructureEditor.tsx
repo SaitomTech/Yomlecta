@@ -17,7 +17,8 @@ import type {
   ArticleOutputLanguage,
   ArticleSummary,
   ArticleTranslation,
-  MediaProject,
+  ArticleContext,
+  ArticleBlockView,
 } from '../../../types/project'
 import { useProjectTitleEditor } from '../../project/hooks/useProjectTitleEditor'
 import { ArticleSectionEditor } from './ArticleSectionEditor'
@@ -31,11 +32,11 @@ import {
 
 type ArticleReviewSectionGroup = {
   id: string
-  slides: MediaProject['slides']
+  slides: ArticleBlockView[]
 }
 
 type ArticleStructureEditorProps = {
-  project: MediaProject
+  project: ArticleContext
   sections: ArticleSections
   sourcePath: string
   canEditSlide: boolean
@@ -59,8 +60,8 @@ type ArticleStructureEditorProps = {
   disabled?: boolean
 }
 
-function articleSlidesFor(project: MediaProject) {
-  return articleBlockViews(project.slides, project.articleBlocks)
+function articleSlidesFor(project: ArticleContext) {
+  return articleBlockViews(project.article.visualSegments, project.article.blocks)
     .filter((slide) => Boolean(slide.transcript))
     .sort((first, second) => first.index - second.index)
 }
@@ -79,7 +80,7 @@ function createSectionId() {
   return `section-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function sortSlideIdsByProjectOrder(slideIds: string[], project: MediaProject) {
+function sortSlideIdsByProjectOrder(slideIds: string[], project: ArticleContext) {
   const slideOrder = new Map(articleSlidesFor(project).map((slide) => [slide.id, slide.index]))
   return [...slideIds].sort(
     (first, second) =>
@@ -88,7 +89,7 @@ function sortSlideIdsByProjectOrder(slideIds: string[], project: MediaProject) {
   )
 }
 
-function normalizeSections(sections: ArticleSections, project: MediaProject): ArticleSections {
+function normalizeSections(sections: ArticleSections, project: ArticleContext): ArticleSections {
   const articleSlides = articleSlidesFor(project)
   const availableSlideIds = new Set(articleSlides.map((slide) => slide.id))
   const assignedSlideIds = new Set<string>()
@@ -105,7 +106,7 @@ function normalizeSections(sections: ArticleSections, project: MediaProject): Ar
   return { ...sections, sections: normalized }
 }
 
-function sectionStartIndexes(sections: ArticleSections, project: MediaProject) {
+function sectionStartIndexes(sections: ArticleSections, project: ArticleContext) {
   const slideIndexes = new Map(articleSlidesFor(project).map((slide, index) => [slide.id, index]))
   return sections.sections
     .map((section) => ({
@@ -120,7 +121,7 @@ function sectionStartIndexes(sections: ArticleSections, project: MediaProject) {
 
 function moveSectionHeadingToGap(
   sections: ArticleSections,
-  project: MediaProject,
+  project: ArticleContext,
   sourceId: string,
   targetGapIndex: number,
 ) {
@@ -150,7 +151,7 @@ function moveSectionHeadingToGap(
 
 function rebuildSectionsFromEntries(
   sections: ArticleSections,
-  project: MediaProject,
+  project: ArticleContext,
   entries: Array<{ section: ArticleSection; startIndex: number }>,
 ) {
   const orderedSlides = articleSlidesFor(project).map((slide) => slide.id)
@@ -169,7 +170,7 @@ function rebuildSectionsFromEntries(
 
 function moveSectionHeadingByStep(
   sections: ArticleSections,
-  project: MediaProject,
+  project: ArticleContext,
   sectionId: string,
   offset: -1 | 1,
 ) {
@@ -182,7 +183,7 @@ function moveSectionHeadingByStep(
 
 function getGroupsForSections(
   sections: ArticleSections,
-  project: MediaProject,
+  project: ArticleContext,
 ): ArticleReviewSectionGroup[] {
   const sectionBySlideId = new Map(
     sections.sections.flatMap((section) =>
@@ -640,7 +641,7 @@ function OutputLanguageSelector({
   error,
   onChange,
 }: {
-  project: MediaProject
+  project: ArticleContext
   translation?: ArticleTranslation
   sourceLanguage: string
   outputLanguage: ArticleOutputLanguage

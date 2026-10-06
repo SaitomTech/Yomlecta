@@ -1,8 +1,8 @@
+import { getActiveArticle } from '../../lib/project/articleSelectors'
 import {
-  getActiveArticle,
   type ArticleTranslation,
   type ArticleTranslationLanguage,
-  type MediaProject,
+  type ArticleContext,
 } from '../../types/project'
 import { LFM2_ENJP_TRANSLATION_MODEL, ensureLfm2TranslationModel } from '../../lib/llama/textModel'
 import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
@@ -56,30 +56,29 @@ export function normalizeLanguage(value: string | undefined) {
   return normalizeArticleLanguage(value)
 }
 
-function sourceTitle(project: MediaProject) {
+function sourceTitle(project: ArticleContext) {
   return (
     getActiveArticle(project)?.title.trim() ||
-    project.article?.title?.trim() ||
-    project.source.name.replace(/\.[^.]+$/, '')
+    project.article.inputMedia.name.replace(/\.[^.]+$/, '')
   )
 }
 
-function currentSummary(project: MediaProject) {
-  return project.article?.summary
+function currentSummary(project: ArticleContext) {
+  return project.article.document?.summary
 }
 
-function currentSections(project: MediaProject) {
-  return project.article?.sections?.sections
+function currentSections(project: ArticleContext) {
+  return project.article.document?.sections?.sections
 }
 
 export function articleTranslationInputFingerprint(
-  project: MediaProject,
+  project: ArticleContext,
   sourceLanguage?: string,
   targetLanguage?: string,
 ) {
   const summary = currentSummary(project)
   const sections = currentSections(project)
-  const articleBlocks = articleBlockViews(project.slides, project.articleBlocks)
+  const articleBlocks = articleBlockViews(project.article.visualSegments, project.article.blocks)
   return JSON.stringify([
     'article-translation-v2-article-blocks',
     sourceLanguage ?? null,
@@ -92,11 +91,11 @@ export function articleTranslationInputFingerprint(
 }
 
 export function getCurrentArticleTranslation(
-  project: MediaProject,
+  project: ArticleContext,
   targetLanguage: string,
   sourceLanguage?: string,
 ) {
-  const translation = project.article?.translations?.[targetLanguage]
+  const translation = project.article.document?.translations?.[targetLanguage]
   return translation &&
     (!sourceLanguage || translation.sourceLanguage === sourceLanguage) &&
     translation.inputFingerprint ===
@@ -131,9 +130,9 @@ export function getTranslationEngineId(translation?: ArticleTranslation): Transl
   )
 }
 
-function collectSegments(project: MediaProject) {
+function collectSegments(project: ArticleContext) {
   const segments: TranslationSegment[] = [{ id: 'title', text: sourceTitle(project) }]
-  for (const block of articleBlockViews(project.slides, project.articleBlocks)) {
+  for (const block of articleBlockViews(project.article.visualSegments, project.article.blocks)) {
     const text = block.transcript?.articleBody?.trim()
     if (text) segments.push({ id: `body:${block.id}`, text })
   }
@@ -156,12 +155,12 @@ function collectSegments(project: MediaProject) {
   return segments.filter((segment) => segment.text.trim().length > 0)
 }
 
-export function articleTranslationSegmentCharacterCounts(project: MediaProject) {
+export function articleTranslationSegmentCharacterCounts(project: ArticleContext) {
   return collectSegments(project).map((segment) => segment.text.length)
 }
 
 function assembleTranslation(
-  project: MediaProject,
+  project: ArticleContext,
   translations: Map<string, string>,
   engineId: TranslationEngineId,
   sourceLanguage: ArticleTranslationLanguage,
@@ -173,7 +172,7 @@ function assembleTranslation(
   const sections = currentSections(project)
   const title = translations.get('title')
   if (!title) throw new Error('記事タイトルを翻訳できませんでした。')
-  const articleBlocks = articleBlockViews(project.slides, project.articleBlocks)
+  const articleBlocks = articleBlockViews(project.article.visualSegments, project.article.blocks)
 
   const bodies = Object.fromEntries(
     articleBlocks.flatMap((block) => {
@@ -269,7 +268,7 @@ export async function runArticleTranslation({
   signal,
   onProgress,
 }: {
-  project: MediaProject
+  project: ArticleContext
   engineId: TranslationEngineId
   sourceLanguage: ArticleTranslationLanguage
   targetLanguage: ArticleTranslationLanguage

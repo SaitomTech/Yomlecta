@@ -1,7 +1,7 @@
 use super::assets::inspect_asset;
 use super::validate_asset_path;
 use serde_json::{json, Map, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 use std::path::Path;
 
 const OCR_ID_FOR_SLIDE_SQL: &str = "COALESCE(
@@ -39,7 +39,7 @@ pub(crate) async fn upsert_asset(
 }
 
 pub(crate) async fn load_project_from_indexes(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     project_id: &str,
     detail_article_id: Option<&str>,
 ) -> Result<Value, String> {
@@ -47,7 +47,7 @@ pub(crate) async fn load_project_from_indexes(
         "SELECT id, title, version, active_article_id, created_at, updated_at FROM projects WHERE id = ?",
     )
     .bind(project_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(|error| format!("プロジェクトを読めませんでした: {error}"))?
     .ok_or_else(|| "プロジェクトが見つかりません。".to_string())?;
@@ -60,7 +60,7 @@ pub(crate) async fn load_project_from_indexes(
         )
         .bind(detail_article_id)
         .bind(project_id)
-        .fetch_one(pool)
+        .fetch_one(&mut *connection)
         .await
         .map_err(|error| format!("記事の所属を確認できませんでした: {error}"))?;
         if !exists {
@@ -77,7 +77,7 @@ pub(crate) async fn load_project_from_indexes(
          WHERE v.project_id = ? ORDER BY v.created_at, v.id",
     )
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("動画を読めませんでした: {error}"))?;
     let mut videos = Vec::new();
@@ -123,7 +123,7 @@ pub(crate) async fn load_project_from_indexes(
          FROM articles WHERE project_id = ? ORDER BY created_at, id",
     )
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("記事を読めませんでした: {error}"))?;
     let mut articles = Vec::new();
@@ -168,11 +168,7 @@ pub(crate) async fn load_project_from_indexes(
                 "id": article_id,
                 "title": row.try_get::<String, _>("title").map_err(|error| error.to_string())?,
                 "sourceVideoId": source_video_id,
-                "inputMedia": input_media,
                 "sourceRange": source_range,
-                "settings": settings,
-                "slides": [],
-                "articleBlocks": [],
                 "workflow": workflow,
                 "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
                 "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
@@ -189,7 +185,18 @@ pub(crate) async fn load_project_from_indexes(
                         .map_err(|error| format!("記事設定JSONが壊れています: {error}"))?;
                 }
             }
-            articles.push(article);
+            if let Some(path) = input_media.get("thumbnailPath") {
+                article["thumbnailPath"] = path.clone();
+            }
+            if let Some(url) = input_media.pointer("/origin/thumbnailUrl") {
+                article["thumbnailUrl"] = url.clone();
+            }
+            let first_image: Option<String> = sqlx::query_scalar("SELECT image.relative_path FROM visual_segments s JOIN assets image ON image.id = s.representative_asset_id WHERE s.article_id = ? AND s.run_id = COALESCE((SELECT visual_run_id FROM article_material_selections WHERE article_id = s.article_id), s.run_id) ORDER BY s.position LIMIT 1")
+                .bind(&article_id).fetch_optional(&mut *connection).await.map_err(|error| error.to_string())?;
+            if let Some(path) = first_image {
+                article["thumbnailPath"] = json!(path);
+            }
+            articles.push(json!({"kind": "metadata", "metadata": article}));
             continue;
         }
 
@@ -202,7 +209,7 @@ pub(crate) async fn load_project_from_indexes(
         )
         .bind(&article_id)
         .bind(&article_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|error| format!("スライド検出結果を読めませんでした: {error}"))?
         .flatten();
@@ -219,7 +226,7 @@ pub(crate) async fn load_project_from_indexes(
         )
         .bind(&article_id)
         .bind(&article_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|error| format!("文字起こし結果を読めませんでした: {error}"))?
         .flatten();
@@ -231,7 +238,7 @@ pub(crate) async fn load_project_from_indexes(
         let slide_rows = sqlx::query(
             "SELECT s.id, s.position, s.start_ms, s.end_ms, s.auto_kind, s.override_kind,
                     s.override_updated_at, s.person_layout, s.detection_json, s.classification_json,
-                    s.revision, b.transcript_json,
+                    s.revision,
                     a.relative_path AS image_path,
                     (SELECT COALESCE(o.edited_text, o.raw_text) FROM ocr_results o
                      WHERE o.id = COALESCE(
@@ -247,18 +254,13 @@ pub(crate) async fn load_project_from_indexes(
                      )) AS ocr_metadata_json
              FROM visual_segments s
              LEFT JOIN assets a ON a.id = s.representative_asset_id
-             LEFT JOIN article_blocks b ON b.article_id = s.article_id AND
-               COALESCE(b.image_segment_id, (
-                 SELECT bs.segment_id FROM article_block_segments bs
-                 WHERE bs.block_id = b.id ORDER BY bs.position LIMIT 1
-               )) = s.id
              WHERE s.article_id = ? AND s.run_id = COALESCE(
                (SELECT visual_run_id FROM article_material_selections WHERE article_id = ?), s.run_id)
              ORDER BY s.position",
         )
         .bind(&article_id)
         .bind(&article_id)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| format!("スライドを読めませんでした: {error}"))?;
         let mut slides = Vec::new();
@@ -308,15 +310,6 @@ pub(crate) async fn load_project_from_indexes(
             {
                 slide["image"] = json!({ "representativeFramePath": path });
             }
-            if let Some(raw) = row
-                .try_get::<Option<String>, _>("transcript_json")
-                .map_err(|error| error.to_string())?
-            {
-                if raw != "null" {
-                    slide["transcript"] = serde_json::from_str(&raw)
-                        .map_err(|error| format!("スライド本文JSONが壊れています: {error}"))?;
-                }
-            }
             if let Some(metadata) = row
                 .try_get::<Option<String>, _>("ocr_metadata_json")
                 .map_err(|error| error.to_string())?
@@ -347,7 +340,7 @@ pub(crate) async fn load_project_from_indexes(
              ORDER BY b.position",
         )
         .bind(&article_id)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| format!("記事ブロックを読めませんでした: {error}"))?;
         let mut article_blocks = Vec::new();
@@ -357,7 +350,7 @@ pub(crate) async fn load_project_from_indexes(
                 "SELECT segment_id FROM article_block_segments WHERE block_id = ? ORDER BY position",
             )
             .bind(&block_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .map_err(|error| format!("記事ブロックの区間を読めませんでした: {error}"))?;
             let mut block = json!({
@@ -388,7 +381,7 @@ pub(crate) async fn load_project_from_indexes(
             "SELECT article_json FROM documents WHERE article_id = ? LIMIT 1",
         )
         .bind(&article_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(|error| format!("原稿を読めませんでした: {error}"))?
         .flatten();
@@ -403,8 +396,8 @@ pub(crate) async fn load_project_from_indexes(
             "inputMedia": input_media,
             "sourceRange": source_range,
             "settings": settings,
-            "slides": slides,
-            "articleBlocks": article_blocks,
+            "visualSegments": slides,
+            "blocks": article_blocks,
             "workflow": workflow,
             "createdAt": row.try_get::<String, _>("created_at").map_err(|error| error.to_string())?,
             "updatedAt": row.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
@@ -428,9 +421,9 @@ pub(crate) async fn load_project_from_indexes(
             article["transcription"] = value;
         }
         if let Some(value) = article_data {
-            article["article"] = value;
+            article["document"] = value;
         }
-        articles.push(article);
+        articles.push(json!({"kind": "loaded", "article": article}));
     }
     let mut project_value = json!({
         "version": project.try_get::<i64, _>("version").map_err(|error| error.to_string())?,
@@ -442,7 +435,7 @@ pub(crate) async fn load_project_from_indexes(
         "updatedAt": project.try_get::<String, _>("updated_at").map_err(|error| error.to_string())?
     });
     if let Some(active) = active_article_id {
-        project_value["activeArticleId"] = json!(active);
+        project_value["lastOpenedArticleId"] = json!(active);
     }
     Ok(project_value)
 }
@@ -667,14 +660,14 @@ pub(crate) async fn load_project_summary(
 }
 
 pub(crate) async fn load_revision_snapshot(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     project_id: &str,
     detail_article_id: Option<&str>,
 ) -> Result<Value, String> {
     let article_rows =
         sqlx::query("SELECT id, revision FROM articles WHERE project_id = ? ORDER BY id")
             .bind(project_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .map_err(|error| format!("記事revisionを読めませんでした: {error}"))?;
     let document_rows = sqlx::query(
@@ -687,7 +680,7 @@ pub(crate) async fn load_revision_snapshot(
     .bind(project_id)
     .bind(detail_article_id)
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("document revisionを読めませんでした: {error}"))?;
     let slide_rows = sqlx::query(
@@ -700,7 +693,7 @@ pub(crate) async fn load_revision_snapshot(
     .bind(project_id)
     .bind(detail_article_id)
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("スライドrevisionを読めませんでした: {error}"))?;
     let ocr_rows = sqlx::query(
@@ -722,7 +715,7 @@ pub(crate) async fn load_revision_snapshot(
     .bind(project_id)
     .bind(detail_article_id)
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("OCR revisionを読めませんでした: {error}"))?;
 

@@ -95,7 +95,9 @@ bunx tauri build --bundles dmg
 
 ### 開発中のプロジェクトデータ
 
-プロジェクトはTauriのAppLocalData配下の`projects/`へ保存します。保存JSONとディレクトリの形式は現行バージョンのみを受け付け、`PROJECT_VERSION`またはストレージレイアウトのバージョンが変わった場合は、開発用のプロジェクトデータを初回起動時に初期化します。初回リリース前のため、旧形式からの移行は行いません。
+プロジェクトの保存先はTauriのAppLocalData配下の`library/library.sqlite`、動画や解析ファイルは`projects/`です。SQLiteの変更はmigrationで適用します。記事状態統一のmigrationは原稿JSONの旧titleのみを除去し、既存の本文・章・要約・翻訳を保持します。ストレージレイアウトやPROJECT_VERSIONは今回変更しません。
+
+画面はProjectの記事entryにmetadataまたは読み込み済みArticleを保持します。選択記事はentryの参照で、同期用の複製stateは持ちません。詳しくは[記事状態の正本統一設計](./docs/article-state-single-source-design.md)を参照してください。
 
 プロジェクトの追加・削除中に残った一時ファイルは、次回起動時に`.tmp`、`.bak`、`.trash`、`project-trash`から回収します。初期化や回収に失敗した場合は処理を継続せず、エラーを確認してから再試行してください。
 

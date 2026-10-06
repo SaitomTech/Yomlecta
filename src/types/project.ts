@@ -202,9 +202,8 @@ export type TranscriptBoundaryPlan = {
     model?: string
   }>
 }
-export type ArticleData = {
+export type ArticleDocument = {
   boundaryPlan?: TranscriptBoundaryPlan
-  title: string
   summary?: ArticleSummary
   sections?: ArticleSections
   translations?: Record<string, ArticleTranslation>
@@ -246,6 +245,20 @@ export type VisualClassificationMetadata = {
   visionEngineVersion?: string
   evidence: VisualClassificationEvidence
 }
+export type BlockTranscript = {
+  raw: string
+  articleBody?: string
+  articleModel?: string
+  articleInputFingerprint?: string
+  articleProvider?: 'local' | 'openai' | 'apple'
+  articleEngineVersion?: string
+  articleInputTokens?: number
+  articleOutputTokens?: number
+  articleRequestId?: string
+  articleGeneratedAt?: string
+  model: string
+}
+
 export type VisualSegment = {
   id: string
   index: number
@@ -259,19 +272,6 @@ export type VisualSegment = {
   detection: { source: 'auto' | 'manual'; hash?: string; distance?: number }
   image: { representativeFramePath?: string }
   ocr?: SlideOcrResult
-  transcript?: {
-    raw: string
-    articleBody?: string
-    articleModel?: string
-    articleInputFingerprint?: string
-    articleProvider?: 'local' | 'openai' | 'apple'
-    articleEngineVersion?: string
-    articleInputTokens?: number
-    articleOutputTokens?: number
-    articleRequestId?: string
-    articleGeneratedAt?: string
-    model: string
-  }
 }
 /** @deprecated Transitional UI name. Persisted rows live in visual_segments. */
 export type SlideData = VisualSegment
@@ -282,30 +282,49 @@ export type ArticleBlock = {
   imageSegmentId?: string
   startMs: number
   endMs: number
-  transcript?: VisualSegment['transcript']
+  transcript?: BlockTranscript
 }
 
 export function effectiveVisualKind(segment: VisualSegment): VisualSegmentKind {
   return segment.overrideKind ?? segment.autoKind
 }
-export type Article = {
+export type ArticleMetadata = {
+  thumbnailPath?: string
+  thumbnailUrl?: string
   id: string
   title: string
   sourceVideoId?: string
-  inputMedia: ArticleInputMedia
   sourceRange: VideoTrimRange
   crop?: CropRegion
   perspectiveCrop?: PerspectiveCrop
-  settings: ProjectSettings
-  slides: SlideData[]
-  articleBlocks: ArticleBlock[]
-  slideDetection?: SlideDetectionResult
-  transcription?: TranscriptionResult
-  article?: ArticleData
   workflow: ProjectWorkflow
   createdAt: string
   updatedAt: string
 }
+export type Article = ArticleMetadata & {
+  inputMedia: ArticleInputMedia
+  settings: ProjectSettings
+  visualSegments: VisualSegment[]
+  blocks: ArticleBlock[]
+  slideDetection?: SlideDetectionResult
+  transcription?: TranscriptionResult
+  document?: ArticleDocument
+}
+export type ArticleBlockView = Readonly<VisualSegment & { transcript?: Readonly<BlockTranscript> }>
+export type ProjectArticleEntry =
+  | { kind: 'metadata'; metadata: ArticleMetadata }
+  | { kind: 'loaded'; article: Article }
+export type Project = {
+  version: number
+  id: string
+  title: string
+  videos: ProjectVideo[]
+  articles: ProjectArticleEntry[]
+  lastOpenedArticleId?: string
+  createdAt: string
+  updatedAt: string
+}
+export type ArticleContext = { project: Project; article: Article }
 export type ProjectHealth = 'ready' | 'source-missing' | 'needs-repair'
 export type ArticleListStatus = 'not-started' | 'working' | 'done'
 
@@ -372,47 +391,4 @@ export type ArticleListItem = {
   lastVisitedStep: ProjectStep
   maxReachedStep: ProjectStep
   status: ArticleListStatus
-}
-/** Stable project fields retained by the SQLite-backed project DTO. */
-export type PersistedProject = {
-  version: number
-  id: string
-  title: string
-  videos: ProjectVideo[]
-  articles: Article[]
-  activeArticleId?: string
-  createdAt: string
-  updatedAt: string
-}
-
-/** Root fields after the active article is materialized for the editor. */
-export type ArticleWorkspace = PersistedProject & {
-  source: MediaSource
-  sourceRange?: VideoTrimRange
-  crop?: CropRegion
-  perspectiveCrop?: PerspectiveCrop
-  settings: ProjectSettings
-  slides: SlideData[]
-  articleBlocks: ArticleBlock[]
-  slideDetection?: SlideDetectionResult
-  transcription?: TranscriptionResult
-  article?: ArticleData
-  workflow: ProjectWorkflow
-}
-
-/** @deprecated Use ArticleWorkspace for editor state and PersistedProject for storage. */
-export type MediaProject = ArticleWorkspace
-
-export function getActiveArticle(project: PersistedProject): Article | null {
-  if (!project.activeArticleId) return null
-  return project.articles.find((article) => article.id === project.activeArticleId) ?? null
-}
-
-export function requireActiveArticleId(project: PersistedProject) {
-  if (!project.activeArticleId) throw new Error('記事が選択されていません。')
-  return project.activeArticleId
-}
-
-export function getActiveMediaSource(project: MediaProject): MediaSource {
-  return project.source
 }

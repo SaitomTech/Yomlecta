@@ -1,12 +1,13 @@
+import { requireActiveArticleId } from '../../../lib/project/articleSelectors'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { MediaProject, SlideData } from '../../../types/project'
+import type { ArticleContext, SlideData } from '../../../types/project'
 import { extractRepresentativeFrameForSlide } from '../detection'
 import {
   getSlidePreviewAssetPath,
   removeSlidePreviewAssets,
 } from '../../../lib/storage/projectAssets'
 import { removeAbsolutePath } from '../../../lib/tauri/filesystem'
-import { requireActiveArticleId } from '../../../types/project'
+import {} from '../../../types/project'
 import { slideRangeKey } from '../utils'
 
 const PREVIEW_EXTRACTION_DELAY_MS = 180
@@ -31,7 +32,7 @@ async function runPreviewQueue(
 }
 
 export function useSlideBoundaryPreviews(
-  project: MediaProject,
+  project: ArticleContext,
   slides: SlideData[],
   enabled: boolean,
 ) {
@@ -53,8 +54,8 @@ export function useSlideBoundaryPreviews(
     setPathsByRange({})
     setPreparingRanges({})
     setPreviewId(nextPreviewId)
-    await removeSlidePreviewAssets(project.id, articleId, discardedPreviewId)
-  }, [articleId, project.id])
+    await removeSlidePreviewAssets(project.project.id, articleId, discardedPreviewId)
+  }, [articleId, project.project.id])
 
   useEffect(() => {
     if (!enabled) return
@@ -94,7 +95,7 @@ export function useSlideBoundaryPreviews(
         if (controller.signal.aborted) return
 
         outputPath = await getSlidePreviewAssetPath(
-          project.id,
+          project.project.id,
           articleId,
           previewId,
           `${rangeKey}-${crypto.randomUUID()}`,
@@ -116,7 +117,7 @@ export function useSlideBoundaryPreviews(
               console.warn('未使用の一時画像を削除できませんでした。', cleanupError)
             })
           } else {
-            await removeSlidePreviewAssets(project.id, articleId, previewId).catch(
+            await removeSlidePreviewAssets(project.project.id, articleId, previewId).catch(
               (cleanupError) => {
                 console.warn('古い一時画像を削除できませんでした。', cleanupError)
               },
@@ -140,13 +141,13 @@ export function useSlideBoundaryPreviews(
   useEffect(() => {
     return () => {
       activeControllerRef.current?.abort()
-      void removeSlidePreviewAssets(project.id, articleId, previewIdRef.current).catch(
+      void removeSlidePreviewAssets(project.project.id, articleId, previewIdRef.current).catch(
         (cleanupError) => {
           console.warn('画面を閉じた後の一時画像を削除できませんでした。', cleanupError)
         },
       )
     }
-  }, [articleId, project.id])
+  }, [articleId, project.project.id])
 
   return { pathsByRange, preparingRanges, discardPreviews }
 }

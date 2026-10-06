@@ -1,3 +1,4 @@
+import { articleMetadata, getLoadedArticle } from '../lib/project/articleSelectors'
 import { useRef, useState } from 'react'
 import { AppLayout } from './AppLayout'
 import { AppPages } from './AppPages'
@@ -70,7 +71,7 @@ function useAppActions(workspace: ProjectWorkspace) {
     finishNavigation(requestId, {
       kind: 'article',
       projectId: created.project.id,
-      articleId: created.project.activeArticleId!,
+      articleId: getLoadedArticle(created.project)!.id,
       step: 'crop',
     })
     return created.video
@@ -84,7 +85,7 @@ function useAppActions(workspace: ProjectWorkspace) {
     finishNavigation(requestId, {
       kind: 'article',
       projectId: created.project.id,
-      articleId: created.project.activeArticleId!,
+      articleId: getLoadedArticle(created.project)!.id,
       step: 'crop',
     })
     return created.video
@@ -113,7 +114,9 @@ function useAppActions(workspace: ProjectWorkspace) {
     finishNavigation(requestId, { kind: 'article-detail', ...target })
   }
   const handleOpenProjectArticle = async (articleId: string) => {
-    const article = project?.articles.find((candidate) => candidate.id === articleId)
+    const article = project?.articles
+      .map(articleMetadata)
+      .find((candidate) => candidate.id === articleId)
     if (!project || !article) return
     const target = { projectId: project.id, articleId }
     if (getArticleStatus(article) === 'done') await handleOpenArticleDetail(target)
@@ -128,7 +131,7 @@ function useAppActions(workspace: ProjectWorkspace) {
   const handleWorkflowStep = async (step: WorkflowStep) => {
     try {
       if (route.kind !== 'article' || !project || step === 'import' || step === 'export') return
-      if (!canNavigateToWorkflowStep(project.workflow.maxReachedStep, step)) return
+      if (!canNavigateToWorkflowStep(workspace.activeArticle!.workflow.maxReachedStep, step)) return
       await changeStep(step, false)
     } catch (error) {
       console.error('ステップを移動できませんでした。', error)
