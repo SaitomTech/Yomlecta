@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  ExternalLink,
   Film,
   Maximize2,
   PencilLine,
@@ -267,14 +266,17 @@ export function ArticleDetailPage({
             <span aria-hidden="true">·</span>
             <span>{formatTimestamp(project.source.metadata.durationMs)}</span>
             <span aria-hidden="true">·</span>
-            <button
-              className="font-semibold text-[#1d6b50] hover:underline"
-              type="button"
-              onClick={onOpenProject}
-              disabled={isExportBusy}
-            >
-              {item.projectTitle}
-            </button>
+            <span>
+              プロジェクト:{' '}
+              <button
+                className="font-semibold text-[#1d6b50] hover:underline"
+                type="button"
+                onClick={onOpenProject}
+                disabled={isExportBusy}
+              >
+                {item.projectTitle}
+              </button>
+            </span>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
             <span
               className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}
@@ -294,14 +296,6 @@ export function ArticleDetailPage({
                 ? '記事を編集'
                 : getArticleActionLabel(status)}
               <ArrowRight size={14} />
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[9px] border border-[#b7cbc0] bg-white px-4 py-3 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
-              type="button"
-              onClick={onOpenProject}
-              disabled={isExportBusy}
-            >
-              <ExternalLink size={14} /> プロジェクト詳細へ
             </button>
             {article && slides.length > 0 && <ArticleExportControls exporter={exporter} />}
           </div>
