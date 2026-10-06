@@ -218,7 +218,6 @@ export function SlideDetectionPage({
       </div>
       <ArticleContextRow
         project={project}
-        sourceName={source.name}
         onSelect={onOpenArticle}
         onSaveTitle={onSaveTitle}
         disabled={isRunning || isSavingReview || hasUnsavedReview}

@@ -1,4 +1,3 @@
-import { getActiveMediaSource } from '../../lib/project/articleSelectors'
 import { Play, Square } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
@@ -56,7 +55,6 @@ export function GenerateNotesPage({
   maxReachedStep,
   onStepClick,
 }: GenerateNotesPageProps) {
-  const source = getActiveMediaSource(project)
   const sourceContext = getActiveArticleSourceContext(project)
   const durationMs = sourceContext.range.endMs - sourceContext.range.startMs
   const slides = useMemo(
@@ -110,7 +108,6 @@ export function GenerateNotesPage({
       </div>
       <ArticleContextRow
         project={project}
-        sourceName={source.name}
         onSelect={onOpenArticle}
         onSaveTitle={onSaveTitle}
         disabled={isProcessing}

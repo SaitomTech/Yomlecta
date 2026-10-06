@@ -107,7 +107,6 @@ function CropTrimEditor({
       </div>
       <ArticleContextRow
         project={project}
-        sourceName={video.media.name}
         onSelect={onOpenArticle}
         onSaveTitle={onSaveTitle}
         disabled={editor.busy || editor.isDetecting}

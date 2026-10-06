@@ -329,7 +329,6 @@ export function ArticleReviewPage({
       </div>
       <ArticleContextRow
         project={project}
-        sourceName={project.article.inputMedia.name}
         onSelect={switchArticle}
         onSaveTitle={onSaveTitle}
         disabled={isBusy || switchingArticleId !== null || editingSlideId !== null}
