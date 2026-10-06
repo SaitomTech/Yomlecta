@@ -875,84 +875,100 @@ export function ArticleStructureEditor({
   }
   return (
     <DragDropProvider onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 id="article-review-heading" className="text-[21px] font-bold tracking-[-0.05em]">
-              2. 表示言語の設定・生成記事の確認と編集
-            </h2>
-            <p className="mt-1 text-xs text-[#71807b]">
-              出力言語を選び、要約・見出し・各Slideの原文を編集できます。訳文は再翻訳で更新されます。
-            </p>
-          </div>
-        </div>
-        <OutputLanguageSelector
-          project={project}
-          translation={translation}
-          sourceLanguage={sourceLanguage}
-          outputLanguage={outputLanguage}
-          disabled={disabled}
-          canEditSlide={canEditSlide}
-          saving={isSavingOutputLanguage}
-          error={outputLanguageError}
-          onChange={(language) => void handleOutputLanguageChange(language)}
-        />
-        <TranslatedArticleTitle translation={translation} outputLanguage={outputLanguage} />
-        {sectionError && <p className="mt-3 text-xs text-[#b6533a]">{sectionError}</p>}
+      <div className="space-y-10">
+        <section aria-labelledby="article-output-language-heading">
+          <h2
+            id="article-output-language-heading"
+            className="text-[21px] font-bold tracking-[-0.05em]"
+          >
+            2. 表示言語の設定
+          </h2>
+          <p className="mt-1 text-xs text-[#71807b]">
+            記事の表示とダウンロードに使う言語を選びます。
+          </p>
+          <OutputLanguageSelector
+            project={project}
+            translation={translation}
+            sourceLanguage={sourceLanguage}
+            outputLanguage={outputLanguage}
+            disabled={disabled}
+            canEditSlide={canEditSlide}
+            saving={isSavingOutputLanguage}
+            error={outputLanguageError}
+            onChange={(language) => void handleOutputLanguageChange(language)}
+          />
+        </section>
+        <section aria-labelledby="article-review-heading">
+          <h2 id="article-review-heading" className="text-[21px] font-bold tracking-[-0.05em]">
+            3. 生成記事の確認と編集
+          </h2>
+          <p className="mt-1 text-xs text-[#71807b]">
+            要約・見出し・各Slideの原文を編集できます。訳文は再翻訳で更新されます。
+          </p>
+          <div
+            className="mt-5 max-h-[65vh] overflow-y-auto overscroll-y-contain pr-3 [scrollbar-gutter:stable] focus-visible:rounded-[8px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30"
+            role="region"
+            aria-labelledby="article-review-heading"
+            tabIndex={0}
+          >
+            <TranslatedArticleTitle translation={translation} outputLanguage={outputLanguage} />
+            {sectionError && <p className="mt-3 text-xs text-[#b6533a]">{sectionError}</p>}
 
-        <ArticleSummaryResult
-          summary={summary}
-          translation={translation}
-          outputLanguage={outputLanguage}
-          disabled={summaryDisabled}
-          onSave={onSaveSummary}
-        />
+            <ArticleSummaryResult
+              summary={summary}
+              translation={translation}
+              outputLanguage={outputLanguage}
+              disabled={summaryDisabled}
+              onSave={onSaveSummary}
+            />
 
-        <div className="mt-5 space-y-7">
-          {displayGroups.length > 0 ? (
-            displayGroups.map((group, index) => (
-              <SectionReviewGroup
-                key={group.id}
-                section={sectionById.get(group.id)}
-                group={group}
-                index={index}
-                totalSlides={articleSlidesFor(project).length}
-                globalStartIndex={slideOrder.get(group.slides[0]?.id ?? '') ?? 0}
-                draggingSectionId={draggingSectionId}
-                sectionControlsDisabled={disabled || isSavingSections || !canEditSlide}
-                savedBodies={savedBodies}
-                editingSlideId={editingSlideId}
-                bodyDraft={bodyDraft}
-                translation={translation}
-                sourceLanguage={sourceLanguage}
-                outputLanguage={outputLanguage}
-                isSavingBody={isSavingBody}
-                isBodyDirty={isBodyDirty}
-                bodySaveError={bodySaveError}
-                videoSrc={videoSource.src}
-                activeVideoSlideId={activeVideoSlideId}
-                canEditSlide={canEditSlide}
-                onHeadingSave={saveHeading}
-                onMoveByButton={(offset) => {
-                  applySectionUpdate((current) =>
-                    moveSectionHeadingByStep(current, project, group.id, offset),
-                  )
-                }}
-                onAddAtGap={(gapIndex) => addSectionAtGap(gapIndex)}
-                onDelete={() => deleteSection(group.id)}
-                onStartSlideEditing={onStartSlideEditing}
-                onCancelSlideEditing={onCancelSlideEditing}
-                onSaveSlide={onSaveSlide}
-                onBodyChange={onBodyChange}
-                onVideoToggle={handleVideoToggle}
-              />
-            ))
-          ) : (
-            <div className="border-y border-dashed border-[#b7cbc0] px-4 py-10 text-center text-xs text-[#71807b]">
-              文字起こし済みの記事本文がありません。
+            <div className="mt-5 space-y-7">
+              {displayGroups.length > 0 ? (
+                displayGroups.map((group, index) => (
+                  <SectionReviewGroup
+                    key={group.id}
+                    section={sectionById.get(group.id)}
+                    group={group}
+                    index={index}
+                    totalSlides={articleSlidesFor(project).length}
+                    globalStartIndex={slideOrder.get(group.slides[0]?.id ?? '') ?? 0}
+                    draggingSectionId={draggingSectionId}
+                    sectionControlsDisabled={disabled || isSavingSections || !canEditSlide}
+                    savedBodies={savedBodies}
+                    editingSlideId={editingSlideId}
+                    bodyDraft={bodyDraft}
+                    translation={translation}
+                    sourceLanguage={sourceLanguage}
+                    outputLanguage={outputLanguage}
+                    isSavingBody={isSavingBody}
+                    isBodyDirty={isBodyDirty}
+                    bodySaveError={bodySaveError}
+                    videoSrc={videoSource.src}
+                    activeVideoSlideId={activeVideoSlideId}
+                    canEditSlide={canEditSlide}
+                    onHeadingSave={saveHeading}
+                    onMoveByButton={(offset) => {
+                      applySectionUpdate((current) =>
+                        moveSectionHeadingByStep(current, project, group.id, offset),
+                      )
+                    }}
+                    onAddAtGap={(gapIndex) => addSectionAtGap(gapIndex)}
+                    onDelete={() => deleteSection(group.id)}
+                    onStartSlideEditing={onStartSlideEditing}
+                    onCancelSlideEditing={onCancelSlideEditing}
+                    onSaveSlide={onSaveSlide}
+                    onBodyChange={onBodyChange}
+                    onVideoToggle={handleVideoToggle}
+                  />
+                ))
+              ) : (
+                <div className="border-y border-dashed border-[#b7cbc0] px-4 py-10 text-center text-xs text-[#71807b]">
+                  文字起こし済みの記事本文がありません。
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        </section>
       </div>
       <DragOverlay disabled={draggingSectionId === null} dropAnimation={null}>
         {draggingSectionId ? (

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { runInNewContext } from 'node:vm'
 import { staleExportAssetFilenames, type ExportDocument } from '../src/features/export/export'
 import {
   renderHtml,
@@ -197,4 +198,62 @@ test('PDFは画像と本文を同じ行に配置し、本文のページまた�
   expect(html).not.toContain(
     '.pdf-slide { display: block; margin: 0 0 3mm; padding: 0 0 2mm; page-break-inside: avoid;',
   )
+})
+
+test('downloaded HTML opens and closes images without the old preview host', () => {
+  const html = renderHtml(englishDocument())
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  if (!script) throw new Error('HTMLの画像プレビュースクリプトがありません。')
+  const listeners: Record<string, (event?: { key: string }) => void> = {}
+  const image = {
+    src: '',
+    removeAttribute: () => {
+      image.src = ''
+    },
+  }
+  const lightbox = {
+    hidden: true,
+    querySelector: (selector: string) =>
+      selector === 'img'
+        ? image
+        : {
+            addEventListener: (_event: string, listener: () => void) => {
+              listeners.close = listener
+            },
+          },
+    addEventListener: (_event: string, listener: () => void) => {
+      listeners.background = listener
+    },
+  }
+  const style = {
+    overflow: '',
+    removeProperty: () => {
+      style.overflow = ''
+    },
+  }
+  runInNewContext(script, {
+    document: {
+      body: { style },
+      getElementById: () => lightbox,
+      querySelectorAll: () => [
+        {
+          dataset: { previewImage: './assets/slide-001.jpg' },
+          addEventListener: (_event: string, listener: () => void) => {
+            listeners.open = listener
+          },
+        },
+      ],
+      addEventListener: (_event: string, listener: () => void) => {
+        listeners.keydown = listener
+      },
+    },
+  })
+  listeners.open()
+  expect(lightbox.hidden).toBe(false)
+  expect(image.src).toBe('./assets/slide-001.jpg')
+  expect(style.overflow).toBe('hidden')
+  listeners.keydown({ key: 'Escape' })
+  expect(lightbox.hidden).toBe(true)
+  expect(image.src).toBe('')
+  expect(style.overflow).toBe('')
 })

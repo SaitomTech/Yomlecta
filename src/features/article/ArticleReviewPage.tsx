@@ -427,35 +427,33 @@ export function ArticleReviewPage({
                 />
               </div>
             </section>
-            <section aria-labelledby="article-review-heading">
-              <ArticleStructureEditor
-                project={project}
-                sections={reviewSections}
-                sourcePath={sourcePath}
-                canEditSlide={canEdit}
-                editingSlideId={editingSlideId}
-                savedBodies={savedBodies}
-                bodyDraft={bodyDraft}
-                isSavingBody={isSaving}
-                isBodyDirty={isBodyDirty}
-                bodySaveError={saveError}
-                onStartSlideEditing={startSlideEditing}
-                onCancelSlideEditing={cancelEditing}
-                onSaveSlide={() => void saveSlide()}
-                onBodyChange={(body) => {
-                  setBodyDraft(body)
-                  setSaveError(null)
-                }}
-                onSaveSections={onSaveSections}
-                summary={project.article?.summary}
-                translation={outputTranslation}
-                outputLanguage={outputLanguage}
-                onSaveOutputLanguage={onSaveOutputLanguage}
-                summaryDisabled={isBusy || hasUnsavedChanges || switchingArticleId !== null}
-                onSaveSummary={onSaveSummary}
-                disabled={isBusy || isBodyDirty || switchingArticleId !== null}
-              />
-            </section>
+            <ArticleStructureEditor
+              project={project}
+              sections={reviewSections}
+              sourcePath={sourcePath}
+              canEditSlide={canEdit}
+              editingSlideId={editingSlideId}
+              savedBodies={savedBodies}
+              bodyDraft={bodyDraft}
+              isSavingBody={isSaving}
+              isBodyDirty={isBodyDirty}
+              bodySaveError={saveError}
+              onStartSlideEditing={startSlideEditing}
+              onCancelSlideEditing={cancelEditing}
+              onSaveSlide={() => void saveSlide()}
+              onBodyChange={(body) => {
+                setBodyDraft(body)
+                setSaveError(null)
+              }}
+              onSaveSections={onSaveSections}
+              summary={project.article?.summary}
+              translation={outputTranslation}
+              outputLanguage={outputLanguage}
+              onSaveOutputLanguage={onSaveOutputLanguage}
+              summaryDisabled={isBusy || hasUnsavedChanges || switchingArticleId !== null}
+              onSaveSummary={onSaveSummary}
+              disabled={isBusy || isBodyDirty || switchingArticleId !== null}
+            />
           </div>
           <div
             className={`flex flex-wrap items-center gap-4 border-t border-[#d8e1dc] px-5 py-4 md:px-7 ${hasUnsavedChanges ? 'justify-between' : 'justify-end'}`}

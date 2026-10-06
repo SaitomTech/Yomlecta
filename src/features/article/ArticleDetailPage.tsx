@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
+import { useExport } from '../export/hooks/useExport'
 import { ArticleExportControls } from '../export/ArticleExportControls'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useVideoSourceUrl } from '../../lib/media/useVideoSourceUrl'
@@ -203,7 +204,8 @@ export function ArticleDetailPage({
   })
   const sourceTitle = article?.title.trim() || item.title || '無題の記事'
   const videoSource = useVideoSourceUrl(project.source.path)
-  const [isExportBusy, setIsExportBusy] = useState(false)
+  const exporter = useExport(project, onGenerated, Boolean(article && slides.length > 0))
+  const isExportBusy = exporter.isBusy
   useNavigationDisabled(isExportBusy)
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
   const [isVideoOpen, setIsVideoOpen] = useState(false)
@@ -301,13 +303,7 @@ export function ArticleDetailPage({
             >
               <ExternalLink size={14} /> プロジェクト詳細へ
             </button>
-            {article && slides.length > 0 && (
-              <ArticleExportControls
-                project={project}
-                onGenerated={onGenerated}
-                onBusyChange={setIsExportBusy}
-              />
-            )}
+            {article && slides.length > 0 && <ArticleExportControls exporter={exporter} />}
           </div>
         </header>
 

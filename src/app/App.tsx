@@ -73,13 +73,15 @@ import type {
 } from '../types/project'
 import type { SlideDetectionOutput } from '../features/slide-detection/types'
 
+type ArticleWorkflowStep = Exclude<ProjectStep, 'export'>
+
 type Route =
   | { kind: 'home' }
   | { kind: 'projects' }
   | { kind: 'articles' }
   | { kind: 'project' }
   | { kind: 'article-detail'; articleId: string; projectId: string }
-  | { kind: 'article'; articleId: string; step: ProjectStep }
+  | { kind: 'article'; articleId: string; step: ArticleWorkflowStep }
 
 function App() {
   const [route, setRoute] = useState<Route>({ kind: 'home' })
@@ -252,17 +254,7 @@ function App() {
       return
     }
 
-    await handleOpenArticleDetail({
-      articleId: article.id,
-      projectId: current.id,
-      title: article.title,
-      projectTitle: current.title,
-      createdAt: article.createdAt,
-      updatedAt: article.updatedAt,
-      lastVisitedStep: article.workflow.lastVisitedStep,
-      maxReachedStep: article.workflow.maxReachedStep,
-      status: getArticleStatus(article),
-    })
+    await handleOpenArticleDetail({ articleId: article.id, projectId: current.id })
   }
 
   const handleDeleteArticle = async (articleId: string) => {
@@ -299,7 +291,9 @@ function App() {
     setRoute({ kind: 'articles' })
   }
 
-  const handleOpenArticleDetail = async (item: ArticleListItem) => {
+  const handleOpenArticleDetail = async (
+    item: Pick<ArticleListItem, 'projectId' | 'articleId'>,
+  ) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
       const loaded = await loadProject(item.projectId, item.articleId)
@@ -341,7 +335,7 @@ function App() {
   const handleWorkflowStep = async (nextStep: WorkflowStep) => {
     try {
       if (route.kind !== 'article' || !projectRef.current) return
-      if (nextStep === 'import') return
+      if (nextStep === 'import' || nextStep === 'export') return
       if (!canNavigateToWorkflowStep(projectRef.current.workflow.maxReachedStep, nextStep)) return
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
@@ -359,12 +353,11 @@ function App() {
     }
   }
 
-  const handleProjectStep = async (nextStep: ProjectStep) => {
+  const handleProjectStep = async (nextStep: ArticleWorkflowStep) => {
     try {
       if (route.kind !== 'article') return
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
-      if (nextStep === 'export') nextStep = 'article-review'
       const saved = await enqueueProjectOperation(async () => {
         const current = projectRef.current
         if (!current || current.activeArticleId !== articleId) return null
@@ -642,7 +635,7 @@ function App() {
           {...articleProps}
         />
       )
-    if (route.step === 'article-review' || route.step === 'export')
+    if (route.step === 'article-review')
       return (
         <ArticleReviewPage
           key={route.articleId}
@@ -656,17 +649,7 @@ function App() {
           onSaveTranslation={handleSaveArticleTranslation}
           onSaveOutputLanguage={handleSaveArticleOutputLanguage}
           onViewArticle={() =>
-            void handleOpenArticleDetail({
-              articleId: route.articleId,
-              projectId: project.id,
-              title: project.article?.title ?? '',
-              projectTitle: project.title,
-              createdAt: project.createdAt,
-              updatedAt: project.updatedAt,
-              lastVisitedStep: project.workflow.lastVisitedStep,
-              maxReachedStep: project.workflow.maxReachedStep,
-              status: getArticleStatus(project),
-            })
+            void handleOpenArticleDetail({ articleId: route.articleId, projectId: project.id })
           }
           onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
