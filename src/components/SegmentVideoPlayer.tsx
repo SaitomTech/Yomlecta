@@ -1,24 +1,26 @@
 import { Pause, Play } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { getSegmentPlaybackRange } from '../lib/media/segmentPlayback'
 import { formatTimestamp } from '../lib/time'
 import type { SlideData } from '../types/project'
 
 type SegmentVideoPlayerProps = {
   slide: SlideData
   videoSrc: string | null
+  sourceOffsetMs?: number
   className?: string
 }
 
 export function SegmentVideoPlayer({
   slide,
   videoSrc,
+  sourceOffsetMs = 0,
   className = 'w-full',
 }: SegmentVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [position, setPosition] = useState(0)
-  const startTime = Math.max(0, slide.startMs / 1000)
-  const endTime = Math.max(startTime, slide.endMs / 1000)
+  const { startTime, endTime } = getSegmentPlaybackRange(slide, sourceOffsetMs)
   const segmentDuration = Math.max(0.1, endTime - startTime)
 
   useEffect(
@@ -114,7 +116,7 @@ export function SegmentVideoPlayer({
           )}
         </button>
         <span className="shrink-0 whitespace-nowrap font-mono text-[10px] tabular-nums text-[#53615b]">
-          {formatTimestamp((startTime + position) * 1000)} / {formatTimestamp(endTime * 1000)}
+          {formatTimestamp(slide.startMs + position * 1000)} / {formatTimestamp(slide.endMs)}
         </span>
         <div className="min-w-0 flex-1">
           <input

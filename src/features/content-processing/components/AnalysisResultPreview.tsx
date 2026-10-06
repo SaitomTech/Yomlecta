@@ -20,6 +20,7 @@ type AnalysisResultPreviewProps = {
   onEdit: () => void
   onSaveSlideResultEdits: (slideId: string, edits: SlideResultEdits) => void | Promise<void>
   videoPath: string
+  sourceOffsetMs: number
   disabled?: boolean
 }
 
@@ -111,10 +112,18 @@ function ResultPane({
   )
 }
 
-function SegmentVideoPreview({ slide, videoSrc }: { slide: SlideData; videoSrc: string | null }) {
+function SegmentVideoPreview({
+  slide,
+  videoSrc,
+  sourceOffsetMs,
+}: {
+  slide: SlideData
+  videoSrc: string | null
+  sourceOffsetMs: number
+}) {
   return (
     <div className="mt-3">
-      <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} />
+      <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} sourceOffsetMs={sourceOffsetMs} />
     </div>
   )
 }
@@ -143,11 +152,13 @@ function SlidePane({ slide }: { slide: SlideData }) {
 function VideoPane({
   slide,
   videoSrc,
+  sourceOffsetMs,
   active,
   onToggle,
 }: {
   slide: SlideData
   videoSrc: string | null
+  sourceOffsetMs: number
   active: boolean
   onToggle: () => void
 }) {
@@ -166,7 +177,11 @@ function VideoPane({
         <div className="w-full max-w-[600px]">
           {active ? (
             <>
-              <SegmentVideoPreview slide={slide} videoSrc={videoSrc} />
+              <SegmentVideoPreview
+                slide={slide}
+                videoSrc={videoSrc}
+                sourceOffsetMs={sourceOffsetMs}
+              />
               <button
                 className="mt-3 text-xs font-semibold text-[#71807b] hover:text-[#1d6b50]"
                 type="button"
@@ -203,6 +218,7 @@ export function AnalysisResultPreview({
   onEdit,
   onSaveSlideResultEdits,
   videoPath,
+  sourceOffsetMs,
   disabled = false,
 }: AnalysisResultPreviewProps) {
   const hasAnyResult = slides.some((slide) => slide.ocr || slide.transcript)
@@ -357,6 +373,7 @@ export function AnalysisResultPreview({
                     <VideoPane
                       slide={slide}
                       videoSrc={videoSource.src}
+                      sourceOffsetMs={sourceOffsetMs}
                       active={activeVideoSlideId === slide.id}
                       onToggle={() =>
                         setActiveVideoSlideId((current) => (current === slide.id ? null : slide.id))

@@ -210,6 +210,7 @@ export function GenerateNotesPage({
             <AnalysisResultPreview
               slides={articleBlockViews(project.slides, project.articleBlocks)}
               videoPath={sourceContext.source.path}
+              sourceOffsetMs={sourceContext.range.startMs}
               onEdit={onOpenArticleReview}
               onSaveSlideResultEdits={onSaveSlideResultEdits}
               disabled={isProcessing}

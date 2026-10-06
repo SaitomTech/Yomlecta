@@ -8,6 +8,7 @@ import {
   useDroppable,
 } from '@dnd-kit/react'
 import { Fragment, useRef, useState } from 'react'
+import { getActiveArticleSourceContext } from '../../../lib/project/articleSource'
 import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
 import { articleBlockViews } from '../../../lib/pipeline/articleBlocks'
 import type {
@@ -452,6 +453,7 @@ type ReviewGroupSlidesProps = {
   isBodyDirty: boolean
   bodySaveError: string | null
   videoSrc: string | null
+  sourceOffsetMs: number
   activeVideoSlideId: string | null
   canEditSlide: boolean
   onAddAtGap: (gapIndex: number) => void
@@ -479,6 +481,7 @@ function ReviewGroupSlides(props: ReviewGroupSlidesProps) {
         <ArticleSectionEditor
           slide={slide}
           videoSrc={props.videoSrc}
+          sourceOffsetMs={props.sourceOffsetMs}
           videoOpen={props.activeVideoSlideId === slide.id}
           body={isEditing ? props.bodyDraft : (props.savedBodies[slide.id] ?? '')}
           sourceLanguage={props.sourceLanguage}
@@ -519,6 +522,7 @@ function SectionReviewGroup({
   isBodyDirty,
   bodySaveError,
   videoSrc,
+  sourceOffsetMs,
   activeVideoSlideId,
   canEditSlide,
   onHeadingSave,
@@ -548,6 +552,7 @@ function SectionReviewGroup({
   isBodyDirty: boolean
   bodySaveError: string | null
   videoSrc: string | null
+  sourceOffsetMs: number
   activeVideoSlideId: string | null
   canEditSlide: boolean
   onHeadingSave: (sectionId: string, heading: string) => Promise<void>
@@ -609,6 +614,7 @@ function SectionReviewGroup({
           isBodyDirty={isBodyDirty}
           bodySaveError={bodySaveError}
           videoSrc={videoSrc}
+          sourceOffsetMs={sourceOffsetMs}
           activeVideoSlideId={activeVideoSlideId}
           canEditSlide={canEditSlide}
           onAddAtGap={onAddAtGap}
@@ -731,6 +737,7 @@ export function ArticleStructureEditor({
   onSaveSummary,
   disabled = false,
 }: ArticleStructureEditorProps) {
+  const sourceOffsetMs = getActiveArticleSourceContext(project).range.startMs
   const videoSource = useVideoSourceUrl(sourcePath)
   const [activeVideoSlideId, setActiveVideoSlideId] = useState<string | null>(null)
   const [draftState, setDraftState] = useState<{
@@ -944,6 +951,7 @@ export function ArticleStructureEditor({
                     isBodyDirty={isBodyDirty}
                     bodySaveError={bodySaveError}
                     videoSrc={videoSource.src}
+                    sourceOffsetMs={sourceOffsetMs}
                     activeVideoSlideId={activeVideoSlideId}
                     canEditSlide={canEditSlide}
                     onHeadingSave={saveHeading}

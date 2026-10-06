@@ -7,6 +7,7 @@ import { articleLanguageLabel, resolveArticleLanguageVisibility } from '../artic
 type ArticleSectionEditorProps = {
   slide: SlideData
   videoSrc: string | null
+  sourceOffsetMs: number
   videoOpen: boolean
   body: string
   sourceLanguage: string
@@ -25,8 +26,23 @@ type ArticleSectionEditorProps = {
   onVideoToggle: (open: boolean) => void
 }
 
-function SegmentVideoPreview({ slide, videoSrc }: { slide: SlideData; videoSrc: string | null }) {
-  return <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} className="w-full max-w-[420px]" />
+function SegmentVideoPreview({
+  slide,
+  videoSrc,
+  sourceOffsetMs,
+}: {
+  slide: SlideData
+  videoSrc: string | null
+  sourceOffsetMs: number
+}) {
+  return (
+    <SegmentVideoPlayer
+      slide={slide}
+      videoSrc={videoSrc}
+      sourceOffsetMs={sourceOffsetMs}
+      className="w-full max-w-[420px]"
+    />
+  )
 }
 
 function SourceLanguageLabel({ language }: { language: string }) {
@@ -158,11 +174,13 @@ function TranslatedBody({
 function OriginalData({
   slide,
   videoSrc,
+  sourceOffsetMs,
   videoOpen,
   onVideoToggle,
 }: {
   slide: SlideData
   videoSrc: string | null
+  sourceOffsetMs: number
   videoOpen: boolean
   onVideoToggle: (open: boolean) => void
 }) {
@@ -182,7 +200,13 @@ function OriginalData({
           <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#71807b]">
             区間動画
           </p>
-          {videoOpen && <SegmentVideoPreview slide={slide} videoSrc={videoSrc} />}
+          {videoOpen && (
+            <SegmentVideoPreview
+              slide={slide}
+              videoSrc={videoSrc}
+              sourceOffsetMs={sourceOffsetMs}
+            />
+          )}
         </div>
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#71807b]">
@@ -204,6 +228,7 @@ function OriginalData({
 export function ArticleSectionEditor({
   slide,
   videoSrc,
+  sourceOffsetMs,
   videoOpen,
   body,
   sourceLanguage,
@@ -278,6 +303,7 @@ export function ArticleSectionEditor({
         <OriginalData
           slide={slide}
           videoSrc={videoSrc}
+          sourceOffsetMs={sourceOffsetMs}
           videoOpen={videoOpen}
           onVideoToggle={onVideoToggle}
         />
