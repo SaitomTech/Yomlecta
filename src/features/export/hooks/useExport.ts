@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { articleExportInputKey } from '../exportInput'
 import { getErrorDetail } from '../../../lib/errors'
 import type { MediaProject } from '../../../types/project'
 import {
@@ -26,18 +27,20 @@ function exportErrorMessage(error: unknown) {
   return '書き出しに失敗しました。'
 }
 
-export function useExport(project: MediaProject, initialResult: ExportResult | null = null) {
+export function useExport(project: MediaProject) {
   const [status, setStatus] = useState<ExportStatus>('idle')
   const [progress, setProgress] = useState<ExportProgress>({
     stage: 'copying-images',
     completed: 0,
     total: 0,
   })
-  const [hasLocalResult, setHasLocalResult] = useState(false)
-  const [localResult, setLocalResult] = useState<ExportResult | null>(null)
+  const [localResult, setLocalResult] = useState<{ inputKey: string; output: ExportResult } | null>(
+    null,
+  )
   const [error, setError] = useState<string | null>(null)
   const isGenerating = useRef(false)
-  const result = hasLocalResult ? localResult : initialResult
+  const inputKey = articleExportInputKey(project)
+  const result = localResult?.inputKey === inputKey ? localResult.output : null
 
   const generate = useCallback(async () => {
     if (isGenerating.current) return null
@@ -45,13 +48,12 @@ export function useExport(project: MediaProject, initialResult: ExportResult | n
     isGenerating.current = true
     setStatus('running')
     setError(null)
-    setHasLocalResult(true)
     setLocalResult(null)
     setProgress({ stage: 'copying-images', completed: 0, total: 0 })
 
     try {
       const output = await exportProject(project, setProgress)
-      setLocalResult(output)
+      setLocalResult({ inputKey, output })
       setStatus('completed')
       return output
     } catch (exportError) {
@@ -62,7 +64,7 @@ export function useExport(project: MediaProject, initialResult: ExportResult | n
     } finally {
       isGenerating.current = false
     }
-  }, [project])
+  }, [project, inputKey])
 
   const download = useCallback(
     async (format: ExportFormat) => {

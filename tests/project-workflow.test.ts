@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { articleExportInputKey } from '../src/features/export/exportInput'
 import { parseMediaProject } from '../src/schemas/project'
 import {
   createEmptyProject,
@@ -19,6 +20,7 @@ import { normalizeTrimRange } from '../src/lib/project/videoRange'
 import { getActiveArticleSourceContext } from '../src/lib/project/articleSource'
 import { createArticleFromRange } from '../src/lib/project/projectMedia'
 import {
+  WORKFLOW_STEPS,
   canNavigateToWorkflowStep,
   getFurthestWorkflowStep,
   isWorkflowStepReached,
@@ -180,7 +182,7 @@ test('export completion records reachability separately from the last visited st
   const revisited = markProjectOpened(exported, 'generate-notes')
 
   expect(exported.workflow.maxReachedStep).toBe('export')
-  expect(exported.workflow.lastVisitedStep).toBe('export')
+  expect(exported.workflow.lastVisitedStep).toBe('article-review')
   expect(exported.workflow.lastExportedAt).toBeTruthy()
   expect(revisited.workflow.maxReachedStep).toBe('export')
   expect(revisited.workflow.lastVisitedStep).toBe('generate-notes')
@@ -533,4 +535,29 @@ test('body edits preserve independently generated sections and summary after rel
   expect(restored.slides[0].transcript?.articleBody).toBe('Edited body')
   expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved heading')
   expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved overview')
+})
+
+test('the workflow has four steps and legacy completed articles can still be edited', () => {
+  expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
+    'crop',
+    'detect-slides',
+    'generate-notes',
+    'article-review',
+  ])
+  expect(canNavigateToWorkflowStep('export', 'article-review')).toBe(true)
+  expect(canNavigateToWorkflowStep('export', 'export')).toBe(false)
+})
+
+test('download inputs change after article regeneration but not export bookkeeping', () => {
+  const project = createArticleWorkspace()
+  const before = articleExportInputKey(project)
+  expect(articleExportInputKey(markProjectExported(project))).toBe(before)
+  expect(articleExportInputKey(markProjectOpened(project, 'article-review'))).toBe(before)
+  const edited = updateProjectArticleDraft(project, {
+    title: 'article',
+    bodies: { 'slide-1': 'regenerated article body' },
+  })
+  expect(articleExportInputKey(edited)).not.toBe(before)
+  expect(articleExportInputKey(updateProjectArticleTitle(project, 'renamed'))).not.toBe(before)
+  expect(articleExportInputKey({ ...project, activeArticleId: 'another-article' })).not.toBe(before)
 })

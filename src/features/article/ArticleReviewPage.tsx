@@ -41,7 +41,7 @@ type ArticleReviewPageProps = {
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onSaveTranslation: (translation: ArticleTranslation) => void | Promise<void>
   onSaveOutputLanguage: (language: ArticleOutputLanguage) => void | Promise<void>
-  onExport: () => void
+  onViewArticle: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -124,7 +124,7 @@ export function ArticleReviewPage({
   onSaveSummary,
   onSaveTranslation,
   onSaveOutputLanguage,
-  onExport,
+  onViewArticle,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -468,11 +468,11 @@ export function ArticleReviewPage({
             <button
               className="inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-[#f3faf6] shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
               type="button"
-              onClick={onExport}
+              onClick={onViewArticle}
               disabled={hasUnsavedChanges || isBusy}
               title={hasUnsavedChanges ? '編集中の変更を保存してください' : undefined}
             >
-              閲覧・ダウンロードへ
+              記事を見る
               <ArrowRight size={14} />
             </button>
           </div>

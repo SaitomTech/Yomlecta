@@ -234,7 +234,8 @@ export function markProjectExported(project: MediaProject): MediaProject {
     ...project,
     workflow: {
       ...project.workflow,
-      lastVisitedStep: 'export',
+      lastVisitedStep: 'article-review',
+      // Keep the stored completion marker compatible with existing lists and projects.
       maxReachedStep: 'export',
       lastExportedAt: now,
       lastOpenedAt: now,
