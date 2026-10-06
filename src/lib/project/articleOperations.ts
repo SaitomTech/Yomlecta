@@ -1,248 +1,203 @@
+import * as changes from './article'
+import * as storage from '../storage/projectStorage'
 import {
-  assignedArticleSlides,
   boundarySourceSlides,
   boundaryPlanInputsCurrent,
   currentBoundaryPlan,
+  assignedArticleSlides,
 } from '../pipeline/transcriptBoundaries'
 import { articleInputFingerprint } from '../../features/article/article'
+import { removeArticleRunDirectories } from '../storage/projectAssets'
 import type { SlideDetectionOutput } from '../../features/slide-detection/types'
-import {
-  commitOcrBatch,
-  commitSlideContentBatch,
-  commitSlideDetection,
-  commitTranscription,
-  updateArticleSource,
-  updateArticleTitle,
-  updateArticleContent,
-  updateDocumentAndArticle,
-  updateSlideResults,
-} from '../storage/projectStorage'
-import {
-  syncActiveArticle,
-  updateProjectArticleDraft,
-  updateProjectArticleOutputLanguage,
-  updateProjectArticleSections,
-  updateProjectArticleSourceSettings,
-  updateProjectArticleSummary,
-  updateProjectArticleTitle,
-  updateProjectArticleTranslation,
-  updateProjectSlideContent,
-  updateProjectSlideDetection,
-  updateProjectSlideOcr,
-  updateProjectSlideResultEdits,
-  updateProjectTranscription,
-} from './project'
 import type {
-  TranscriptBoundaryPlan,
-  ContentProcessingResult,
+  Article,
+  ArticleContext,
   ArticleDraft,
   ArticleOutputLanguage,
   ArticleSections,
   ArticleSummary,
   ArticleTranslation,
+  ContentProcessingResult,
   CropRegion,
-  MediaProject,
   PerspectiveCrop,
   SlideOcrResult,
   SlideResultEdits,
+  TranscriptBoundaryPlan,
   TranscriptionResult,
   VideoTrimRange,
 } from '../../types/project'
-import { removeArticleRunDirectories } from '../storage/projectAssets'
 
-function activeArticle(project: MediaProject) {
-  if (!project.activeArticleId) return null
-  return project.articles.find((article) => article.id === project.activeArticleId) ?? null
-}
-
-function syncedArticle(project: MediaProject) {
-  const next = syncActiveArticle(project)
-  const article = activeArticle(next)
-  if (!article) return null
-  return { next, article }
-}
-
-export async function saveTranscriptBoundaryPlan(
-  project: MediaProject,
-  plan: TranscriptBoundaryPlan,
-) {
-  const slides = boundarySourceSlides(project)
-  if (!boundaryPlanInputsCurrent(plan, slides))
-    throw new Error('文字起こしやOCRが変更されました。本文生成を再実行してください。')
-  if (JSON.stringify(project.article?.boundaryPlan) === JSON.stringify(plan)) return project
-  const updated = {
-    ...project,
-    article: {
-      ...project.article,
-      title: project.article?.title ?? activeArticle(project)?.title ?? '無題の記事',
-      boundaryPlan: plan,
+function nextContext(context: ArticleContext, article: Article): ArticleContext {
+  return {
+    project: {
+      ...context.project,
+      updatedAt:
+        article.updatedAt > context.project.updatedAt
+          ? article.updatedAt
+          : context.project.updatedAt,
     },
-    workflow: { ...project.workflow, maxReachedStep: 'article-review' as const },
-    updatedAt: new Date().toISOString(),
+    article,
   }
-  const synced = syncedArticle(updated)
-  if (!synced) throw new Error('記事が選択されていません。')
-  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
-  return synced.next
 }
-
-export async function saveArticleDraft(project: MediaProject, draft: ArticleDraft) {
-  const updated = updateProjectArticleDraft(project, draft)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateArticleContent(synced.next, synced.article, synced.next.articleBlocks)
-  return synced.next
+async function saveDocument(
+  context: ArticleContext,
+  article: Article,
+  options: Parameters<typeof storage.updateDocumentAndArticle>[3] = {},
+) {
+  if (article === context.article) return article
+  await storage.updateDocumentAndArticle(
+    nextContext(context, article).project,
+    article,
+    article.document,
+    options,
+  )
+  return article
 }
-
-export async function saveArticleSections(project: MediaProject, sections: ArticleSections | null) {
-  const updated = updateProjectArticleSections(project, sections)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article, {
+export async function saveArticleDraft(context: ArticleContext, draft: ArticleDraft) {
+  const article = changes.updateArticleDraft(context.article, draft)
+  if (article === context.article) return article
+  await storage.updateArticleContent(nextContext(context, article).project, article, article.blocks)
+  return article
+}
+export const saveArticleSections = (context: ArticleContext, sections: ArticleSections | null) =>
+  saveDocument(context, changes.updateArticleSections(context.article, sections), {
     runKind: sections && sections.model !== 'manual' ? 'chapter_generation' : undefined,
   })
-  return synced.next
-}
-
-export async function saveArticleSummary(project: MediaProject, summary: ArticleSummary) {
-  const updated = updateProjectArticleSummary(project, summary)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article, {
+export const saveArticleSummary = (context: ArticleContext, summary: ArticleSummary) =>
+  saveDocument(context, changes.updateArticleSummary(context.article, summary), {
     runKind: 'summary_generation',
   })
-  return synced.next
+export const saveArticleTranslation = (context: ArticleContext, translation: ArticleTranslation) =>
+  saveDocument(context, changes.updateArticleTranslation(context.article, translation))
+export const saveArticleOutputLanguage = (
+  context: ArticleContext,
+  language: ArticleOutputLanguage,
+) => saveDocument(context, changes.updateArticleOutputLanguage(context.article, language))
+export async function saveArticleTitle(context: ArticleContext, title: string) {
+  const article = changes.updateArticleTitle(context.article, title)
+  if (article === context.article) return article
+  await storage.updateArticleTitle(nextContext(context, article).project, article)
+  return article
 }
-
-export async function saveArticleTranslation(
-  project: MediaProject,
-  translation: ArticleTranslation,
-) {
-  const updated = updateProjectArticleTranslation(project, translation)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
-  return synced.next
+export async function saveArticleWorkflow(context: ArticleContext, article: Article) {
+  if (article === context.article) return article
+  await storage.updateArticleWorkflow(nextContext(context, article).project, article)
+  return article
 }
-
-export async function saveArticleOutputLanguage(
-  project: MediaProject,
-  outputLanguage: ArticleOutputLanguage,
-) {
-  const updated = updateProjectArticleOutputLanguage(project, outputLanguage)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateDocumentAndArticle(synced.next, synced.article, synced.next.article)
-  return synced.next
-}
-
-export async function saveArticleTitle(project: MediaProject, title: string) {
-  const updated = updateProjectArticleTitle(project, title)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateArticleTitle(synced.next, synced.article)
-  return synced.next
-}
-
 export async function saveArticleSource(
-  project: MediaProject,
+  context: ArticleContext,
   range: VideoTrimRange,
   crop: CropRegion,
   perspectiveCrop?: PerspectiveCrop,
 ) {
-  const updated = updateProjectArticleSourceSettings(project, range, crop, perspectiveCrop)
-  if (updated === project) return project
-  const synced = syncedArticle(updated)
-  if (!synced) return null
-  await updateArticleSource(synced.next, synced.article)
-  await removeArticleRunDirectories(synced.next.id, synced.article.id).catch((error) =>
+  const sourceMetadata = context.project.videos.find(
+    (video) => video.id === context.article.sourceVideoId,
+  )?.media.metadata
+  const article = changes.updateArticleSourceSettings(
+    context.article,
+    range,
+    crop,
+    perspectiveCrop,
+    { sourceMetadata },
+  )
+  if (article === context.article) return article
+  await storage.updateArticleSource(nextContext(context, article).project, article)
+  await removeArticleRunDirectories(context.project.id, article.id).catch((error) =>
     console.warn('古い記事解析ファイルを削除できませんでした。', error),
   )
-  return synced.next
+  return article
 }
-
-export async function saveSlideDetection(project: MediaProject, output: SlideDetectionOutput) {
-  const updated = updateProjectSlideDetection(project, output.result, output.slides)
-  if (updated === project) return null
-  const next = syncActiveArticle(updated)
-  await commitSlideDetection(next, next.slideDetection ?? output.result, next.slides)
-  return next
+export async function saveSlideDetection(context: ArticleContext, output: SlideDetectionOutput) {
+  const article = changes.updateArticleSlideDetection(context.article, output.result, output.slides)
+  if (article === context.article) return article
+  await storage.commitSlideDetection(
+    nextContext(context, article),
+    output.result,
+    article.visualSegments,
+  )
+  return article
 }
-
-export async function saveTranscription(project: MediaProject, transcription: TranscriptionResult) {
-  const updated = updateProjectTranscription(project, transcription)
-  if (updated === project) return null
-  const next = syncActiveArticle(updated)
-  await commitTranscription(next, next.transcription ?? transcription)
-  return next
+export async function saveTranscription(context: ArticleContext, result: TranscriptionResult) {
+  const article = changes.updateArticleTranscription(context.article, result)
+  if (article === context.article) return article
+  await storage.commitTranscription(nextContext(context, article), article.transcription ?? result)
+  return article
 }
-
 export async function saveOcrBatch(
-  project: MediaProject,
+  context: ArticleContext,
   results: Array<{ slideId: string; ocr: SlideOcrResult }>,
 ) {
-  let next = project
-  for (const { slideId, ocr } of results) next = updateProjectSlideOcr(next, slideId, ocr)
-  if (next === project) return null
-  next = syncActiveArticle(next)
-  await commitOcrBatch(
-    next,
-    results.map(({ slideId, ocr }) => ({
-      slideId,
-      ocr,
-      transcript: next.slides.find((slide) => slide.id === slideId)?.transcript,
+  const now = new Date().toISOString()
+  const article = results.reduce(
+    (article, item) => changes.updateArticleSlideOcr(article, item.slideId, item.ocr, now),
+    context.article,
+  )
+  if (article === context.article) return article
+  await storage.commitOcrBatch(
+    nextContext(context, article),
+    results.map((item) => ({
+      ...item,
+      transcript: article.blocks.find((block) => block.imageSegmentId === item.slideId)?.transcript,
     })),
   )
-  return next
+  return article
 }
-
+export async function saveTranscriptBoundaryPlan(
+  context: ArticleContext,
+  plan: TranscriptBoundaryPlan,
+) {
+  if (!boundaryPlanInputsCurrent(plan, boundarySourceSlides(context)))
+    throw new Error('文字起こしやOCRが変更されました。本文生成を再実行してください。')
+  if (JSON.stringify(context.article.document?.boundaryPlan) === JSON.stringify(plan))
+    return context.article
+  const article = {
+    ...context.article,
+    document: { ...context.article.document, boundaryPlan: plan },
+    workflow: { ...context.article.workflow, maxReachedStep: 'article-review' as const },
+    updatedAt: new Date().toISOString(),
+  }
+  return saveDocument(context, article)
+}
 export async function saveSlideContentBatch(
-  project: MediaProject,
+  context: ArticleContext,
   results: Array<{ slideId: string; result: ContentProcessingResult }>,
 ) {
-  const plan = currentBoundaryPlan(project)
-  if (!plan || !boundaryPlanInputsCurrent(plan, boundarySourceSlides(project))) {
+  const plan = currentBoundaryPlan(context)
+  if (!plan || !boundaryPlanInputsCurrent(plan, boundarySourceSlides(context)))
     throw new Error('本文の生成中に文字起こしやOCRが変更されました。再実行してください。')
-  }
-  const assigned = new Map(assignedArticleSlides(project, plan).map((slide) => [slide.id, slide]))
-  for (const { slideId, result } of results) {
-    const slide = assigned.get(slideId)
+  const assigned = new Map(assignedArticleSlides(context, plan).map((block) => [block.id, block]))
+  for (const item of results) {
+    const block = assigned.get(item.slideId)
     if (
-      !slide ||
-      articleInputFingerprint(slide, result.article.model) !== result.article.inputFingerprint
-    ) {
+      !block ||
+      articleInputFingerprint(block, item.result.article.model) !==
+        item.result.article.inputFingerprint
+    )
       throw new Error('本文の生成中に入力が変更されました。再実行してください。')
-    }
   }
-  let next = project
-  for (const { slideId, result } of results) next = updateProjectSlideContent(next, slideId, result)
-  if (next === project) return null
-  next = syncActiveArticle(next)
-  const items = results.flatMap(({ slideId, result }) => {
-    const transcript = next.slides.find((slide) => slide.id === slideId)?.transcript
-    return transcript ? [{ slideId, result, transcript }] : []
+  const now = new Date().toISOString()
+  const article = results.reduce(
+    (article, item) => changes.updateArticleSlideContent(article, item.slideId, item.result, now),
+    context.article,
+  )
+  if (article === context.article) return article
+  const items = results.map((item) => {
+    const transcript = article.blocks.find((block) => block.id === item.slideId)?.transcript
+    if (!transcript) throw new Error('記事ブロックの発話がありません。')
+    return { ...item, transcript }
   })
-  if (items.length !== results.length) return null
-  await commitSlideContentBatch(next, items)
-  return next
+  await storage.commitSlideContentBatch(nextContext(context, article), items)
+  return article
 }
-
 export async function saveSlideResultEdits(
-  project: MediaProject,
-  slideId: string,
+  context: ArticleContext,
+  blockId: string,
   edits: SlideResultEdits,
 ) {
-  const updated = updateProjectSlideResultEdits(project, slideId, edits)
-  if (updated === project) return null
-  const next = syncActiveArticle(updated)
-  const transcript = next.slides.find((slide) => slide.id === slideId)?.transcript
-  const ocr = next.slides.find((slide) => slide.id === slideId)?.ocr
-  await updateSlideResults(next, slideId, transcript, ocr)
-  return next
+  const article = changes.updateArticleSlideResultEdits(context.article, blockId, edits)
+  if (article === context.article) return article
+  const block = article.blocks.find((block) => block.id === blockId)!
+  const ocr = article.visualSegments.find((segment) => segment.id === block.imageSegmentId)?.ocr
+  await storage.updateSlideResults(nextContext(context, article), blockId, block.transcript, ocr)
+  return article
 }

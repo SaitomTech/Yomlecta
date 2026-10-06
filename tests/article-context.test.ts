@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { articleInputFingerprint, hasCurrentArticle } from '../src/features/article/article'
-import type { SlideData } from '../src/types/project'
+import type { ArticleBlockView } from '../src/types/project'
 
-function slide(raw: string): SlideData {
+function slide(raw: string): ArticleBlockView {
   return {
     id: 'slide',
     index: 0,
@@ -17,18 +17,33 @@ function slide(raw: string): SlideData {
 }
 
 test('本文の更新判定には確定済み担当発話を使う', () => {
-  const target = slide('assigned speech')
-  target.transcript!.articleBody = 'body'
-  target.transcript!.articleInputFingerprint = articleInputFingerprint(target, 'model')
+  const source = slide('assigned speech')
+  const target = {
+    ...source,
+    transcript: {
+      ...source.transcript!,
+      articleBody: 'body',
+      articleInputFingerprint: articleInputFingerprint(source, 'model'),
+    },
+  }
   expect(hasCurrentArticle(target, 'model')).toBe(true)
-  target.transcript!.raw += ' changed'
-  expect(hasCurrentArticle(target, 'model')).toBe(false)
+  const changed = {
+    ...target,
+    transcript: { ...target.transcript, raw: target.transcript.raw + ' changed' },
+  }
+  expect(hasCurrentArticle(changed, 'model')).toBe(false)
 })
 
 test('担当発話が空のブロックは空本文を正式な生成結果として扱う', () => {
-  const target = slide('')
-  target.transcript!.articleBody = ''
-  target.transcript!.articleInputFingerprint = articleInputFingerprint(target, 'model')
+  const source = slide('')
+  const target = {
+    ...source,
+    transcript: {
+      ...source.transcript!,
+      articleBody: '',
+      articleInputFingerprint: articleInputFingerprint(source, 'model'),
+    },
+  }
   expect(hasCurrentArticle(target, 'model')).toBe(true)
   expect(hasCurrentArticle(target, 'other-model')).toBe(false)
 })

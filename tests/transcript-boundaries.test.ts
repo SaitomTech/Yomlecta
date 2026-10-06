@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { SlideData } from '../src/types/project'
+import type { ArticleBlockView } from '../src/types/project'
 import {
   assignedTranscript,
   createBoundaryPlan,
@@ -8,7 +8,7 @@ import {
 } from '../src/lib/pipeline/transcriptBoundaries'
 import { adjustTranscriptBoundaries } from '../src/features/content-processing/boundaryAdjustment'
 import type { BoundaryDecision } from '../src/features/content-processing/articleGenerator'
-function slides(...texts: string[]): SlideData[] {
+function slides(...texts: string[]): ArticleBlockView[] {
   return texts.map((raw, index) => ({
     id: `slide-${index}`,
     index,
@@ -25,7 +25,7 @@ function rejoin(plan: ReturnType<typeof createBoundaryPlan>) {
   return plan.originalRanges.map((_, index) => assignedTranscript(plan, index).text).join('')
 }
 
-async function adjust(input: SlideData[], decision: BoundaryDecision) {
+async function adjust(input: ArticleBlockView[], decision: BoundaryDecision) {
   let calls = 0
   const plan = await adjustTranscriptBoundaries({
     slides: input,
@@ -113,7 +113,7 @@ test('キャッシュは同じ入力だけ再利用し、OCR変更で無効に�
     },
   })
   expect(boundaryPlanInputsCurrent(plan, input)).toBe(true)
-  input[0]!.ocr = { rawText: '変更', model: 'test' }
+  input[0] = { ...input[0]!, ocr: { rawText: '変更', model: 'test' } }
   expect(boundaryPlanInputsCurrent(plan, input)).toBe(false)
 })
 test('中止をfallbackにせず伝播する', async () => {

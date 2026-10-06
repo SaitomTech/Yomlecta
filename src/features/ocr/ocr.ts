@@ -14,7 +14,7 @@ import {
 } from '../../lib/ocr/modelManager'
 import { modelProgressRatio } from '../../lib/models/download'
 import { ocrEligibleSegments } from '../../lib/pipeline/articleBlocks'
-import type { MediaProject, SlideData, SlideOcrResult } from '../../types/project'
+import type { ArticleContext, SlideData, SlideOcrResult } from '../../types/project'
 
 const OCR_PROMPT_VERSION = 'text-recognition-v4'
 const MAX_OPENAI_OCR_REQUESTS = 4
@@ -32,7 +32,7 @@ export type OcrSlideCompleted = (
 ) => void | Promise<void>
 
 type RunOcrInput = {
-  project: MediaProject
+  project: ArticleContext
   onStage?: (stage: OcrStage) => void
   onProgress?: (progress: OcrProgress) => void
   onSlideCompleted?: OcrSlideCompleted
@@ -153,7 +153,7 @@ export async function runOcr({
   force = false,
   modelId = DEFAULT_OCR_MODEL.id,
 }: RunOcrInput) {
-  const slides = ocrEligibleSegments(project.slides, project.articleBlocks)
+  const slides = ocrEligibleSegments(project.article.visualSegments, project.article.blocks)
   if (slides.length === 0) {
     throw new UserFacingError('OCRするSlideがありません。先にスライド検出を実行してください。')
   }

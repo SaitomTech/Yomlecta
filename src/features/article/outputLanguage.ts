@@ -1,13 +1,13 @@
-import type { ArticleOutputLanguage, ArticleTranslation, MediaProject } from '../../types/project'
+import type { ArticleOutputLanguage, ArticleTranslation, ArticleContext } from '../../types/project'
 import { articleTranslationInputFingerprint, normalizeLanguage } from './translation'
 
-const currentTranslationsCache = new WeakMap<MediaProject, ArticleTranslation[]>()
+const currentTranslationsCache = new WeakMap<ArticleContext, ArticleTranslation[]>()
 
-export function getCurrentArticleTranslations(project: MediaProject) {
+export function getCurrentArticleTranslations(project: ArticleContext) {
   const cached = currentTranslationsCache.get(project)
   if (cached) return cached
 
-  const translations = Object.values(project.article?.translations ?? {})
+  const translations = Object.values(project.article.document?.translations ?? {})
     .filter(
       (translation) =>
         translation.sourceLanguage !== translation.targetLanguage &&
@@ -23,7 +23,7 @@ export function getCurrentArticleTranslations(project: MediaProject) {
   return translations
 }
 
-export function getCurrentJapaneseEnglishTranslation(project: MediaProject) {
+export function getCurrentJapaneseEnglishTranslation(project: ArticleContext) {
   return getCurrentArticleTranslations(project).find(
     (translation) =>
       ['ja', 'en'].includes(translation.sourceLanguage) &&
@@ -32,7 +32,7 @@ export function getCurrentJapaneseEnglishTranslation(project: MediaProject) {
 }
 
 export function getCurrentTranslationForOutputLanguage(
-  project: MediaProject,
+  project: ArticleContext,
   language: ArticleOutputLanguage,
 ) {
   if (language === 'both') return getCurrentJapaneseEnglishTranslation(project)
@@ -41,12 +41,19 @@ export function getCurrentTranslationForOutputLanguage(
   )
 }
 
-export function getArticleSourceLanguage(project: MediaProject, translation?: ArticleTranslation) {
-  return translation?.sourceLanguage ?? normalizeLanguage(project.transcription?.language) ?? 'ja'
+export function getArticleSourceLanguage(
+  project: ArticleContext,
+  translation?: ArticleTranslation,
+) {
+  return (
+    translation?.sourceLanguage ??
+    normalizeLanguage(project.article.transcription?.language) ??
+    'ja'
+  )
 }
 
 export function isArticleOutputLanguageAvailable(
-  project: MediaProject,
+  project: ArticleContext,
   language: ArticleOutputLanguage,
   translation = getCurrentJapaneseEnglishTranslation(project),
 ) {
@@ -60,9 +67,9 @@ export function isArticleOutputLanguageAvailable(
   )
 }
 
-export function getArticleOutputLanguage(project: MediaProject): ArticleOutputLanguage {
+export function getArticleOutputLanguage(project: ArticleContext): ArticleOutputLanguage {
   const currentTranslations = getCurrentArticleTranslations(project)
-  const storedLanguage = project.article?.outputLanguage
+  const storedLanguage = project.article.document?.outputLanguage
   const translation = currentTranslations.find(
     (candidate) =>
       ['ja', 'en'].includes(candidate.sourceLanguage) &&

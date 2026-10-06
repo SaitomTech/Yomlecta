@@ -10,7 +10,7 @@ import type { ArticleModelId } from '../../../lib/article/articleModel'
 import type {
   ArticleSections,
   ArticleSummary,
-  MediaProject,
+  ArticleContext,
   TranscriptBoundaryPlan,
 } from '../../../types/project'
 import {
@@ -29,7 +29,7 @@ import {
 export type ContentProcessingStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
 function savedContentProgress(
-  project: MediaProject,
+  project: ArticleContext,
   modelId: ArticleModelId,
   includeSummary: boolean,
 ) {
@@ -48,15 +48,15 @@ function savedContentProgress(
     completedFromProject === targetSlides.length &&
     targetSlides.length > 0 &&
     hasCurrentArticleSections(project, modelId) &&
-    (!includeSummary || Boolean(project.article?.summary))
+    (!includeSummary || Boolean(project.article.document?.summary))
   return { targetSlides, completedFromProject, isUpToDate }
 }
 
 export function useContentProcessing(
-  project: MediaProject,
+  project: ArticleContext,
   onSlideCompleted: ContentProcessingSlideCompleted,
   modelId: ArticleModelId,
-  getCurrentProject: () => MediaProject | null,
+  getCurrentProject: () => ArticleContext | null,
   onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>,
   onSectionsCompleted: (sections: ArticleSections) => void | Promise<void>,
   onSummaryCompleted: (summary: ArticleSummary) => void | Promise<void>,

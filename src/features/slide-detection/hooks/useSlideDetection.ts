@@ -1,21 +1,21 @@
 import { useCallback, useState } from 'react'
 import { runSlideDetection } from '../detection'
-import type { MediaProject } from '../../../types/project'
+import type { ArticleContext } from '../../../types/project'
 import type { PendingSlideDetectionOutput, SlideDetectionStage } from '../types'
 
 export type SlideDetectionStatus = 'idle' | 'running' | 'completed' | 'error'
 
-function hasRepresentativeFrames(project: MediaProject) {
+function hasRepresentativeFrames(project: ArticleContext) {
   return (
-    project.slides.length > 0 &&
-    project.slides.every((slide) => Boolean(slide.image.representativeFramePath))
+    project.article.visualSegments.length > 0 &&
+    project.article.visualSegments.every((slide) => Boolean(slide.image.representativeFramePath))
   )
 }
 
-function hasPersistedAutomaticDetection(project: MediaProject) {
+function hasPersistedAutomaticDetection(project: ArticleContext) {
   return Boolean(
-    project.slideDetection &&
-    project.slideDetection.framesAnalyzed > 0 &&
+    project.article.slideDetection &&
+    project.article.slideDetection.framesAnalyzed > 0 &&
     hasRepresentativeFrames(project),
   )
 }
@@ -25,7 +25,7 @@ type UseSlideDetectionOptions = {
 }
 
 export function useSlideDetection(
-  project: MediaProject,
+  project: ArticleContext,
   { onCompleted }: UseSlideDetectionOptions,
 ) {
   const hasPersistedResult = hasPersistedAutomaticDetection(project)

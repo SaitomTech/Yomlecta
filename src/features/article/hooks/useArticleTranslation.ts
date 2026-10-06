@@ -3,7 +3,7 @@ import { getUserErrorMessage } from '../../../lib/errors'
 import type {
   ArticleTranslation,
   ArticleTranslationLanguage,
-  MediaProject,
+  ArticleContext,
 } from '../../../types/project'
 import {
   getCurrentArticleTranslation,
@@ -17,12 +17,12 @@ import {
 export type TranslationStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
 export function useArticleTranslation(
-  project: MediaProject,
+  project: ArticleContext,
   engineId: TranslationEngineId,
   sourceLanguage: ArticleTranslationLanguage,
   targetLanguage: ArticleTranslationLanguage,
   onCompleted: (translation: ArticleTranslation) => void | Promise<void>,
-  getCurrentProject?: () => MediaProject | null,
+  getCurrentProject?: () => ArticleContext | null,
 ) {
   const [status, setStatus] = useState<TranslationStatus>('idle')
   const [stage, setStage] = useState<TranslationStage>('preparing-model')

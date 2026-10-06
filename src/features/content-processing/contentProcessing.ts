@@ -3,7 +3,8 @@ import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { withUserFacingError, UserFacingError } from '../../lib/errors'
 import type {
   ContentProcessingResult,
-  MediaProject,
+  ArticleContext,
+  ArticleBlockView,
   TranscriptBoundaryPlan,
 } from '../../types/project'
 import { articleInputFingerprint, hasCurrentArticle } from '../article/article'
@@ -35,7 +36,7 @@ export type ContentProcessingSlideSkipped = (
 ) => void
 
 type RunContentProcessingInput = {
-  project: MediaProject
+  project: ArticleContext
   modelId: ArticleModelId
   onStage?: (stage: ContentProcessingStage) => void
   onProgress?: (progress: ContentProcessingProgress) => void
@@ -51,7 +52,7 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
 }
 
-export function hasCurrentContent(slide: MediaProject['slides'][number], modelId: ArticleModelId) {
+export function hasCurrentContent(slide: ArticleBlockView, modelId: ArticleModelId) {
   return hasCurrentArticle(slide, modelId)
 }
 
@@ -92,7 +93,7 @@ export async function runContentProcessing(
   }
   const generator =
     generatorOverride ??
-    createArticleGenerator(getArticleModel(modelId), project.transcription?.language)
+    createArticleGenerator(getArticleModel(modelId), project.article.transcription?.language)
   onProgress?.({ completed: 0, total: sourceSlides.length, stageProgress: null })
 
   throwIfAborted(signal)

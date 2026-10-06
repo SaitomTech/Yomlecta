@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS } from './article'
 import { extractVideoThumbnail } from '../media/ffmpeg'
 import { copyFile, renameAbsolutePath } from '../tauri/filesystem'
 import {
@@ -9,12 +10,12 @@ import {
 import { normalizeTrimRange } from './videoRange'
 import { normalizeArticleCrop } from './articleSource'
 import type { SelectedVideo } from '../../features/import/types'
-import { DEFAULT_SETTINGS, projectWithVideos } from './project'
+import { projectWithVideos } from './project'
 import type {
   Article,
   ArticleInputMedia,
   CropRegion,
-  MediaProject,
+  Project,
   MediaSource,
   ProjectVideo,
   PerspectiveCrop,
@@ -35,7 +36,7 @@ function withManagedPath(source: MediaSource, path: string, managedRelativePath:
   }
 }
 
-export async function addProjectVideo(project: MediaProject, selected: SelectedVideo) {
+export async function addProjectVideo(project: Project, selected: SelectedVideo) {
   if (!selected.metadata) throw new Error('動画メタデータがありません。')
   const youtubeOrigin = selected.origin?.kind === 'youtube' ? selected.origin : null
   if (
@@ -107,7 +108,7 @@ export async function addProjectVideo(project: MediaProject, selected: SelectedV
 }
 
 export async function createArticleFromRange(
-  project: MediaProject,
+  project: Project,
   videoId: string,
   title: string,
   requestedRange: VideoTrimRange,
@@ -138,8 +139,8 @@ export async function createArticleFromRange(
     crop,
     ...(requestedPerspectiveCrop ? { perspectiveCrop: requestedPerspectiveCrop } : {}),
     settings: DEFAULT_SETTINGS,
-    slides: [],
-    articleBlocks: [],
+    visualSegments: [],
+    blocks: [],
     workflow: {
       lastVisitedStep: 'crop',
       maxReachedStep: 'crop',
@@ -151,7 +152,7 @@ export async function createArticleFromRange(
 }
 
 export function createArticlesFromRanges(
-  project: MediaProject,
+  project: Project,
   videoId: string,
   ranges: Array<{
     title: string

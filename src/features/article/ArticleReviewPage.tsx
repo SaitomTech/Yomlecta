@@ -13,7 +13,7 @@ import type {
   ArticleSummary,
   ArticleTranslation,
   ArticleTranslationLanguage,
-  MediaProject,
+  ArticleContext,
   TranscriptBoundaryPlan,
 } from '../../types/project'
 import { ArticleNavigationBar } from './components/ArticleNavigationBar'
@@ -32,11 +32,11 @@ import { getTranslationEngineId, normalizeLanguage, type TranslationEngineId } f
 import { getArticleOutputLanguage, getCurrentTranslationForOutputLanguage } from './outputLanguage'
 
 type ArticleReviewPageProps = {
-  project: MediaProject
+  project: ArticleContext
   onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>
   onContentSlideCompleted: ContentProcessingSlideCompleted
   onSaveSections: (sections: ArticleSections | null) => void | Promise<void>
-  getCurrentProject: () => MediaProject | null
+  getCurrentProject: () => ArticleContext | null
   onSave: (draft: ArticleDraft) => void | Promise<void>
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onSaveTranslation: (translation: ArticleTranslation) => void | Promise<void>
@@ -86,8 +86,8 @@ function cancelArticleBatch(
   if (stage !== 'idle') cancelers[stage]()
 }
 
-function getCurrentArticleSections(project: MediaProject) {
-  return project.article?.sections
+function getCurrentArticleSections(project: ArticleContext) {
+  return project.article.document?.sections
 }
 
 function getReviewControlState({
@@ -131,9 +131,10 @@ export function ArticleReviewPage({
   maxReachedStep,
   onStepClick,
 }: ArticleReviewPageProps) {
-  const articleSlides = articleBlockViews(project.slides, project.articleBlocks).filter((slide) =>
-    Boolean(slide.transcript),
-  )
+  const articleSlides = articleBlockViews(
+    project.article.visualSegments,
+    project.article.blocks,
+  ).filter((slide) => Boolean(slide.transcript))
   const currentArticleSections = getCurrentArticleSections(project)
   const { outputLanguage, outputTranslation } = useMemo(() => {
     const language = getArticleOutputLanguage(project)
@@ -143,20 +144,18 @@ export function ArticleReviewPage({
     }
   }, [project])
   const sourcePath = getActiveArticleSourceContext(project).source.path
-  const activeArticle = project.articles.find((article) => article.id === project.activeArticleId)
+  const activeArticle = project.article
   const articleTitle =
-    activeArticle?.title.trim() ||
-    project.article?.title?.trim() ||
-    project.source.name.replace(/\.[^.]+$/, '')
+    activeArticle?.title.trim() || project.article.inputMedia.name.replace(/\.[^.]+$/, '')
   const [includeSummary, setIncludeSummary] = useState(true)
-  const storedTextModelId = project.slides
+  const storedTextModelId = project.article.blocks
     .map((slide) => slide.transcript?.articleModel)
     .find((modelId): modelId is string => Boolean(modelId))
   const [textModelId, setTextModelId] = useState<ArticleModelId>(
     () => getArticleModel(storedTextModelId).id,
   )
   const initialTranslationSource: ArticleTranslationLanguage =
-    normalizeLanguage(project.transcription?.language) ?? 'ja'
+    normalizeLanguage(project.article.transcription?.language) ?? 'ja'
   const initialTranslationTarget: ArticleTranslationLanguage =
     initialTranslationSource === 'ja' ? 'en' : 'ja'
   const [translationSourceLanguage, setTranslationSourceLanguage] =
@@ -164,7 +163,7 @@ export function ArticleReviewPage({
   const [translationTargetLanguage, setTranslationTargetLanguage] =
     useState<ArticleTranslationLanguage>(initialTranslationTarget)
   const [translationEngineId, setTranslationEngineId] = useState<TranslationEngineId>(() =>
-    getTranslationEngineId(project.article?.translations?.[initialTranslationTarget]),
+    getTranslationEngineId(project.article.document?.translations?.[initialTranslationTarget]),
   )
   const [includeTranslationInBatch, setIncludeTranslationInBatch] = useState(false)
   const reviewSections = currentArticleSections ?? {
@@ -277,7 +276,7 @@ export function ArticleReviewPage({
   }
 
   const switchArticle = async (articleId: string) => {
-    if (articleId === project.activeArticleId) {
+    if (articleId === project.article.id) {
       return true
     }
     if (switchingArticleId || isBusy) return false
@@ -330,7 +329,7 @@ export function ArticleReviewPage({
       </div>
       <ArticleContextRow
         project={project}
-        sourceName={project.source.name}
+        sourceName={project.article.inputMedia.name}
         onSelect={switchArticle}
         onSaveTitle={onSaveTitle}
         disabled={isBusy || switchingArticleId !== null || editingSlideId !== null}
@@ -374,7 +373,9 @@ export function ArticleReviewPage({
                     }
                     void handleRunAll()
                   }}
-                  disabled={!isBatchRunning && (isBusy || project.slides.length === 0)}
+                  disabled={
+                    !isBatchRunning && (isBusy || project.article.visualSegments.length === 0)
+                  }
                   aria-label={isBatchRunning ? '一括実行を停止' : undefined}
                 >
                   {isBatchRunning ? (
@@ -446,7 +447,7 @@ export function ArticleReviewPage({
                 setSaveError(null)
               }}
               onSaveSections={onSaveSections}
-              summary={project.article?.summary}
+              summary={project.article.document?.summary}
               translation={outputTranslation}
               outputLanguage={outputLanguage}
               onSaveOutputLanguage={onSaveOutputLanguage}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { articleExportInputKey } from '../exportInput'
 import { getErrorDetail } from '../../../lib/errors'
-import type { MediaProject } from '../../../types/project'
+import type { ArticleContext } from '../../../types/project'
 import {
   EXPORT_OPTIONS,
   downloadAllExportFiles,
@@ -12,7 +12,7 @@ import {
 } from '../export'
 
 export function useExport(
-  project: MediaProject,
+  project: ArticleContext,
   onGenerated: () => void | Promise<void>,
   enabled: boolean,
 ) {

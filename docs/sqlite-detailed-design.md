@@ -8,7 +8,11 @@
 
 Yomlectaの正本をプロジェクトJSONからSQLiteへ移す。新規ユーザーだけを対象にするため、旧`project.json`や`project.summary.json`は読まない。旧形式を受け付ける互換層も作らない。
 
-画面が保持する`MediaProject`は編集用DTOであり、正本ではない。画面の操作ごとに、対象テーブルだけをTauri command経由で更新する。
+画面は`Project.articles`のmetadata/loaded entryを保持し、詳細記事は一件だけ読み込む。記事フィールドをproject直下へ展開しない。画面の操作ごとに、対象テーブルだけをTauri command経由で更新する。記事タイトルは`articles.title`のみ、発話・本文は`article_blocks.transcript_json`のみを更新する。表示用の結合結果は保存しない。
+
+`db_load_project`は`{ project, loadedArticleId, revisions }`を返す。詳細とrevisionを同じread transactionで取得し、フロントで対象IDと構造を検証してからrevision mapを更新する。画面stateの契約は[記事状態の正本統一設計](./article-state-single-source-design.md)を参照。
+
+migration `0007_remove_document_title.sql`は`documents.article_json`の旧titleだけを除去する。章・要約・翻訳・境界計画は保持し、PROJECT_VERSIONやasset配置は変更しない。
 
 次の状態をSQLiteで独立して管理する。
 

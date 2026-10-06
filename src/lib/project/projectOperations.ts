@@ -1,19 +1,19 @@
 import type { SelectedVideo } from '../../features/import/types'
 import type {
   CropRegion,
-  MediaProject,
+  Project,
   PerspectiveCrop,
   ProjectVideo,
   VideoTrimRange,
 } from '../../types/project'
 import { addProjectVideo, createArticlesFromRanges } from './projectMedia'
-import { projectWithArticle, syncActiveArticle } from './project'
+import { replaceLoadedArticle } from './project'
+import { articleMetadata } from './articleSelectors'
 import {
   checkStorageReference,
   createArticles,
   createProjectBundle,
   createVideoAndUpdateProject,
-  updateArticleWorkflow,
   updateProject,
 } from '../storage/projectStorage'
 import {
@@ -21,17 +21,7 @@ import {
   removeProjectVideoAssetDirectory,
 } from '../storage/projectAssets'
 
-export async function persistProjectWorkflow(project: MediaProject) {
-  const synced = syncActiveArticle(project)
-  const activeArticle = synced.activeArticleId
-    ? synced.articles.find((article) => article.id === synced.activeArticleId)
-    : undefined
-  if (activeArticle) await updateArticleWorkflow(synced, activeArticle)
-  else await updateProject(synced)
-  return synced
-}
-
-export async function renameProject(project: MediaProject, title: string) {
+export async function renameProject(project: Project, title: string) {
   const trimmed = title.trim()
   if (!trimmed) throw new Error('プロジェクト名を入力してください。')
   const next = { ...project, title: trimmed, updatedAt: new Date().toISOString() }
@@ -40,9 +30,9 @@ export async function renameProject(project: MediaProject, title: string) {
 }
 
 export async function createProjectFromVideo(
-  project: MediaProject,
+  project: Project,
   selectedVideo: SelectedVideo,
-): Promise<{ project: MediaProject; video: ProjectVideo }> {
+): Promise<{ project: Project; video: ProjectVideo }> {
   const added = await addProjectVideo(project, selectedVideo)
   try {
     const metadata = added.video.media.metadata
@@ -55,8 +45,12 @@ export async function createProjectFromVideo(
       )
     )[0]
     if (!article) throw new Error('記事作成フローを開始できませんでした。')
-    const nextProject = projectWithArticle(
-      { ...added.project, articles: [...added.project.articles, article] },
+    const nextProject = replaceLoadedArticle(
+      {
+        ...added.project,
+        lastOpenedArticleId: article.id,
+        articles: [...added.project.articles, { kind: 'loaded', article }],
+      },
       article,
     )
     await createProjectBundle(nextProject, added.video, article)
@@ -70,9 +64,9 @@ export async function createProjectFromVideo(
 }
 
 export async function addVideoToProject(
-  project: MediaProject,
+  project: Project,
   selectedVideo: SelectedVideo,
-): Promise<{ project: MediaProject; video: ProjectVideo }> {
+): Promise<{ project: Project; video: ProjectVideo }> {
   const added = await addProjectVideo(project, selectedVideo)
   try {
     await createVideoAndUpdateProject(added.project, added.video)
@@ -88,7 +82,7 @@ export async function addVideoToProject(
 }
 
 export async function addArticlesToProject(
-  project: MediaProject,
+  project: Project,
   videoId: string,
   ranges: Array<{ title: string; range: VideoTrimRange }>,
   crop: CropRegion,
@@ -96,9 +90,15 @@ export async function addArticlesToProject(
 ) {
   const created = await createArticlesFromRanges(project, videoId, ranges, crop, perspectiveCrop)
   if (created.length === 0) throw new Error('記事を作成できませんでした。')
-  const nextProject: MediaProject = {
+  const nextProject: Project = {
     ...project,
-    articles: [...project.articles, ...created],
+    articles: [
+      ...project.articles,
+      ...created.map((article) => ({
+        kind: 'metadata' as const,
+        metadata: articleMetadata({ kind: 'loaded', article }),
+      })),
+    ],
     updatedAt: new Date().toISOString(),
   }
   try {

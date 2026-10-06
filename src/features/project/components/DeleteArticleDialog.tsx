@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import type { Article } from '../../../types/project'
+import type { ArticleMetadata } from '../../../types/project'
 import { ConfirmDialog } from './ConfirmDialog'
 export function DeleteArticleDialog({
   article,
   onClose,
   onConfirm,
 }: {
-  article: Article
+  article: ArticleMetadata
   onClose: () => void
   onConfirm: () => Promise<void>
 }) {

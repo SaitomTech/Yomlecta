@@ -1,9 +1,12 @@
-import { parseMediaProject } from '../../schemas/project'
+import { getLoadedArticle } from '../project/articleSelectors'
+import { parseLoadedProjectPayload } from '../../schemas/project'
 import type {
   Article,
+  ArticleContext,
+  BlockTranscript,
   ArticleBlock,
-  ArticleData,
-  MediaProject,
+  ArticleDocument,
+  Project,
   ProjectVideo,
   SlideData,
   SlideDetectionResult,
@@ -44,15 +47,7 @@ const documentRevisions = new Map<string, number>()
 const slideRevisions = new Map<string, number>()
 const ocrRevisions = new Map<string, number>()
 
-type RevisionMap = Record<string, number>
-type LoadedProjectPayload = {
-  project: unknown
-  revision: number
-  articleRevisions?: RevisionMap
-  documentRevisions?: RevisionMap
-  slideRevisions?: RevisionMap
-  ocrRevisions?: RevisionMap
-}
+type LoadedProjectPayload = ReturnType<typeof parseLoadedProjectPayload>
 
 function applyRevisionSnapshot(projectId: string, loaded: LoadedProjectPayload) {
   projectRevisions.clear()
@@ -60,12 +55,12 @@ function applyRevisionSnapshot(projectId: string, loaded: LoadedProjectPayload) 
   documentRevisions.clear()
   slideRevisions.clear()
   ocrRevisions.clear()
-  projectRevisions.set(projectId, loaded.revision)
+  projectRevisions.set(projectId, loaded.revisions.revision)
   for (const [key, map] of [
-    [articleRevisions, loaded.articleRevisions],
-    [documentRevisions, loaded.documentRevisions],
-    [slideRevisions, loaded.slideRevisions],
-    [ocrRevisions, loaded.ocrRevisions],
+    [articleRevisions, loaded.revisions.articleRevisions],
+    [documentRevisions, loaded.revisions.documentRevisions],
+    [slideRevisions, loaded.revisions.slideRevisions],
+    [ocrRevisions, loaded.revisions.ocrRevisions],
   ] as const) {
     for (const [id, revision] of Object.entries(map ?? {})) key.set(id, revision)
   }
@@ -99,7 +94,7 @@ async function initializeProjectStorage() {
   return storageInitialization
 }
 
-export async function createProject(project: MediaProject) {
+export async function createProject(project: Project) {
   await initializeProjectStorage()
   await invoke('db_create_project', {
     projectId: project.id,
@@ -112,12 +107,12 @@ export async function createProject(project: MediaProject) {
   return project
 }
 
-export async function updateProject(project: MediaProject) {
+export async function updateProject(project: Project) {
   await initializeProjectStorage()
   const result = await invoke<{ revision: number }>('db_update_project', {
     projectId: project.id,
     title: project.title,
-    activeArticleId: project.activeArticleId ?? null,
+    activeArticleId: project.lastOpenedArticleId ?? null,
     updatedAt: project.updatedAt,
     expectedRevision: projectRevisions.get(project.id),
   })
@@ -125,12 +120,11 @@ export async function updateProject(project: MediaProject) {
   return project
 }
 
-export async function updateArticleTitle(project: MediaProject, article: Article) {
+export async function updateArticleTitle(project: Project, article: Article) {
   await initializeProjectStorage()
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
-    documentRevision: number
   }>('db_update_article_title', {
     projectId: project.id,
     articleId: article.id,
@@ -138,15 +132,13 @@ export async function updateArticleTitle(project: MediaProject, article: Article
     updatedAt: article.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(article.id),
-    expectedDocumentRevision: documentRevisions.get(article.id),
   })
   projectRevisions.set(project.id, result.projectRevision)
   articleRevisions.set(article.id, result.articleRevision)
-  documentRevisions.set(article.id, result.documentRevision)
   return result
 }
 
-export async function updateArticleWorkflow(project: MediaProject, article: Article) {
+export async function updateArticleWorkflow(project: Project, article: Article) {
   await initializeProjectStorage()
   const result = await invoke<{
     projectRevision: number
@@ -154,8 +146,9 @@ export async function updateArticleWorkflow(project: MediaProject, article: Arti
   }>('db_update_article_workflow', {
     projectId: project.id,
     articleId: article.id,
-    activeArticleId: project.activeArticleId ?? null,
+    activeArticleId: article.id,
     workflow: article.workflow,
+    projectUpdatedAt: project.updatedAt,
     updatedAt: article.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(article.id),
@@ -166,7 +159,7 @@ export async function updateArticleWorkflow(project: MediaProject, article: Arti
 }
 
 export async function updateArticleContent(
-  project: MediaProject,
+  project: Project,
   article: Article,
   articleBlocks: ArticleBlock[],
 ) {
@@ -196,7 +189,7 @@ export async function updateArticleContent(
   return result
 }
 
-export async function createVideoAndUpdateProject(project: MediaProject, video: ProjectVideo) {
+export async function createVideoAndUpdateProject(project: Project, video: ProjectVideo) {
   await initializeProjectStorage()
   const result = await invoke<{ projectRevision: number }>('db_create_video_and_update_project', {
     projectId: project.id,
@@ -208,11 +201,7 @@ export async function createVideoAndUpdateProject(project: MediaProject, video: 
   return result
 }
 
-export async function createProjectBundle(
-  project: MediaProject,
-  video: ProjectVideo,
-  article: Article,
-) {
+export async function createProjectBundle(project: Project, video: ProjectVideo, article: Article) {
   await initializeProjectStorage()
   await invoke('db_create_project_bundle', { project, video, article })
   projectRevisions.set(project.id, 0)
@@ -220,7 +209,7 @@ export async function createProjectBundle(
   documentRevisions.set(article.id, 0)
 }
 
-export async function createArticles(project: MediaProject, articles: Article[]) {
+export async function createArticles(project: Project, articles: Article[]) {
   await initializeProjectStorage()
   const result = await invoke<{ projectRevision: number }>('db_create_articles', {
     projectId: project.id,
@@ -237,7 +226,7 @@ export async function createArticles(project: MediaProject, articles: Article[])
 }
 
 export async function updateArticleSource(
-  project: MediaProject,
+  project: Project,
   article: Article,
   options: { expectedDocumentRevision?: number } = {},
 ) {
@@ -274,15 +263,14 @@ function runId() {
 }
 
 export async function commitSlideDetection(
-  project: MediaProject,
+  context: ArticleContext,
   detectionResult: SlideDetectionResult,
   slides: SlideData[],
 ) {
   await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
+  const article = context.article
+  const articleId = article.id
+  const project = context.project
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
@@ -292,10 +280,10 @@ export async function commitSlideDetection(
     runId: runId(),
     result: detectionResult,
     slides,
-    articleBlocks: project.articleBlocks,
+    articleBlocks: article.blocks,
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
+    activeArticleId: article.id,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedRevision: articleRevisions.get(articleId),
@@ -308,14 +296,13 @@ export async function commitSlideDetection(
 }
 
 export async function commitTranscription(
-  project: MediaProject,
+  context: ArticleContext,
   transcription: TranscriptionResult,
 ) {
   await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
+  const article = context.article
+  const articleId = article.id
+  const project = context.project
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
@@ -324,10 +311,10 @@ export async function commitTranscription(
     articleId,
     runId: runId(),
     transcription,
-    articleBlocks: project.articleBlocks,
+    articleBlocks: article.blocks,
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
+    activeArticleId: article.id,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedRevision: articleRevisions.get(articleId),
@@ -340,18 +327,17 @@ export async function commitTranscription(
 }
 
 export async function commitOcrBatch(
-  project: MediaProject,
+  context: ArticleContext,
   items: Array<{
     slideId: string
     ocr: SlideOcrResult
-    transcript: NonNullable<SlideData['transcript']> | undefined
+    transcript: NonNullable<BlockTranscript> | undefined
   }>,
 ) {
   await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
+  const article = context.article
+  const articleId = article.id
+  const project = context.project
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
@@ -367,7 +353,7 @@ export async function commitOcrBatch(
     })),
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
+    activeArticleId: article.id,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(articleId),
@@ -382,18 +368,17 @@ export async function commitOcrBatch(
 }
 
 export async function commitSlideContentBatch(
-  project: MediaProject,
+  context: ArticleContext,
   items: Array<{
     slideId: string
     result: unknown
-    transcript: NonNullable<SlideData['transcript']>
+    transcript: NonNullable<BlockTranscript>
   }>,
 ) {
   await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
+  const article = context.article
+  const articleId = article.id
+  const project = context.project
   const response = await invoke<{
     projectRevision: number
     articleRevision: number
@@ -407,7 +392,7 @@ export async function commitSlideContentBatch(
     })),
     article: articlePersistenceMetadata(article),
     projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
+    activeArticleId: article.id,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(articleId),
@@ -419,16 +404,15 @@ export async function commitSlideContentBatch(
 }
 
 export async function updateSlideResults(
-  project: MediaProject,
+  context: ArticleContext,
   slideId: string,
-  transcript: NonNullable<SlideData['transcript']> | undefined,
+  transcript: NonNullable<BlockTranscript> | undefined,
   ocr: SlideOcrResult | undefined,
 ) {
   await initializeProjectStorage()
-  const articleId = project.activeArticleId
-  if (!articleId) throw new Error('記事が選択されていません。')
-  const article = project.articles.find((candidate) => candidate.id === articleId)
-  if (!article) throw new Error('記事が見つかりません。')
+  const article = context.article
+  const articleId = article.id
+  const project = context.project
   const result = await invoke<{
     projectRevision: number
     articleRevision: number
@@ -442,7 +426,7 @@ export async function updateSlideResults(
     ocrText: ocr?.rawText ?? null,
     article,
     projectTitle: project.title,
-    activeArticleId: project.activeArticleId,
+    activeArticleId: article.id,
     projectUpdatedAt: project.updatedAt,
     expectedProjectRevision: projectRevisions.get(project.id),
     expectedArticleRevision: articleRevisions.get(articleId),
@@ -457,9 +441,9 @@ export async function updateSlideResults(
 }
 
 export async function updateDocumentAndArticle(
-  project: MediaProject,
+  project: Project,
   article: Article,
-  articleData: ArticleData | undefined,
+  articleData: ArticleDocument | undefined,
   options: { runKind?: 'summary_generation' | 'chapter_generation' } = {},
 ) {
   await initializeProjectStorage()
@@ -497,15 +481,17 @@ export async function checkStorageReference(
 
 export async function loadProject(projectId: string, articleId?: string) {
   await initializeProjectStorage()
-  const loaded = await invoke<LoadedProjectPayload>('db_load_project', {
+  const payload = await invoke<unknown>('db_load_project', {
     projectId,
     articleId: articleId ?? null,
   })
-  const project = parseMediaProject(loaded.project)
+  const loaded = parseLoadedProjectPayload(payload, projectId, articleId)
+  const project: Project = loaded.project
+  const article = getLoadedArticle(project)
   applyRevisionSnapshot(projectId, loaded)
-  await cleanupProjectDerivedAssets(project, articleId).catch((error) =>
-    console.warn('不要な解析ファイルを整理できませんでした。', error),
-  )
+  await (
+    article ? cleanupProjectDerivedAssets({ project, article }, articleId) : Promise.resolve()
+  ).catch((error) => console.warn('不要な解析ファイルを整理できませんでした。', error))
   return project
 }
 
@@ -548,7 +534,7 @@ export async function listArticles(
   })
 }
 
-export async function deleteProjectArticle(project: MediaProject, articleId: string) {
+export async function deleteProjectArticle(project: Project, articleId: string) {
   await initializeProjectStorage()
   const transaction = await beginAssetTrashTransaction(project.id, 'articles', articleId)
   try {
@@ -571,7 +557,7 @@ export async function deleteProjectArticle(project: MediaProject, articleId: str
   }
 }
 
-export async function deleteProjectVideo(project: MediaProject, videoId: string) {
+export async function deleteProjectVideo(project: Project, videoId: string) {
   await initializeProjectStorage()
   const transaction = await beginAssetTrashTransaction(project.id, 'videos', videoId)
   try {

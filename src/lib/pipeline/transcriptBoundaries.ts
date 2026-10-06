@@ -1,15 +1,15 @@
-import type { MediaProject, SlideData, TranscriptBoundaryPlan } from '../../types/project'
+import type { ArticleContext, ArticleBlockView, TranscriptBoundaryPlan } from '../../types/project'
 import { articleBlockViews } from './articleBlocks'
 
 export const BOUNDARY_VERSION = 'transcript-boundaries-v7-fragment-transfer-guidance'
 const WINDOW = 600
 const SOURCE_SEPARATOR = '\n\n'
 
-export function boundarySourceSlides(project: Pick<MediaProject, 'slides' | 'articleBlocks'>) {
-  return articleBlockViews(project.slides, project.articleBlocks)
+export function boundarySourceSlides(project: ArticleContext) {
+  return articleBlockViews(project.article.visualSegments, project.article.blocks)
 }
 
-export function boundarySource(slides: SlideData[]) {
+export function boundarySource(slides: ArticleBlockView[]) {
   let sourceText = ''
   const originalRanges = slides.map((slide, index) => {
     const start = sourceText.length
@@ -20,14 +20,14 @@ export function boundarySource(slides: SlideData[]) {
   return { sourceText, originalRanges }
 }
 
-export function boundarySourceFingerprint(slides: SlideData[]) {
+export function boundarySourceFingerprint(slides: ArticleBlockView[]) {
   return JSON.stringify([
     BOUNDARY_VERSION,
     slides.map((slide) => [slide.id, slide.transcript?.raw ?? '']),
   ])
 }
 
-export function boundaryInputFingerprint(slides: SlideData[], index: number, model: string) {
+export function boundaryInputFingerprint(slides: ArticleBlockView[], index: number, model: string) {
   return JSON.stringify([
     BOUNDARY_VERSION,
     model,
@@ -37,7 +37,7 @@ export function boundaryInputFingerprint(slides: SlideData[], index: number, mod
   ])
 }
 
-export function createBoundaryPlan(slides: SlideData[]): TranscriptBoundaryPlan {
+export function createBoundaryPlan(slides: ArticleBlockView[]): TranscriptBoundaryPlan {
   const source = boundarySource(slides)
   return {
     version: BOUNDARY_VERSION,
@@ -56,7 +56,7 @@ export function createBoundaryPlan(slides: SlideData[]): TranscriptBoundaryPlan 
 
 export function boundaryTransferOffset(
   plan: TranscriptBoundaryPlan,
-  slides: SlideData[],
+  slides: ArticleBlockView[],
   index: number,
   decision: { move: 'keep' | 'left_to_right' | 'right_to_left'; text: string },
 ) {
@@ -78,7 +78,7 @@ export function boundaryTransferOffset(
   return original + decision.text.length
 }
 
-export function validateBoundaryPlan(plan: TranscriptBoundaryPlan, slides: SlideData[]) {
+export function validateBoundaryPlan(plan: TranscriptBoundaryPlan, slides: ArticleBlockView[]) {
   const expected = boundarySource(slides)
   if (
     plan.version !== BOUNDARY_VERSION ||
@@ -137,7 +137,10 @@ export function resolveBoundaryConflicts(plan: TranscriptBoundaryPlan) {
   return next
 }
 
-export function boundaryPlanInputsCurrent(plan: TranscriptBoundaryPlan, slides: SlideData[]) {
+export function boundaryPlanInputsCurrent(
+  plan: TranscriptBoundaryPlan,
+  slides: ArticleBlockView[],
+) {
   return (
     validateBoundaryPlan(plan, slides) &&
     plan.boundaries.every(
@@ -148,9 +151,9 @@ export function boundaryPlanInputsCurrent(plan: TranscriptBoundaryPlan, slides: 
   )
 }
 
-export function currentBoundaryPlan(project: MediaProject) {
+export function currentBoundaryPlan(project: ArticleContext) {
   const slides = boundarySourceSlides(project)
-  const plan = project.article?.boundaryPlan
+  const plan = project.article.document?.boundaryPlan
   return plan && validateBoundaryPlan(plan, slides) ? plan : undefined
 }
 
@@ -163,7 +166,10 @@ export function assignedTranscript(plan: TranscriptBoundaryPlan, index: number) 
   return { start, end, text: plan.sourceText.slice(start, end) }
 }
 
-export function assignedArticleSlides(project: MediaProject, plan = currentBoundaryPlan(project)) {
+export function assignedArticleSlides(
+  project: ArticleContext,
+  plan = currentBoundaryPlan(project),
+) {
   const slides = boundarySourceSlides(project)
   if (!plan) return slides
   return slides.map((slide, index) => ({
@@ -171,12 +177,13 @@ export function assignedArticleSlides(project: MediaProject, plan = currentBound
     transcript: {
       ...slide.transcript,
       raw: assignedTranscript(plan, index).text.trim(),
-      model: slide.transcript?.model ?? project.transcription?.model ?? 'boundary-assignment',
+      model:
+        slide.transcript?.model ?? project.article.transcription?.model ?? 'boundary-assignment',
     },
   }))
 }
 
-function boundaryContext(slides: SlideData[], index: number) {
+function boundaryContext(slides: ArticleBlockView[], index: number) {
   return {
     leftOcr: slides[index]?.ocr?.rawText.slice(0, 800) ?? '',
     rightOcr: slides[index + 1]?.ocr?.rawText.slice(0, 800) ?? '',
@@ -185,13 +192,13 @@ function boundaryContext(slides: SlideData[], index: number) {
   }
 }
 
-export function boundaryPrompt(slides: SlideData[], index: number) {
+export function boundaryPrompt(slides: ArticleBlockView[], index: number) {
   return JSON.stringify(boundaryContext(slides, index))
 }
 
 export function hasCurrentBoundaryDecisions(
   plan: TranscriptBoundaryPlan | undefined,
-  slides: SlideData[],
+  slides: ArticleBlockView[],
   model: string,
 ) {
   return Boolean(

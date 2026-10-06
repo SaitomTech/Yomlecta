@@ -13,10 +13,10 @@ import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { SegmentVideoPlayer } from '../../../components/SegmentVideoPlayer'
 import { formatTimestamp } from '../../../lib/time'
 import { useVideoSourceUrl } from '../../../lib/media/useVideoSourceUrl'
-import type { SlideData, SlideResultEdits } from '../../../types/project'
+import type { ArticleBlockView, SlideResultEdits } from '../../../types/project'
 
 type AnalysisResultPreviewProps = {
-  slides: SlideData[]
+  slides: ArticleBlockView[]
   onEdit: () => void
   onSaveSlideResultEdits: (slideId: string, edits: SlideResultEdits) => void | Promise<void>
   videoPath: string
@@ -117,7 +117,7 @@ function SegmentVideoPreview({
   videoSrc,
   sourceOffsetMs,
 }: {
-  slide: SlideData
+  slide: ArticleBlockView
   videoSrc: string | null
   sourceOffsetMs: number
 }) {
@@ -128,7 +128,7 @@ function SegmentVideoPreview({
   )
 }
 
-function SlidePane({ slide }: { slide: SlideData }) {
+function SlidePane({ slide }: { slide: ArticleBlockView }) {
   return (
     <section
       className="flex min-h-0 flex-col bg-[#fbfcfa]"
@@ -154,7 +154,7 @@ function VideoPane({
   videoSrc,
   sourceOffsetMs,
 }: {
-  slide: SlideData
+  slide: ArticleBlockView
   videoSrc: string | null
   sourceOffsetMs: number
 }) {
@@ -178,7 +178,7 @@ function VideoPane({
   )
 }
 
-function initialEdits(slide: SlideData): SlideResultEdits {
+function initialEdits(slide: ArticleBlockView): SlideResultEdits {
   return {
     ocrText: slide.ocr?.rawText ?? '',
     transcriptRaw: slide.transcript?.raw ?? '',
@@ -201,7 +201,7 @@ export function AnalysisResultPreview({
   const [savingSlideId, setSavingSlideId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const startEditing = (slide: SlideData) => {
+  const startEditing = (slide: ArticleBlockView) => {
     setEditingSlideId(slide.id)
     setDraft(initialEdits(slide))
     setSaveError(null)

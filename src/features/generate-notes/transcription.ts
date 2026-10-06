@@ -1,3 +1,4 @@
+import { requireActiveArticleId } from '../../lib/project/articleSelectors'
 import { UserFacingError, withUserFacingError } from '../../lib/errors'
 import { mapWithConcurrency } from '../../lib/async/mapWithConcurrency'
 import { extractAudio, extractAudioChunkForOpenAi } from '../../lib/media/ffmpeg'
@@ -22,8 +23,7 @@ import { transcriptionRangesForArticleBlocks } from '../../lib/pipeline/articleB
 import { buildOpenAiTranscriptionContext } from '../../lib/pipeline/transcriptionContext'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import {
-  requireActiveArticleId,
-  type MediaProject,
+  type ArticleContext,
   type TranscriptionKeywordChunk,
   type TranscriptSegment,
   type TranscriptionResult,
@@ -43,7 +43,7 @@ export type TranscriptionChunkProgress = {
 }
 
 type RunTranscriptionInput = {
-  project: MediaProject
+  project: ArticleContext
   language: TranscriptionLanguage
   modelId: TranscriptionModelId
   onStage?: (stage: TranscriptionStage) => void
@@ -83,14 +83,18 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('処理を中止しました。', 'AbortError')
 }
 
-function inputFingerprint(project: MediaProject, modelId: TranscriptionModelId, language: string) {
+function inputFingerprint(
+  project: ArticleContext,
+  modelId: TranscriptionModelId,
+  language: string,
+) {
   const context = getActiveArticleSourceContext(project)
   const source = context.source
   const metadata = source.metadata
   const ocrContextFingerprint =
     modelId === OPENAI_TRANSCRIBE_MODEL.id
       ? JSON.stringify(
-          project.slides.map((slide) => [
+          project.article.visualSegments.map((slide) => [
             slide.id,
             slide.startMs,
             slide.endMs,
@@ -118,7 +122,7 @@ function inputFingerprint(project: MediaProject, modelId: TranscriptionModelId, 
 }
 
 async function prepareAudio(
-  project: MediaProject,
+  project: ArticleContext,
   signal: AbortSignal | undefined,
   onStage?: (stage: TranscriptionStage) => void,
 ) {
@@ -128,7 +132,7 @@ async function prepareAudio(
   const audioError =
     '動画から音声を準備できませんでした。音声トラックを確認して、再試行してください。'
   return withUserFacingError(audioError, async () => {
-    const path = await getAudioAssetPath(project.id, requireActiveArticleId(project))
+    const path = await getAudioAssetPath(project.project.id, requireActiveArticleId(project))
     await extractAudio({
       path: context.source.path,
       outputPath: path,
@@ -190,12 +194,12 @@ async function runAppleTranscription({
   }
 }
 
-function createOpenAiAudioRanges(project: MediaProject) {
+function createOpenAiAudioRanges(project: ArticleContext) {
   const context = getActiveArticleSourceContext(project)
   const durationMs = Math.max(1, context.range.endMs - context.range.startMs)
   return transcriptionRangesForArticleBlocks(
     durationMs,
-    project.articleBlocks,
+    project.article.blocks,
     MAX_OPENAI_CHUNK_DURATION_MS,
     TARGET_OPENAI_CHUNK_DURATION_MS,
   )
@@ -235,7 +239,7 @@ async function runLocalTranscription({
   const audioError =
     '動画から音声を準備できませんでした。音声トラックを確認して、再試行してください。'
   const audioPath = await withUserFacingError(audioError, async () => {
-    const path = await getAudioAssetPath(project.id, requireActiveArticleId(project))
+    const path = await getAudioAssetPath(project.project.id, requireActiveArticleId(project))
     await extractAudio({
       path: context.source.path,
       outputPath: path,
@@ -250,12 +254,12 @@ async function runLocalTranscription({
   throwIfAborted(signal)
   onStage?.('transcribing')
   onProgress?.(null)
-  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'local')
+  await resetTranscriptionAudioChunks(project.project.id, requireActiveArticleId(project), 'local')
   const rawTranscript = await withUserFacingError(
     '音声を文字起こしできませんでした。アプリを再起動して、再試行してください。',
     () =>
       runWhisper({
-        projectId: project.id,
+        projectId: project.project.id,
         articleId: requireActiveArticleId(project),
         audioPath,
         modelPath,
@@ -300,7 +304,7 @@ function createOpenAiProvider({
     },
     transcribeChunk: async (chunk) => {
       const context = buildOpenAiTranscriptionContext(
-        project.slides,
+        project.article.visualSegments,
         { startMs: chunk.startMs, endMs: chunk.endMs },
         effectiveLanguage,
       )
@@ -349,7 +353,7 @@ async function prepareOpenAiRange({
   chunkIndex,
   signal,
 }: {
-  project: MediaProject
+  project: ArticleContext
   provider: OpenAiTranscriptionProvider
   audioPath: string
   range: ChunkRange
@@ -358,7 +362,7 @@ async function prepareOpenAiRange({
 }): Promise<PreparedChunk[]> {
   throwIfAborted(signal)
   const path = await getTranscriptionAudioChunkPath(
-    project.id,
+    project.project.id,
     requireActiveArticleId(project),
     provider.provider,
     chunkIndex,
@@ -436,7 +440,7 @@ export async function runTranscription(input: RunTranscriptionInput): Promise<Tr
   const audioError =
     '動画から音声を準備できませんでした。音声トラックを確認して、再試行してください。'
   const audioPath = await withUserFacingError(audioError, async () => {
-    const path = await getAudioAssetPath(project.id, requireActiveArticleId(project))
+    const path = await getAudioAssetPath(project.project.id, requireActiveArticleId(project))
     await extractAudio({
       path: context.source.path,
       outputPath: path,
@@ -448,7 +452,7 @@ export async function runTranscription(input: RunTranscriptionInput): Promise<Tr
     return path
   })
 
-  await resetTranscriptionAudioChunks(project.id, requireActiveArticleId(project), 'openai')
+  await resetTranscriptionAudioChunks(project.project.id, requireActiveArticleId(project), 'openai')
   const ranges = createOpenAiAudioRanges(project)
   const chunks: PreparedChunk[] = []
   onStage?.('preparing-chunks')

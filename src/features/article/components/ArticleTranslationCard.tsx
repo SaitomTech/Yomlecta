@@ -6,7 +6,7 @@ import { OpenAiApiKeySettings } from '../../../components/OpenAiApiKeySettings'
 import { ProcessingStatusRow } from '../../../components/ProcessingStatusRow'
 import { OPENAI_LUNA_MODEL } from '../../../lib/article/articleModel'
 import { estimateOpenAiTranslationCost } from '../../../lib/openai/cost'
-import type { ArticleTranslationLanguage, MediaProject } from '../../../types/project'
+import type { ArticleTranslationLanguage, ArticleContext } from '../../../types/project'
 import type { ArticleTranslationController } from '../hooks/useArticleTranslation'
 import { articleLanguageLabel } from '../articleLanguage'
 import {
@@ -31,7 +31,7 @@ export function ArticleTranslationCard({
   onCancel,
   disabled = false,
 }: {
-  project: MediaProject
+  project: ArticleContext
   sourceLanguage: ArticleTranslationLanguage
   targetLanguage: ArticleTranslationLanguage
   engineId: TranslationEngineId
@@ -45,11 +45,13 @@ export function ArticleTranslationCard({
   onCancel: () => void
   disabled?: boolean
 }) {
-  const saved = project.article?.translations?.[targetLanguage]
+  const saved = project.article.document?.translations?.[targetLanguage]
   const translation = generation.currentTranslation ?? saved
   const isStale = Boolean(saved && !generation.currentTranslation)
   const isRunning = generation.status === 'running'
-  const hasArticleBody = project.slides.some((slide) => slide.transcript?.articleBody?.trim())
+  const hasArticleBody = project.article.blocks.some((slide) =>
+    slide.transcript?.articleBody?.trim(),
+  )
   const localPairSupported =
     ['ja', 'en'].includes(sourceLanguage) &&
     ['ja', 'en'].includes(targetLanguage) &&

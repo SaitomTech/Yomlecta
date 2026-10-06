@@ -17,7 +17,7 @@ import {
   estimateOpenAiSectionsCost,
   estimateOpenAiSummaryCost,
 } from '../../../lib/openai/cost'
-import type { MediaProject } from '../../../types/project'
+import type { ArticleContext } from '../../../types/project'
 import {
   APPLE_FOUNDATION_MODELS,
   OPENAI_LUNA_MODEL,
@@ -30,7 +30,7 @@ import { hasCurrentContent } from '../contentProcessing'
 import { articleSectionsInput, hasCurrentArticleSections } from '../../article/article'
 
 type ContentProcessingPanelProps = {
-  project: MediaProject
+  project: ArticleContext
   processing: ContentProcessingController
   model: ArticleModel
   modelId: ArticleModelId
@@ -68,7 +68,7 @@ function progressRatio(processing: ContentProcessingController) {
 }
 
 function estimateArticleGenerationCost(
-  project: MediaProject,
+  project: ArticleContext,
   modelId: ArticleModelId,
   isCompleted: boolean,
   includeSummary: boolean,

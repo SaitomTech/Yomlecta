@@ -1,3 +1,4 @@
+import { requireActiveArticleId } from '../../lib/project/articleSelectors'
 import {
   extractFullFrame,
   extractRepresentativeFrame,
@@ -17,8 +18,7 @@ import { detectPeopleInImages, type PeopleDetection } from '../../lib/vision/per
 import { detectTextInImages, type TextDetection } from '../../lib/vision/textDetection'
 import {
   effectiveVisualKind,
-  requireActiveArticleId,
-  type MediaProject,
+  type ArticleContext,
   type SlideBoundary,
   type SlideData,
   type VisualClassificationMetadata,
@@ -398,7 +398,7 @@ function representativeTimestamp(startMs: number, endMs: number) {
 }
 
 export async function extractRepresentativeFrameForSlide(
-  project: MediaProject,
+  project: ArticleContext,
   slide: SlideData,
   outputPath: string,
   signal?: AbortSignal,
@@ -424,7 +424,7 @@ export async function extractRepresentativeFrameForSlide(
 }
 
 async function classifySegments(
-  project: MediaProject,
+  project: ArticleContext,
   segments: SlideData[],
   sampledFrames: FrameHash[],
   threshold: number,
@@ -433,7 +433,7 @@ async function classifySegments(
   const articleId = requireActiveArticleId(project)
   const context = getActiveArticleSourceContext(project)
   const runId = crypto.randomUUID()
-  const directory = await prepareVisualClassificationDirectory(project.id, articleId, runId)
+  const directory = await prepareVisualClassificationDirectory(project.project.id, articleId, runId)
   const pathsBySegment = new Map<string, string[]>()
   const cropPathBySegment = new Map<string, string>()
   const timestampByPath = new Map<string, number>()
@@ -644,12 +644,12 @@ async function classifySegments(
       mergeAdjacentNonSlideSegments(continuityClassifiedSegments),
     )
   } finally {
-    await removeVisualClassificationDirectory(project.id, articleId, runId)
+    await removeVisualClassificationDirectory(project.project.id, articleId, runId)
   }
 }
 
 async function addRepresentativeFrames(
-  project: MediaProject,
+  project: ArticleContext,
   slides: SlideData[],
   onProgress?: (progress: number) => void,
   failOnError = false,
@@ -662,7 +662,12 @@ async function addRepresentativeFrames(
     for (let index = 0; index < slides.length; index += 1) {
       const slide = slides[index]
       try {
-        const outputPath = await getSlideRunAssetPath(project.id, articleId, assetRunId, index)
+        const outputPath = await getSlideRunAssetPath(
+          project.project.id,
+          articleId,
+          assetRunId,
+          index,
+        )
         await extractRepresentativeFrameForSlide(project, slide, outputPath)
         completed.push({ ...slide, image: { representativeFramePath: outputPath } })
       } catch (error) {
@@ -677,7 +682,7 @@ async function addRepresentativeFrames(
       }
     }
   } catch (error) {
-    await removeSlideRunAssets(project.id, articleId, assetRunId).catch((cleanupError) => {
+    await removeSlideRunAssets(project.project.id, articleId, assetRunId).catch((cleanupError) => {
       console.warn('失敗した代表画像候補を削除できませんでした。', cleanupError)
     })
     throw error
@@ -687,7 +692,7 @@ async function addRepresentativeFrames(
 }
 
 export async function commitSlideDetectionOutput(
-  project: MediaProject,
+  project: ArticleContext,
   pending: PendingSlideDetectionOutput,
   persist: (output: SlideDetectionOutput) => void | Promise<void>,
 ) {
@@ -695,13 +700,15 @@ export async function commitSlideDetectionOutput(
   try {
     const output = { result: pending.result, slides: pending.slides }
     await persist(output)
-    await pruneSlideAssetRuns(project.id, articleId, pending.assetRunId).catch((cleanupError) => {
-      console.warn('以前の代表画像を削除できませんでした。', cleanupError)
-    })
+    await pruneSlideAssetRuns(project.project.id, articleId, pending.assetRunId).catch(
+      (cleanupError) => {
+        console.warn('以前の代表画像を削除できませんでした。', cleanupError)
+      },
+    )
     return output
   } catch (error) {
     try {
-      await removeSlideRunAssets(project.id, articleId, pending.assetRunId)
+      await removeSlideRunAssets(project.project.id, articleId, pending.assetRunId)
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],
@@ -713,7 +720,7 @@ export async function commitSlideDetectionOutput(
 }
 
 type CreateManualSlideDetectionOutputInput = {
-  project: MediaProject
+  project: ArticleContext
   boundaries: SlideBoundary[]
   threshold: number
   sampleIntervalMs: number
@@ -746,10 +753,10 @@ export async function createManualSlideDetectionOutput({
     result: {
       sampleIntervalMs,
       threshold,
-      framesAnalyzed: project.slideDetection?.framesAnalyzed ?? 0,
+      framesAnalyzed: project.article.slideDetection?.framesAnalyzed ?? 0,
       boundaries: sortedBoundaries,
-      detectedAt: project.slideDetection?.detectedAt ?? new Date().toISOString(),
-      visualClassifier: project.slideDetection?.visualClassifier,
+      detectedAt: project.article.slideDetection?.detectedAt ?? new Date().toISOString(),
+      visualClassifier: project.article.slideDetection?.visualClassifier,
     },
     slides: pending.slides,
     assetRunId: pending.assetRunId,
@@ -757,7 +764,7 @@ export async function createManualSlideDetectionOutput({
 }
 
 type RunSlideDetectionInput = {
-  project: MediaProject
+  project: ArticleContext
   onProgress?: (progress: number) => void
   onStage?: (stage: SlideDetectionStage) => void
 }
@@ -769,7 +776,7 @@ export async function runSlideDetection({
 }: RunSlideDetectionInput): Promise<PendingSlideDetectionOutput> {
   const context = getActiveArticleSourceContext(project)
   const durationMs = context.range.endMs - context.range.startMs
-  const { sampleIntervalMs, threshold } = project.settings.slideDetection
+  const { sampleIntervalMs, threshold } = project.article.settings.slideDetection
   onStage?.('sampling')
   const frames = await sampleCropFrames({
     path: context.source.path,

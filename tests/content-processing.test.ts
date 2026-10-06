@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
-import {
-  createEmptyProject,
-  updateProjectSlideContent,
-  syncActiveArticle,
-} from '../src/lib/project/project'
+import { createArticleFixture, editArticle, withArticle, blockViews } from './fixtures/article'
+import { updateArticleSlideContent } from '../src/lib/project/article'
+import { articleContext } from '../src/lib/project/articleSelectors'
+const editContent = editArticle(updateArticleSlideContent)
+
 import {
   articleInputFingerprint,
   articleSectionsInputFingerprint,
@@ -19,8 +19,8 @@ import {
   userPromptFor,
 } from '../src/features/content-processing/articleGenerator'
 import { assignedArticleSlides, createBoundaryPlan } from '../src/lib/pipeline/transcriptBoundaries'
-import { parseMediaProject } from '../src/schemas/project'
-import type { Article, MediaProject } from '../src/types/project'
+import { parseProject } from '../src/schemas/project'
+import type { ArticleContext } from '../src/types/project'
 
 function decision(text = '') {
   return {
@@ -31,31 +31,32 @@ function decision(text = '') {
 }
 
 function workspace() {
-  const project = createEmptyProject('test')
-  project.slides = ['Overview. Next, the method is', 'recording temperature.'].map(
-    (raw, index) => ({
+  const context = createArticleFixture()
+  const visualSegments = ['Overview. Next, the method is', 'recording temperature.'].map(
+    (_raw, index) => ({
       id: `s-${index}`,
       index,
       startMs: index * 1000,
       endMs: (index + 1) * 1000,
-      autoKind: 'slide',
-      personLayout: 'none',
-      detection: { source: 'auto' },
+      autoKind: 'slide' as const,
+      personLayout: 'none' as const,
+      detection: { source: 'auto' as const },
       image: {},
-      transcript: { raw, model: 'transcriber' },
     }),
   )
-  project.articleBlocks = project.slides.map((slide) => ({
-    id: slide.id,
-    index: slide.index,
-    visualSegmentIds: [slide.id],
-    imageSegmentId: slide.id,
-    startMs: slide.startMs,
-    endMs: slide.endMs,
-    transcript: slide.transcript,
+  const blocks = visualSegments.map((segment, index) => ({
+    id: segment.id,
+    index,
+    visualSegmentIds: [segment.id],
+    imageSegmentId: segment.id,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    transcript: {
+      raw: ['Overview. Next, the method is', 'recording temperature.'][index],
+      model: 'transcriber',
+    },
   }))
-  project.article = { title: 'test' }
-  return project
+  return withArticle(context, { ...context.article, visualSegments, blocks })
 }
 function fakeGenerator(events: string[], cut?: number): ArticleGenerator {
   return {
@@ -85,21 +86,20 @@ function fakeGenerator(events: string[], cut?: number): ArticleGenerator {
 
 test('境界計画の保存が完了した後に担当発話だけを生成し、元の発話を保持する', async () => {
   let project = workspace()
-  const originals = project.slides.map((slide) => slide.transcript!.raw)
+  const originals = project.article.blocks.map((slide) => slide.transcript!.raw)
   const events: string[] = []
-  const cut = createBoundaryPlan(project.slides).sourceText.indexOf('Next,')
+  const cut = createBoundaryPlan(blockViews(project)).sourceText.indexOf('Next,')
   await runContentProcessing(
     {
       project,
       modelId: 'openai:gpt-6-luna',
       onBoundaryPlanCompleted: async (plan) => {
         await Promise.resolve()
-        project.article!.boundaryPlan = plan
+        project.article.document!.boundaryPlan = plan
         events.push('saved-plan')
       },
       onSlideCompleted: async (results) => {
-        for (const { slideId, result } of results)
-          project = updateProjectSlideContent(project, slideId, result)
+        for (const { slideId, result } of results) project = editContent(project, slideId, result)
       },
     },
     fakeGenerator(events, cut),
@@ -108,7 +108,7 @@ test('境界計画の保存が完了した後に担当発話だけを生成し�
   expect(events[1]).toBe('saved-plan')
   expect(events[2]).toBe('generate:s-0:Overview.')
   expect(events[3]).toBe('generate:s-1:Next, the method is\n\nrecording temperature.')
-  expect(project.slides.map((slide) => slide.transcript!.raw)).toEqual(originals)
+  expect(project.article.blocks.map((slide) => slide.transcript!.raw)).toEqual(originals)
   expect(assignedArticleSlides(project)[1]!.transcript!.articleBody).toContain('Next,')
   const rerun: string[] = []
   await runContentProcessing(
@@ -160,60 +160,28 @@ test('担当発話が空になったブロックはモデルを呼ばずに空�
       project,
       modelId: 'openai:gpt-6-luna',
       onBoundaryPlanCompleted: async (plan) => {
-        project.article!.boundaryPlan = plan
+        project.article.document!.boundaryPlan = plan
       },
       onSlideCompleted: async (results) => {
-        for (const { slideId, result } of results)
-          project = updateProjectSlideContent(project, slideId, result)
+        for (const { slideId, result } of results) project = editContent(project, slideId, result)
       },
     },
     fakeGenerator(events, 0),
   )
   expect(events.filter((event) => event.startsWith('generate:'))).toHaveLength(1)
-  expect(project.slides[0]!.transcript!.articleBody).toBe('')
+  expect(project.article.blocks[0]!.transcript!.articleBody).toBe('')
 })
 
-test('保存スキーマで境界計画が往復し、旧記事では計画が不要', () => {
-  const project = workspace()
-  project.article!.boundaryPlan = createBoundaryPlan(project.slides)
-  const article: Article = {
-    id: 'article-test',
-    title: 'test',
-    inputMedia: {
-      path: '/tmp/lecture.mp4',
-      name: 'lecture.mp4',
-      extension: 'mp4',
-      metadata: { path: '/tmp/lecture.mp4', durationMs: 2000, width: 1920, height: 1080 },
-      origin: { kind: 'local-file' },
-      ownership: 'managed',
-      managedRelativePath: 'articles/article-test/input/original.mp4',
-    },
-    sourceRange: { startMs: 0, endMs: 2000 },
-    settings: project.settings,
-    slides: project.slides,
-    articleBlocks: project.articleBlocks,
-    article: project.article,
-    workflow: project.workflow,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-  }
-  project.articles = [article]
-  project.activeArticleId = article.id
-  const snapshot = (value: MediaProject) => ({
-    version: value.version,
-    id: value.id,
-    title: value.title,
-    videos: value.videos,
-    articles: syncActiveArticle(value).articles,
-    activeArticleId: value.activeArticleId,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
-  })
-  expect(parseMediaProject(snapshot(project)).article?.boundaryPlan).toEqual(
-    project.article!.boundaryPlan,
+test('保存スキーマで境界計画が往復し、計画がない原稿も読める', () => {
+  const context = workspace()
+  context.article.document!.boundaryPlan = createBoundaryPlan(blockViews(context))
+  expect(articleContext(parseProject(context.project)).article.document?.boundaryPlan).toEqual(
+    context.article.document!.boundaryPlan,
   )
-  delete project.article!.boundaryPlan
-  expect(parseMediaProject(snapshot(project)).article?.boundaryPlan).toBeUndefined()
+  delete context.article.document!.boundaryPlan
+  expect(
+    articleContext(parseProject(context.project)).article.document?.boundaryPlan,
+  ).toBeUndefined()
 })
 
 test('境界応答は移動方向と原文を必須にし、本文入力には前後資料を含めない', () => {
@@ -222,7 +190,7 @@ test('境界応答は移動方向と原文を必須にし、本文入力には�
   )
   expect(() => parseBoundaryResponse('{"body":"rewritten"}')).toThrow()
   expect(() => parseBoundaryResponse('{"candidateId":"C10"}')).toThrow()
-  const prompt = userPromptFor(workspace().slides[0]!, 'en')
+  const prompt = userPromptFor(blockViews(workspace())[0]!, 'en')
   expect(prompt).toContain('<RAW TRANSCRIPT>')
   expect(prompt).not.toContain('PREVIOUS')
   expect(prompt).not.toContain('NEXT')
@@ -236,8 +204,10 @@ function combinedProcessing() {
   const input = {
     project,
     includeSummary: false,
-    onSummaryCompleted: async (summary: NonNullable<MediaProject['article']>['summary']) => {
-      project.article!.summary = summary
+    onSummaryCompleted: async (
+      summary: NonNullable<ArticleContext['article']['document']>['summary'],
+    ) => {
+      project.article.document!.summary = summary
       events.push('saved-summary')
     },
     modelId: 'openai:gpt-6-luna' as const,
@@ -245,19 +215,20 @@ function combinedProcessing() {
     getCurrentProject: () => project,
     onStage: (stage: ArticleContentProcessingStage) => stages.push(stage),
     onBoundaryPlanCompleted: async (plan: ReturnType<typeof createBoundaryPlan>) => {
-      project.article!.boundaryPlan = plan
+      project.article.document!.boundaryPlan = plan
     },
     onSlideCompleted: async (
       results: Parameters<
         import('../src/features/content-processing/contentProcessing').ContentProcessingSlideCompleted
       >[0],
     ) => {
-      for (const { slideId, result } of results)
-        project = updateProjectSlideContent(project, slideId, result)
+      for (const { slideId, result } of results) project = editContent(project, slideId, result)
       events.push('saved-bodies')
     },
-    onSectionsCompleted: async (sections: NonNullable<MediaProject['article']>['sections']) => {
-      project.article!.sections = sections
+    onSectionsCompleted: async (
+      sections: NonNullable<ArticleContext['article']['document']>['sections'],
+    ) => {
+      project.article.document!.sections = sections
       events.push('saved-sections')
     },
   }
@@ -293,7 +264,7 @@ function combinedProcessing() {
       events.push('sections')
       expect(events).toContain('saved-bodies')
       expect(args.project).toBe(project)
-      expect(args.project.slides.every((slide) => slide.transcript?.articleBody)).toBe(true)
+      expect(args.project.article.blocks.every((slide) => slide.transcript?.articleBody)).toBe(true)
       expect(args.signal).toBe(controller.signal)
       args.onPreparationProgress(0.5)
       args.onReady()
@@ -312,7 +283,7 @@ test('本文の保存後に最新の本文でセクションを生成し、同�
   await runArticleContentProcessing(run.input, run.runners)
   expect(run.events.slice(-3)).toEqual(['saved-bodies', 'sections', 'saved-sections'])
   expect(run.stages.slice(-2)).toEqual(['preparing-sections', 'generating-sections'])
-  expect(run.currentProject().article?.sections?.sections).toHaveLength(1)
+  expect(run.currentProject().article.document?.sections?.sections).toHaveLength(1)
   const before = [...run.events]
   await runArticleContentProcessing({ ...run.input, project: run.currentProject() }, run.runners)
   expect(run.events).toEqual(before)
@@ -328,7 +299,9 @@ test('セクション生成の失敗後は保存済み本文を再利用して�
       },
     }),
   ).rejects.toThrow('sections failed')
-  expect(run.currentProject().slides.every((slide) => slide.transcript?.articleBody)).toBe(true)
+  expect(run.currentProject().article.blocks.every((slide) => slide.transcript?.articleBody)).toBe(
+    true,
+  )
   const generatedBodies = run.events.filter((event) => event.startsWith('generate:')).length
   await runArticleContentProcessing({ ...run.input, project: run.currentProject() }, run.runners)
   expect(run.events.filter((event) => event.startsWith('generate:'))).toHaveLength(generatedBodies)
@@ -375,7 +348,7 @@ test('要約が有効なら本文・セクション構成の保存後に同じ�
     'saved-summary',
   ])
   expect(run.stages.slice(-2)).toEqual(['preparing-summary', 'generating-summary'])
-  expect(run.currentProject().article?.summary?.overview).toBe('Overview')
+  expect(run.currentProject().article.document?.summary?.overview).toBe('Overview')
 })
 
 test('要約が無効なら既存の要約を保持し、要約モデルを呼ばない', async () => {
@@ -388,10 +361,10 @@ test('要約が無効なら既存の要約を保持し、要約モデルを呼�
     keyPoints: ['Point'],
     keywords: ['Keyword'],
   }
-  run.currentProject().article!.summary = summary
+  run.currentProject().article.document!.summary = summary
   await runArticleContentProcessing(run.input, run.runners)
   expect(run.events).not.toContain('summary')
-  expect(run.currentProject().article?.summary).toEqual(summary)
+  expect(run.currentProject().article.document?.summary).toEqual(summary)
 })
 
 test('要約に失敗しても保存済み本文・構成を再利用して再試行できる', async () => {
@@ -434,6 +407,8 @@ test('要約生成中の停止では要約を保存せず、保存済み本文�
     ),
   ).rejects.toThrow('処理を中止しました。')
   expect(run.events).not.toContain('saved-summary')
-  expect(run.currentProject().article?.sections?.sections).toHaveLength(1)
-  expect(run.currentProject().slides.every((slide) => slide.transcript?.articleBody)).toBe(true)
+  expect(run.currentProject().article.document?.sections?.sections).toHaveLength(1)
+  expect(run.currentProject().article.blocks.every((slide) => slide.transcript?.articleBody)).toBe(
+    true,
+  )
 })

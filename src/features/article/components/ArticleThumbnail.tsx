@@ -1,20 +1,10 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { FileText } from 'lucide-react'
 import { useState } from 'react'
-import type { Article } from '../../../types/project'
+import type { ArticleMetadata } from '../../../types/project'
 
-export function getArticleThumbnail(article: Article) {
-  return {
-    thumbnailPath:
-      [...article.slides]
-        .sort((a, b) => a.index - b.index)
-        .find((slide) => slide.image.representativeFramePath)?.image.representativeFramePath ??
-      article.inputMedia.thumbnailPath,
-    thumbnailUrl:
-      article.inputMedia.origin?.kind === 'youtube'
-        ? article.inputMedia.origin.thumbnailUrl
-        : undefined,
-  }
+export function getArticleThumbnail(article: ArticleMetadata) {
+  return { thumbnailPath: article.thumbnailPath, thumbnailUrl: article.thumbnailUrl }
 }
 
 export function ArticleThumbnail({

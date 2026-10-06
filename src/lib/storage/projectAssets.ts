@@ -5,7 +5,7 @@ import {
   readAppLocalDirectory,
   removeAppLocalPath,
 } from '../tauri/filesystem'
-import type { MediaProject } from '../../types/project'
+import type { ArticleContext } from '../../types/project'
 
 function assertId(value: string, label: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error(`不正な${label}です。`)
@@ -293,14 +293,15 @@ export async function pruneSlideAssets(projectId: string, articleId: string, sli
   )
 }
 
-export async function cleanupProjectDerivedAssets(project: MediaProject, detailArticleId?: string) {
-  const activeArticle = project.articles.find(
-    (article) => article.id === (detailArticleId ?? project.activeArticleId),
-  )
-  if (!activeArticle) return
-  await pruneSlideAssets(project.id, activeArticle.id, activeArticle.slides.length)
+export async function cleanupProjectDerivedAssets(
+  project: ArticleContext,
+  detailArticleId?: string,
+) {
+  const activeArticle = project.article
+  if (detailArticleId && detailArticleId !== activeArticle.id) return
+  await pruneSlideAssets(project.project.id, activeArticle.id, activeArticle.visualSegments.length)
   const slideRunIds = new Set(
-    activeArticle.slides.flatMap((slide) => {
+    activeArticle.visualSegments.flatMap((slide) => {
       const match = slide.image.representativeFramePath?.match(
         /[/\\]runs[/\\]slides[/\\]([a-zA-Z0-9_-]+)[/\\]slide-\d+\.jpg$/,
       )
@@ -308,10 +309,14 @@ export async function cleanupProjectDerivedAssets(project: MediaProject, detailA
     }),
   )
   if (slideRunIds.size <= 1) {
-    await pruneSlideAssetRuns(project.id, activeArticle.id, slideRunIds.values().next().value)
+    await pruneSlideAssetRuns(
+      project.project.id,
+      activeArticle.id,
+      slideRunIds.values().next().value,
+    )
   }
   const previewDirectory = articleAssetDirectory(
-    project.id,
+    project.project.id,
     activeArticle.id,
     'temp/slide-previews',
   )
@@ -319,7 +324,7 @@ export async function cleanupProjectDerivedAssets(project: MediaProject, detailA
   if (activeArticle.transcription) return
   await Promise.all(
     ['runs/current/audio', 'runs/current/transcript'].map(async (directory) => {
-      const path = articleAssetDirectory(project.id, activeArticle.id, directory)
+      const path = articleAssetDirectory(project.project.id, activeArticle.id, directory)
       if (await appLocalPathExists(path)) await removeAppLocalPath(path)
     }),
   )

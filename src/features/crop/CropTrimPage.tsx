@@ -5,14 +5,19 @@ import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
 import { WorkflowPanelHeader } from '../../components/WorkflowPanelHeader'
 import type { WorkflowStep } from '../../lib/workflow'
-import type { CropRegion, MediaProject, PerspectiveCrop, VideoTrimRange } from '../../types/project'
+import type {
+  CropRegion,
+  ArticleContext,
+  PerspectiveCrop,
+  VideoTrimRange,
+} from '../../types/project'
 import { ArticleNavigationBar } from '../article/components/ArticleNavigationBar'
 import { CropSettingsPanel } from '../project/article-creator/CropSettingsPanel'
 import { RangeEditor } from '../project/article-creator/RangeEditor'
 import { useArticleRangeEditor } from '../project/article-creator/useArticleRangeEditor'
 
 type CropTrimPageProps = {
-  project: MediaProject
+  project: ArticleContext
   onCompleted: (
     range: VideoTrimRange,
     crop: CropRegion,
@@ -34,13 +39,13 @@ export function CropTrimPage({
   maxReachedStep,
   onStepClick,
 }: CropTrimPageProps) {
-  const article = project.articles.find((candidate) => candidate.id === project.activeArticleId)
+  const article = project.article
   const video = useMemo(
     () =>
-      project.videos.find((candidate) => candidate.id === article?.sourceVideoId) ??
-      project.videos[0] ??
+      project.project.videos.find((candidate) => candidate.id === article?.sourceVideoId) ??
+      project.project.videos[0] ??
       null,
-    [article?.sourceVideoId, project.videos],
+    [article?.sourceVideoId, project.project.videos],
   )
 
   if (!article || !video) return null
@@ -71,12 +76,12 @@ function CropTrimEditor({
   maxReachedStep,
   onStepClick,
 }: CropTrimPageProps & {
-  article: NonNullable<CropTrimPageProps['project']['articles'][number]>
-  video: NonNullable<CropTrimPageProps['project']['videos'][number]>
+  article: NonNullable<CropTrimPageProps['project']['article']>
+  video: NonNullable<CropTrimPageProps['project']['project']['videos'][number]>
 }) {
   const [isCropPreviewOpen, setIsCropPreviewOpen] = useState(true)
   const editor = useArticleRangeEditor({
-    projectId: project.id,
+    projectId: project.project.id,
     video,
     initialRange: article.sourceRange,
     initialTitle: article.title,
@@ -132,7 +137,7 @@ function CropTrimEditor({
             />
             {isCropPreviewOpen && (
               <CropSettingsPanel
-                projectId={project.id}
+                projectId={project.project.id}
                 video={video}
                 editor={editor}
                 onClose={() => setIsCropPreviewOpen(false)}

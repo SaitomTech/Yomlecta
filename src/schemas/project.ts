@@ -1,10 +1,5 @@
 import { z } from 'zod'
-import {
-  PROJECT_VERSION,
-  type MediaProject,
-  type PersistedProject,
-  type ProjectSettings,
-} from '../types/project'
+import { PROJECT_VERSION, type Project } from '../types/project'
 
 const IsoDateSchema = z.iso.datetime()
 const IdSchema = z.string().regex(/^[a-zA-Z0-9_-]+$/)
@@ -267,7 +262,6 @@ const SlideDataSchema = z
     }),
     image: z.strictObject({ representativeFramePath: z.string().min(1).optional() }),
     ocr: SlideOcrResultSchema.optional(),
-    transcript: SlideTranscriptSchema.optional(),
   })
 
   .refine((slide) => slide.endMs >= slide.startMs, 'スライド区間が不正です。')
@@ -363,9 +357,8 @@ const TranscriptBoundaryPlanSchema = z.strictObject({
     }),
   ),
 })
-const ArticleDataSchema = z.strictObject({
+const ArticleDocumentSchema = z.strictObject({
   boundaryPlan: TranscriptBoundaryPlanSchema.optional(),
-  title: z.string().min(1),
   summary: ArticleSummarySchema.optional(),
   sections: ArticleSectionsSchema.optional(),
   translations: z.record(z.string(), ArticleTranslationSchema).optional(),
@@ -388,15 +381,31 @@ const ArticleSchema = z.strictObject({
   crop: CropRegionSchema.optional(),
   perspectiveCrop: PerspectiveCropSchema.optional(),
   settings: ProjectSettingsSchema,
-  slides: z.array(SlideDataSchema),
-  articleBlocks: z.array(ArticleBlockSchema).default([]),
+  visualSegments: z.array(SlideDataSchema),
+  blocks: z.array(ArticleBlockSchema),
   slideDetection: SlideDetectionResultSchema.optional(),
   transcription: TranscriptionResultSchema.optional(),
-  article: ArticleDataSchema.optional(),
+  document: ArticleDocumentSchema.optional(),
   workflow: ProjectWorkflowSchema,
   createdAt: IsoDateSchema,
   updatedAt: IsoDateSchema,
 })
+
+const ArticleMetadataSchema = ArticleSchema.pick({
+  id: true,
+  title: true,
+  sourceVideoId: true,
+  sourceRange: true,
+  crop: true,
+  perspectiveCrop: true,
+  workflow: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({ thumbnailPath: z.string().optional(), thumbnailUrl: z.string().optional() })
+const EntrySchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('metadata'), metadata: ArticleMetadataSchema }),
+  z.strictObject({ kind: z.literal('loaded'), article: ArticleSchema }),
+])
 
 const ProjectFileSchema = z
   .strictObject({
@@ -404,8 +413,8 @@ const ProjectFileSchema = z
     id: IdSchema,
     title: z.string().min(1),
     videos: z.array(ProjectVideoSchema),
-    articles: z.array(ArticleSchema),
-    activeArticleId: IdSchema.optional(),
+    articles: z.array(EntrySchema),
+    lastOpenedArticleId: IdSchema.optional(),
     createdAt: IsoDateSchema,
     updatedAt: IsoDateSchema,
   })
@@ -420,7 +429,8 @@ const ProjectFileSchema = z
     }
 
     const articleIds = new Set<string>()
-    for (const article of project.articles) {
+    for (const entry of project.articles) {
+      const article = entry.kind === 'loaded' ? entry.article : entry.metadata
       if (articleIds.has(article.id)) {
         context.addIssue({
           code: 'custom',
@@ -437,57 +447,88 @@ const ProjectFileSchema = z
         })
       }
     }
-    if (project.activeArticleId && !articleIds.has(project.activeArticleId)) {
+    for (const entry of project.articles) {
+      if (entry.kind !== 'loaded') continue
+      const segmentIds = new Set(entry.article.visualSegments.map((segment) => segment.id))
+      const blockIds = new Set(entry.article.blocks.map((block) => block.id))
+      if (
+        segmentIds.size !== entry.article.visualSegments.length ||
+        blockIds.size !== entry.article.blocks.length
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['articles'],
+          message: '映像区間または記事ブロックのIDが重複しています。',
+        })
+      }
+      for (const block of entry.article.blocks) {
+        if (
+          block.visualSegmentIds.some((id) => !segmentIds.has(id)) ||
+          (block.imageSegmentId && !block.visualSegmentIds.includes(block.imageSegmentId))
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['articles'],
+            message: '記事ブロックの参照先が不正です。',
+          })
+        }
+      }
+    }
+    if (project.articles.filter((entry) => entry.kind === 'loaded').length > 1) {
       context.addIssue({
         code: 'custom',
-        path: ['activeArticleId'],
+        path: ['articles'],
+        message: '詳細記事が重複しています。',
+      })
+    }
+    if (project.lastOpenedArticleId && !articleIds.has(project.lastOpenedArticleId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastOpenedArticleId'],
         message: '選択中の記事が見つかりません。',
       })
     }
   })
 
-const DEFAULT_SETTINGS: ProjectSettings = {
-  slideDetection: { sampleIntervalMs: 500, threshold: 12 },
-  transcription: true,
-  ocr: true,
-  correction: true,
-  articleFormatting: true,
+export function parseProject(value: unknown): Project {
+  return ProjectFileSchema.parse(value)
 }
 
-const EMPTY_SOURCE = {
-  path: '',
-  name: '',
-  extension: 'mp4' as const,
-  metadata: { path: '', durationMs: 0, width: 1, height: 1 },
-  origin: { kind: 'local-file' as const },
-}
+const RevisionSchema = z.number().int().nonnegative()
+const LoadedProjectPayloadSchema = z.strictObject({
+  project: ProjectFileSchema,
+  loadedArticleId: IdSchema.nullable(),
+  revisions: z.strictObject({
+    revision: RevisionSchema,
+    articleRevisions: z.record(IdSchema, RevisionSchema),
+    documentRevisions: z.record(IdSchema, RevisionSchema),
+    slideRevisions: z.record(IdSchema, RevisionSchema),
+    ocrRevisions: z.record(IdSchema, RevisionSchema),
+  }),
+})
 
-function workspaceFor(project: PersistedProject): MediaProject {
-  const article = project.activeArticleId
-    ? project.articles.find((candidate) => candidate.id === project.activeArticleId)
-    : undefined
-  const video = project.videos[0]
-  return {
-    ...project,
-    source: article?.inputMedia ?? video?.media ?? EMPTY_SOURCE,
-    sourceRange: article?.sourceRange,
-    crop: article?.crop,
-    perspectiveCrop: article?.perspectiveCrop,
-    settings: article?.settings ?? DEFAULT_SETTINGS,
-    slides: article?.slides ?? [],
-    articleBlocks: article?.articleBlocks ?? [],
-    ...(article?.slideDetection ? { slideDetection: article.slideDetection } : {}),
-    ...(article?.transcription ? { transcription: article.transcription } : {}),
-    ...(article?.article ? { article: article.article } : {}),
-    workflow: article?.workflow ?? {
-      lastVisitedStep: 'detect-slides',
-      maxReachedStep: 'detect-slides',
-      lastOpenedAt: project.updatedAt,
-    },
+export function parseLoadedProjectPayload(value: unknown, projectId: string, articleId?: string) {
+  const loaded = LoadedProjectPayloadSchema.parse(value)
+  const entry = loaded.project.articles.find((entry) => entry.kind === 'loaded')
+  const loadedId = entry?.article.id ?? null
+  if (
+    loaded.project.id !== projectId ||
+    loadedId !== loaded.loadedArticleId ||
+    (articleId && loadedId !== articleId)
+  ) {
+    throw new Error('読み込んだ記事の対象が一致しません。')
   }
-}
-
-export function parseMediaProject(value: unknown): MediaProject {
-  const parsed = ProjectFileSchema.parse(value)
-  return workspaceFor(parsed)
+  for (const entry of loaded.project.articles) {
+    const id = entry.kind === 'loaded' ? entry.article.id : entry.metadata.id
+    if (loaded.revisions.articleRevisions[id] === undefined)
+      throw new Error('記事revisionがありません。')
+    if (entry.kind !== 'loaded') continue
+    if (loaded.revisions.documentRevisions[id] === undefined)
+      throw new Error('原稿revisionがありません。')
+    for (const segment of entry.article.visualSegments) {
+      if (loaded.revisions.slideRevisions[segment.id] === undefined)
+        throw new Error('映像区間revisionがありません。')
+    }
+  }
+  return loaded
 }

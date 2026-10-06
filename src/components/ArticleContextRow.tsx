@@ -2,10 +2,10 @@ import { ArrowLeftRight, PencilLine } from 'lucide-react'
 import { useState } from 'react'
 import { ArticleSwitcherPanel } from '../features/article/components/ArticleSwitcherPanel'
 import { useProjectTitleEditor } from '../features/project/hooks/useProjectTitleEditor'
-import type { MediaProject } from '../types/project'
+import type { ArticleContext } from '../types/project'
 
 type ArticleContextRowProps = {
-  project: MediaProject
+  project: ArticleContext
   sourceName?: string
   onSelect?: (articleId: string) => void | boolean | Promise<void | boolean>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -14,21 +14,21 @@ type ArticleContextRowProps = {
 
 export function ArticleContextRow({
   project,
-  sourceName = project.source.name,
+  sourceName = project.article.inputMedia.name,
   onSelect,
   onSaveTitle,
   disabled = false,
 }: ArticleContextRowProps) {
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false)
-  const article = project.articles.find((candidate) => candidate.id === project.activeArticleId)
-  const title = article?.title.trim() || project.article?.title?.trim() || '無題の記事'
+  const article = project.article
+  const title = article?.title.trim() || '無題の記事'
   const titleEditor = useProjectTitleEditor({
     initialTitle: title,
     onSave: async (nextTitle) => {
       await onSaveTitle(nextTitle)
     },
   })
-  const canSwitchArticles = project.articles.length > 1
+  const canSwitchArticles = project.project.articles.length > 1
 
   const handleSelect = async (articleId: string) => {
     if (!onSelect) return
@@ -102,8 +102,8 @@ export function ArticleContextRow({
       </div>
       {isSwitcherOpen && onSelect && (
         <ArticleSwitcherPanel
-          project={project}
-          selectedArticleId={project.activeArticleId}
+          project={project.project}
+          selectedArticleId={project.article.id}
           disabled={disabled}
           onClose={() => setIsSwitcherOpen(false)}
           onSelect={handleSelect}

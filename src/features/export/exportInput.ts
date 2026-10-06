@@ -1,16 +1,16 @@
-import type { MediaProject } from '../../types/project'
+import type { ArticleContext } from '../../types/project'
 
 // Workflow timestamps change after export completion without changing the output.
-export function articleExportInputKey(project: MediaProject) {
+export function articleExportInputKey(project: ArticleContext) {
   return JSON.stringify({
-    id: project.id,
-    articleId: project.activeArticleId,
-    title: project.articles.find((article) => article.id === project.activeArticleId)?.title,
-    source: project.source,
-    sourceRange: project.sourceRange,
-    transcription: project.transcription,
-    slides: project.slides,
-    articleBlocks: project.articleBlocks,
-    article: project.article,
+    id: project.project.id,
+    articleId: project.article.id,
+    title: project.article.title,
+    source: project.article.inputMedia,
+    sourceRange: project.article.sourceRange,
+    transcription: project.article.transcription,
+    slides: project.article.visualSegments,
+    articleBlocks: project.article.blocks,
+    article: project.article.document,
   })
 }
