@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Download,
   ExternalLink,
   Film,
   Maximize2,
@@ -10,6 +9,9 @@ import {
   X,
 } from 'lucide-react'
 import { useState } from 'react'
+import { useNavigationDisabled } from '../../app/navigationDisabled'
+import { useExport } from '../export/hooks/useExport'
+import { ArticleExportControls } from '../export/ArticleExportControls'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useVideoSourceUrl } from '../../lib/media/useVideoSourceUrl'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
@@ -176,14 +178,14 @@ export function ArticleDetailPage({
   item,
   onBack,
   onEdit,
-  onExport,
+  onGenerated,
   onOpenProject,
 }: {
   project: MediaProject
   item: ArticleListItem
   onBack: () => void
   onEdit: () => void
-  onExport: () => void
+  onGenerated: () => void | Promise<void>
   onOpenProject: () => void
 }) {
   const article = project.articles.find((candidate) => candidate.id === item.articleId)
@@ -202,6 +204,9 @@ export function ArticleDetailPage({
   })
   const sourceTitle = article?.title.trim() || item.title || '無題の記事'
   const videoSource = useVideoSourceUrl(project.source.path)
+  const exporter = useExport(project, onGenerated, Boolean(article && slides.length > 0))
+  const isExportBusy = exporter.isBusy
+  useNavigationDisabled(isExportBusy)
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
   const [isVideoOpen, setIsVideoOpen] = useState(false)
   const expandedDialogRef = useDialogA11y<HTMLDivElement>({
@@ -220,6 +225,7 @@ export function ArticleDetailPage({
           className="inline-flex items-center gap-1.5 rounded-[8px] px-2 py-1.5 text-xs font-semibold text-[#71807b] transition hover:bg-[#e2eee8] hover:text-[#1d6b50]"
           type="button"
           onClick={onBack}
+          disabled={isExportBusy}
         >
           <ArrowLeft size={14} /> 記事一覧へ戻る
         </button>
@@ -265,6 +271,7 @@ export function ArticleDetailPage({
               className="font-semibold text-[#1d6b50] hover:underline"
               type="button"
               onClick={onOpenProject}
+              disabled={isExportBusy}
             >
               {item.projectTitle}
             </button>
@@ -280,6 +287,7 @@ export function ArticleDetailPage({
               className="inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c]"
               type="button"
               onClick={onEdit}
+              disabled={isExportBusy}
             >
               <PencilLine size={14} />
               {getArticleActionLabel(status) === '記事を見る'
@@ -291,18 +299,11 @@ export function ArticleDetailPage({
               className="inline-flex items-center gap-2 rounded-[9px] border border-[#b7cbc0] bg-white px-4 py-3 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#f4faf6]"
               type="button"
               onClick={onOpenProject}
+              disabled={isExportBusy}
             >
               <ExternalLink size={14} /> プロジェクト詳細へ
             </button>
-            {status === 'done' && (
-              <button
-                className="inline-flex items-center gap-2 rounded-[9px] px-3 py-3 text-xs font-semibold text-[#53615b] transition hover:bg-[#e8f2ec] hover:text-[#1d6b50]"
-                type="button"
-                onClick={onExport}
-              >
-                <Download size={14} /> 書き出し
-              </button>
-            )}
+            {article && slides.length > 0 && <ArticleExportControls exporter={exporter} />}
           </div>
         </header>
 
@@ -363,7 +364,6 @@ export function ArticleDetailPage({
                   summary={summary}
                   translation={translation}
                   outputLanguage={outputLanguage}
-                  isUpToDate
                   readOnly
                 />
               )}
@@ -380,6 +380,7 @@ export function ArticleDetailPage({
                     className="mt-5 inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white"
                     type="button"
                     onClick={onEdit}
+                    disabled={isExportBusy}
                   >
                     {getArticleActionLabel(status)} <ArrowRight size={14} />
                   </button>

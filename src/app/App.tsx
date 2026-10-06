@@ -5,8 +5,6 @@ import { ArticleDetailPage } from '../features/article/ArticleDetailPage'
 import { ArticlesPage } from '../features/article/ArticlesPage'
 import { getArticleStatus } from '../features/article/articleList'
 import { CropTrimPage } from '../features/crop/CropTrimPage'
-import { ExportPage } from '../features/export/ExportPage'
-import { exportProject, type ExportResult } from '../features/export/export'
 import { GenerateNotesPage } from '../features/generate-notes/GenerateNotesPage'
 import { HomePage } from '../features/home/HomePage'
 import { ProjectDetailPage } from '../features/project/ProjectDetailPage'
@@ -64,7 +62,6 @@ import type {
   ContentProcessingResult,
   CropRegion,
   ArticleSections,
-  MediaProject,
   PerspectiveCrop,
   ProjectStep,
   ProjectVideo,
@@ -76,70 +73,21 @@ import type {
 } from '../types/project'
 import type { SlideDetectionOutput } from '../features/slide-detection/types'
 
+type ArticleWorkflowStep = Exclude<ProjectStep, 'export'>
+
 type Route =
   | { kind: 'home' }
   | { kind: 'projects' }
   | { kind: 'articles' }
   | { kind: 'project' }
   | { kind: 'article-detail'; articleId: string; projectId: string }
-  | { kind: 'article'; articleId: string; step: ProjectStep }
+  | { kind: 'article'; articleId: string; step: ArticleWorkflowStep }
 
 function App() {
   const [route, setRoute] = useState<Route>({ kind: 'home' })
-  const [generatedExport, setGeneratedExport] = useState<{
-    articleId: string
-    result: ExportResult
-  } | null>(null)
-  const [exportPreparation, setExportPreparation] = useState<
-    | { articleId: string; status: 'running' }
-    | { articleId: string; status: 'error'; message: string }
-    | null
-  >(null)
-  const exportOperationQueue = useRef<Promise<void> | null>(null)
   const navigationRequestRef = useRef(0)
   const { project, projectRef, setProjectState, clearProjectState, enqueueProjectOperation } =
     useProjectWorkspace()
-
-  const regenerateArticleExport = (
-    savedProject: MediaProject | null,
-    reportToExportPage = false,
-  ) => {
-    if (!savedProject?.activeArticleId) return Promise.resolve()
-
-    const articleId = savedProject.activeArticleId
-    if (reportToExportPage) setExportPreparation({ articleId, status: 'running' })
-    const previous = exportOperationQueue.current ?? Promise.resolve()
-    const next = previous
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          const result = await exportProject(savedProject)
-          setGeneratedExport({ articleId, result })
-          if (reportToExportPage) {
-            setExportPreparation((current) => (current?.articleId === articleId ? null : current))
-          }
-        } catch (error) {
-          console.error('記事の書き出し結果を更新できませんでした。', error)
-          if (reportToExportPage) {
-            setExportPreparation((current) =>
-              current?.articleId === articleId
-                ? {
-                    articleId,
-                    status: 'error',
-                    message:
-                      error instanceof Error ? error.message : '記事の書き出しに失敗しました。',
-                  }
-                : current,
-            )
-          }
-        }
-      })
-    exportOperationQueue.current = next.then(
-      () => undefined,
-      () => undefined,
-    )
-    return next
-  }
 
   const handleCreateProject = async (title: string) => {
     const next = createEmptyProject(title)
@@ -282,7 +230,8 @@ function App() {
       const loaded = await loadProject(current.id, articleId)
       const next = activateArticle(loaded, articleId)
       const article = next.articles.find((candidate) => candidate.id === articleId)
-      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const savedStep = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const step = savedStep === 'export' ? 'article-review' : savedStep
       const opened = markProjectOpened(next, step)
       const saved = await persistProjectWorkflow(opened)
       setProjectState(saved)
@@ -305,17 +254,7 @@ function App() {
       return
     }
 
-    await handleOpenArticleDetail({
-      articleId: article.id,
-      projectId: current.id,
-      title: article.title,
-      projectTitle: current.title,
-      createdAt: article.createdAt,
-      updatedAt: article.updatedAt,
-      lastVisitedStep: article.workflow.lastVisitedStep,
-      maxReachedStep: article.workflow.maxReachedStep,
-      status: getArticleStatus(article),
-    })
+    await handleOpenArticleDetail({ articleId: article.id, projectId: current.id })
   }
 
   const handleDeleteArticle = async (articleId: string) => {
@@ -352,7 +291,9 @@ function App() {
     setRoute({ kind: 'articles' })
   }
 
-  const handleOpenArticleDetail = async (item: ArticleListItem) => {
+  const handleOpenArticleDetail = async (
+    item: Pick<ArticleListItem, 'projectId' | 'articleId'>,
+  ) => {
     const requestId = ++navigationRequestRef.current
     await enqueueProjectOperation(async () => {
       const loaded = await loadProject(item.projectId, item.articleId)
@@ -366,29 +307,23 @@ function App() {
 
   const handleOpenArticleWorkflow = async (item: ArticleListItem, preferredStep?: ProjectStep) => {
     const requestId = ++navigationRequestRef.current
-    const { saved, step } = await enqueueProjectOperation(async () => {
+    const { step } = await enqueueProjectOperation(async () => {
       const loaded = await loadProject(item.projectId, item.articleId)
       const next = activateArticle(loaded, item.articleId)
       const article = next.articles.find((candidate) => candidate.id === item.articleId)
-      const step = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const savedStep = preferredStep ?? article?.workflow.lastVisitedStep ?? 'detect-slides'
+      const step = savedStep === 'export' ? 'article-review' : savedStep
       const marked = markProjectOpened(next, step)
       const saved = await persistProjectWorkflow(marked)
       setProjectState(saved)
-      return { saved, step }
+      return { step }
     })
     if (requestId === navigationRequestRef.current) {
-      if (step === 'export') {
-        setGeneratedExport(null)
-        setExportPreparation({ articleId: item.articleId, status: 'running' })
-      }
       setRoute({
         kind: 'article',
         articleId: item.articleId,
         step,
       })
-      if (step === 'export') {
-        window.setTimeout(() => void regenerateArticleExport(saved, true), 0)
-      }
     }
   }
 
@@ -400,12 +335,8 @@ function App() {
   const handleWorkflowStep = async (nextStep: WorkflowStep) => {
     try {
       if (route.kind !== 'article' || !projectRef.current) return
-      if (nextStep === 'import') return
+      if (nextStep === 'import' || nextStep === 'export') return
       if (!canNavigateToWorkflowStep(projectRef.current.workflow.maxReachedStep, nextStep)) return
-      if (nextStep === 'export') {
-        await handleProjectStep('export')
-        return
-      }
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
       const saved = await enqueueProjectOperation(async () => {
@@ -422,27 +353,11 @@ function App() {
     }
   }
 
-  const handleProjectStep = async (nextStep: ProjectStep) => {
+  const handleProjectStep = async (nextStep: ArticleWorkflowStep) => {
     try {
       if (route.kind !== 'article') return
       const requestId = ++navigationRequestRef.current
       const articleId = route.articleId
-      if (nextStep === 'export') {
-        const saved = await enqueueProjectOperation(async () => {
-          const current = projectRef.current
-          if (!current || current.activeArticleId !== articleId) return null
-          const next = markProjectOpened(current, nextStep)
-          const persisted = await persistProjectWorkflow(next)
-          return setProjectState(persisted)
-        })
-        if (saved && requestId === navigationRequestRef.current) {
-          setGeneratedExport(null)
-          setExportPreparation({ articleId, status: 'running' })
-          setRoute({ kind: 'article', articleId, step: nextStep })
-          window.setTimeout(() => void regenerateArticleExport(saved, true), 0)
-        }
-        return
-      }
       const saved = await enqueueProjectOperation(async () => {
         const current = projectRef.current
         if (!current || current.activeArticleId !== articleId) return null
@@ -457,10 +372,10 @@ function App() {
     }
   }
 
-  const handleExportCompleted = async () => {
+  const handleExportCompleted = async (articleId: string) => {
     await enqueueProjectOperation(async () => {
       const current = projectRef.current
-      if (!current) return
+      if (!current || current.activeArticleId !== articleId) return
       const next = markProjectExported(current)
       const persisted = await persistProjectWorkflow(next)
       setProjectState(persisted)
@@ -536,36 +451,33 @@ function App() {
   }
   const handleSaveSlideResultEdits = async (slideId: string, edits: SlideResultEdits) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveSlideResultEdits(current, slideId, edits)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticle = async (draft: ArticleDraft) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleDraft(current, draft)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticleSections = async (sections: ArticleSections | null) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleSections(current, sections)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticleTitle = async (title: string) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
@@ -577,44 +489,37 @@ function App() {
       return next
     })
     if (!saved) throw new Error('記事が選択されていません。')
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticleSummary = async (summary: ArticleSummary) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleSummary(current, summary)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticleTranslation = async (translation: ArticleTranslation) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleTranslation(current, translation)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
   const handleSaveArticleOutputLanguage = async (outputLanguage: ArticleOutputLanguage) => {
     const targetArticleId = route.kind === 'article' ? route.articleId : null
-    const saved = await enqueueProjectOperation(async () => {
+    await enqueueProjectOperation(async () => {
       const current = projectRef.current
       if (!current || !targetArticleId || current.activeArticleId !== targetArticleId) return null
       const next = await saveArticleOutputLanguage(current, outputLanguage)
       if (next) setProjectState(next)
       return next
     })
-    await regenerateArticleExport(saved)
   }
-
-  const currentExportPreparation =
-    exportPreparation?.articleId === project?.activeArticleId ? exportPreparation : null
 
   const page = (() => {
     if (route.kind === 'home')
@@ -657,6 +562,7 @@ function App() {
       }
       return (
         <ArticleDetailPage
+          key={route.articleId}
           project={project}
           item={item}
           onBack={handleOpenArticles}
@@ -666,7 +572,7 @@ function App() {
               getArticleStatus(item) === 'done' ? 'article-review' : undefined,
             )
           }
-          onExport={() => void handleOpenArticleWorkflow(item, 'export')}
+          onGenerated={() => handleExportCompleted(item.articleId)}
           onOpenProject={() => void handleOpenProject(project.id)}
         />
       )
@@ -742,31 +648,15 @@ function App() {
           onSaveSummary={handleSaveArticleSummary}
           onSaveTranslation={handleSaveArticleTranslation}
           onSaveOutputLanguage={handleSaveArticleOutputLanguage}
-          onExport={() => void handleProjectStep('export')}
+          onViewArticle={() =>
+            void handleOpenArticleDetail({ articleId: route.articleId, projectId: project.id })
+          }
           onBackToProject={handleBackToProject}
           onOpenArticle={handleOpenArticle}
           {...articleProps}
         />
       )
-    return (
-      <ExportPage
-        key={route.articleId}
-        project={project}
-        exportResult={
-          generatedExport && generatedExport.articleId === project.activeArticleId
-            ? generatedExport.result
-            : null
-        }
-        preparationError={
-          currentExportPreparation?.status === 'error' ? currentExportPreparation.message : null
-        }
-        isPreparing={currentExportPreparation?.status === 'running'}
-        onBackToProject={handleBackToProject}
-        onOpenArticle={handleOpenArticle}
-        onGenerated={handleExportCompleted}
-        {...articleProps}
-      />
-    )
+    return null
   })()
 
   if (!page) return null

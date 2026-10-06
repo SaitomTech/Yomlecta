@@ -16,13 +16,9 @@ import type {
   MediaProject,
   TranscriptBoundaryPlan,
 } from '../../types/project'
-import { ArticleSummaryCard } from './components/ArticleSummaryCard'
 import { ArticleNavigationBar } from './components/ArticleNavigationBar'
-import { ArticleSectionsCard } from './components/ArticleSectionsCard'
 import { ArticleTranslationCard } from './components/ArticleTranslationCard'
 import { ArticleStructureEditor } from './components/ArticleStructureEditor'
-import { useArticleSummary } from './hooks/useArticleSummary'
-import { useArticleSections } from './hooks/useArticleSections'
 import { useArticleTranslation } from './hooks/useArticleTranslation'
 import {
   ContentProcessingPanel,
@@ -32,7 +28,6 @@ import type { ContentProcessingSlideCompleted } from '../content-processing/cont
 import { useContentProcessing } from '../content-processing/hooks/useContentProcessing'
 import { getActiveArticleSourceContext } from '../../lib/project/articleSource'
 import { articleBlockViews } from '../../lib/pipeline/articleBlocks'
-import { hasCurrentArticleSections } from './article'
 import { getTranslationEngineId, normalizeLanguage, type TranslationEngineId } from './translation'
 import { getArticleOutputLanguage, getCurrentTranslationForOutputLanguage } from './outputLanguage'
 
@@ -46,7 +41,7 @@ type ArticleReviewPageProps = {
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onSaveTranslation: (translation: ArticleTranslation) => void | Promise<void>
   onSaveOutputLanguage: (language: ArticleOutputLanguage) => void | Promise<void>
-  onExport: () => void
+  onViewArticle: () => void
   onBackToProject: () => void
   onOpenArticle: (articleId: string) => void | Promise<void>
   onSaveTitle: (title: string) => void | Promise<void>
@@ -55,15 +50,13 @@ type ArticleReviewPageProps = {
 }
 
 type EditingTarget = { type: 'slide'; slideId: string } | null
-type BatchStage = 'idle' | 'content' | 'summary' | 'sections' | 'translation'
+type BatchStage = 'idle' | 'content' | 'translation'
 
 type ArticleBatchActions = {
   isBusy: boolean
   includeTranslation: boolean
   setStage: (stage: BatchStage) => void
   processContent: () => Promise<boolean>
-  generateSummary: () => Promise<boolean>
-  generateSections: () => Promise<boolean>
   generateTranslation: () => Promise<boolean>
 }
 
@@ -71,8 +64,6 @@ async function runArticleBatch(actions: ArticleBatchActions) {
   if (actions.isBusy) return
   const steps: Array<{ stage: Exclude<BatchStage, 'idle'>; run: () => Promise<boolean> }> = [
     { stage: 'content' as const, run: actions.processContent },
-    { stage: 'summary' as const, run: actions.generateSummary },
-    { stage: 'sections' as const, run: actions.generateSections },
   ]
   if (actions.includeTranslation) {
     steps.push({ stage: 'translation' as const, run: actions.generateTranslation })
@@ -96,63 +87,30 @@ function cancelArticleBatch(
 }
 
 function getCurrentArticleSections(project: MediaProject) {
-  const sections = project.article?.sections
-  return sections &&
-    (sections.model === 'manual' || hasCurrentArticleSections(project, sections.model))
-    ? sections
-    : undefined
+  return project.article?.sections
 }
 
 function getReviewControlState({
   isSaving,
   isBatchRunning,
-  isSummaryRunning,
   isProcessingRunning,
-  isSectionsRunning,
   isTranslationRunning,
   hasUnsavedChanges,
   isSwitchingArticle,
 }: {
   isSaving: boolean
   isBatchRunning: boolean
-  isSummaryRunning: boolean
   isProcessingRunning: boolean
-  isSectionsRunning: boolean
   isTranslationRunning: boolean
   hasUnsavedChanges: boolean
   isSwitchingArticle: boolean
 }) {
-  const isBusy =
-    isSaving ||
-    isBatchRunning ||
-    isSummaryRunning ||
-    isProcessingRunning ||
-    isSectionsRunning ||
-    isTranslationRunning
-  const sharedGenerationDisabled = isSaving || hasUnsavedChanges || isSwitchingArticle
-
+  const isBusy = isSaving || isBatchRunning || isProcessingRunning || isTranslationRunning
   return {
     isBusy,
     isBatchRunning,
     contentControlsDisabled:
-      isBatchRunning ||
-      isSaving ||
-      isSummaryRunning ||
-      isSectionsRunning ||
-      isTranslationRunning ||
-      hasUnsavedChanges,
-    summaryControlsDisabled:
-      isBatchRunning ||
-      sharedGenerationDisabled ||
-      isProcessingRunning ||
-      isSectionsRunning ||
-      isTranslationRunning,
-    sectionsControlsDisabled:
-      isBatchRunning ||
-      sharedGenerationDisabled ||
-      isSummaryRunning ||
-      isProcessingRunning ||
-      isTranslationRunning,
+      isBatchRunning || isSaving || isTranslationRunning || hasUnsavedChanges || isSwitchingArticle,
   }
 }
 
@@ -166,7 +124,7 @@ export function ArticleReviewPage({
   onSaveSummary,
   onSaveTranslation,
   onSaveOutputLanguage,
-  onExport,
+  onViewArticle,
   onBackToProject,
   onOpenArticle,
   onSaveTitle,
@@ -190,17 +148,7 @@ export function ArticleReviewPage({
     activeArticle?.title.trim() ||
     project.article?.title?.trim() ||
     project.source.name.replace(/\.[^.]+$/, '')
-  const [summaryModelId, setSummaryModelId] = useState<ArticleModelId>(
-    () =>
-      getArticleModel(project.article?.summary?.model ?? articleSlides[0]?.transcript?.articleModel)
-        .id,
-  )
-  const summaryGeneration = useArticleSummary(
-    project,
-    summaryModelId,
-    onSaveSummary,
-    getCurrentProject,
-  )
+  const [includeSummary, setIncludeSummary] = useState(true)
   const storedTextModelId = project.slides
     .map((slide) => slide.transcript?.articleModel)
     .find((modelId): modelId is string => Boolean(modelId))
@@ -250,12 +198,9 @@ export function ArticleReviewPage({
     textModelId,
     getCurrentProject,
     onBoundaryPlanCompleted,
-  )
-  const sectionsGeneration = useArticleSections(
-    project,
-    textModelId,
     onSaveSections,
-    getCurrentProject,
+    onSaveSummary,
+    includeSummary,
   )
   const translationGeneration = useArticleTranslation(
     project,
@@ -269,18 +214,10 @@ export function ArticleReviewPage({
   const editingSlideId = editingTarget?.type === 'slide' ? editingTarget.slideId : null
   const isBodyDirty = editingSlideId !== null && bodyDraft !== (savedBodies[editingSlideId] ?? '')
   const hasUnsavedChanges = isBodyDirty
-  const {
-    isBusy,
-    isBatchRunning,
-    contentControlsDisabled,
-    summaryControlsDisabled,
-    sectionsControlsDisabled,
-  } = getReviewControlState({
+  const { isBusy, isBatchRunning, contentControlsDisabled } = getReviewControlState({
     isSaving,
     isBatchRunning: batchStage !== 'idle',
-    isSummaryRunning: summaryGeneration.status === 'running',
     isProcessingRunning: processing.status === 'running',
-    isSectionsRunning: sectionsGeneration.status === 'running',
     isTranslationRunning: translationGeneration.status === 'running',
     hasUnsavedChanges,
     isSwitchingArticle: switchingArticleId !== null,
@@ -293,16 +230,12 @@ export function ArticleReviewPage({
       includeTranslation: includeTranslationInBatch,
       setStage: setBatchStage,
       processContent: () => processing.process(processing.status === 'completed'),
-      generateSummary: () => summaryGeneration.generate(summaryGeneration.isUpToDate),
-      generateSections: () => sectionsGeneration.generate(sectionsGeneration.isUpToDate),
       generateTranslation: () => translationGeneration.generate(translationGeneration.isUpToDate),
     })
 
   const handleCancelBatch = () =>
     cancelArticleBatch(batchStage, {
       content: processing.cancel,
-      summary: summaryGeneration.cancel,
-      sections: sectionsGeneration.cancel,
       translation: translationGeneration.cancel,
     })
 
@@ -460,6 +393,11 @@ export function ArticleReviewPage({
                     model={textModel}
                     modelId={textModelId}
                     onModelChange={handleTextModelChange}
+                    includeSummary={includeSummary}
+                    onIncludeSummaryChange={(enabled) => {
+                      processing.reset()
+                      setIncludeSummary(enabled)
+                    }}
                     disabled={contentControlsDisabled || switchingArticleId !== null}
                   />
                   <ContentProcessingStatus
@@ -467,27 +405,6 @@ export function ArticleReviewPage({
                     disabled={contentControlsDisabled || switchingArticleId !== null}
                   />
                 </div>
-                <ArticleSummaryCard
-                  project={project}
-                  summary={project.article?.summary}
-                  generation={summaryGeneration}
-                  modelId={summaryModelId}
-                  onModelChange={setSummaryModelId}
-                  disabled={summaryControlsDisabled}
-                  onGenerate={(force) => void summaryGeneration.generate(force)}
-                  onCancel={summaryGeneration.cancel}
-                />
-                <ArticleSectionsCard
-                  project={project}
-                  sections={currentArticleSections}
-                  generation={sectionsGeneration}
-                  model={textModel}
-                  modelId={textModelId}
-                  onModelChange={handleTextModelChange}
-                  onGenerate={(force) => void sectionsGeneration.generate(force)}
-                  onCancel={sectionsGeneration.cancel}
-                  disabled={sectionsControlsDisabled}
-                />
                 <ArticleTranslationCard
                   project={project}
                   sourceLanguage={translationSourceLanguage}
@@ -505,43 +422,38 @@ export function ArticleReviewPage({
                     isBusy ||
                     hasUnsavedChanges ||
                     switchingArticleId !== null ||
-                    summaryGeneration.status === 'running' ||
-                    processing.status === 'running' ||
-                    sectionsGeneration.status === 'running'
+                    processing.status === 'running'
                   }
                 />
               </div>
             </section>
-            <section aria-labelledby="article-review-heading">
-              <ArticleStructureEditor
-                project={project}
-                sections={reviewSections}
-                sourcePath={sourcePath}
-                canEditSlide={canEdit}
-                editingSlideId={editingSlideId}
-                savedBodies={savedBodies}
-                bodyDraft={bodyDraft}
-                isSavingBody={isSaving}
-                isBodyDirty={isBodyDirty}
-                bodySaveError={saveError}
-                onStartSlideEditing={startSlideEditing}
-                onCancelSlideEditing={cancelEditing}
-                onSaveSlide={() => void saveSlide()}
-                onBodyChange={(body) => {
-                  setBodyDraft(body)
-                  setSaveError(null)
-                }}
-                onSaveSections={onSaveSections}
-                summary={project.article?.summary}
-                translation={outputTranslation}
-                outputLanguage={outputLanguage}
-                onSaveOutputLanguage={onSaveOutputLanguage}
-                summaryIsUpToDate={summaryGeneration.isUpToDate}
-                summaryDisabled={isBusy || hasUnsavedChanges || switchingArticleId !== null}
-                onSaveSummary={onSaveSummary}
-                disabled={isBusy || isBodyDirty || switchingArticleId !== null}
-              />
-            </section>
+            <ArticleStructureEditor
+              project={project}
+              sections={reviewSections}
+              sourcePath={sourcePath}
+              canEditSlide={canEdit}
+              editingSlideId={editingSlideId}
+              savedBodies={savedBodies}
+              bodyDraft={bodyDraft}
+              isSavingBody={isSaving}
+              isBodyDirty={isBodyDirty}
+              bodySaveError={saveError}
+              onStartSlideEditing={startSlideEditing}
+              onCancelSlideEditing={cancelEditing}
+              onSaveSlide={() => void saveSlide()}
+              onBodyChange={(body) => {
+                setBodyDraft(body)
+                setSaveError(null)
+              }}
+              onSaveSections={onSaveSections}
+              summary={project.article?.summary}
+              translation={outputTranslation}
+              outputLanguage={outputLanguage}
+              onSaveOutputLanguage={onSaveOutputLanguage}
+              summaryDisabled={isBusy || hasUnsavedChanges || switchingArticleId !== null}
+              onSaveSummary={onSaveSummary}
+              disabled={isBusy || isBodyDirty || switchingArticleId !== null}
+            />
           </div>
           <div
             className={`flex flex-wrap items-center gap-4 border-t border-[#d8e1dc] px-5 py-4 md:px-7 ${hasUnsavedChanges ? 'justify-between' : 'justify-end'}`}
@@ -554,11 +466,11 @@ export function ArticleReviewPage({
             <button
               className="inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-[#f3faf6] shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
               type="button"
-              onClick={onExport}
+              onClick={onViewArticle}
               disabled={hasUnsavedChanges || isBusy}
               title={hasUnsavedChanges ? '編集中の変更を保存してください' : undefined}
             >
-              閲覧・ダウンロードへ
+              記事を見る
               <ArrowRight size={14} />
             </button>
           </div>

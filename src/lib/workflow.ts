@@ -11,10 +11,11 @@ export const WORKFLOW_STEPS: Array<{ id: WorkflowStep; label: string }> = [
   { id: 'detect-slides', label: 'スライド区間を検出' },
   { id: 'generate-notes', label: '文字起こしとOCR' },
   { id: 'article-review', label: '記事の生成・編集' },
-  { id: 'export', label: '閲覧・ダウンロード' },
 ]
 
 export function getWorkflowStepIndex(step: WorkflowStep) {
+  // Legacy completion marker remains readable, but is no longer a visible step.
+  if (step === 'export') return WORKFLOW_STEPS.length
   return WORKFLOW_STEPS.findIndex((workflowStep) => workflowStep.id === step)
 }
 
@@ -27,5 +28,5 @@ export function isWorkflowStepReached(maxReachedStep: WorkflowStep, step: Workfl
 }
 
 export function canNavigateToWorkflowStep(maxReachedStep: WorkflowStep, step: WorkflowStep) {
-  return step !== 'import' && isWorkflowStepReached(maxReachedStep, step)
+  return step !== 'import' && step !== 'export' && isWorkflowStepReached(maxReachedStep, step)
 }

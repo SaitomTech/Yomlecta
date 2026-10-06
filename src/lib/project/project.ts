@@ -234,7 +234,8 @@ export function markProjectExported(project: MediaProject): MediaProject {
     ...project,
     workflow: {
       ...project.workflow,
-      lastVisitedStep: 'export',
+      lastVisitedStep: 'article-review',
+      // Keep the stored completion marker compatible with existing lists and projects.
       maxReachedStep: 'export',
       lastExportedAt: now,
       lastOpenedAt: now,
@@ -318,9 +319,7 @@ export function updateProjectSlideOcr(
   if (!currentSlide) return project
   const ocrChanged = !sameValue(currentSlide.ocr, ocr)
   if (!ocrChanged) return project
-  const nextTranscript = currentSlide.transcript
-    ? { raw: currentSlide.transcript.raw, model: currentSlide.transcript.model }
-    : undefined
+  const nextTranscript = currentSlide.transcript ? { ...currentSlide.transcript } : undefined
   const nextBlocks = project.articleBlocks.map((block) =>
     articleBlockHostSegmentId(block) === slideId ? { ...block, transcript: nextTranscript } : block,
   )

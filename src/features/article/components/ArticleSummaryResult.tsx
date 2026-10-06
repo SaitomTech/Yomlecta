@@ -14,7 +14,6 @@ type ArticleSummaryResultProps = {
   summary?: ArticleSummary
   translation?: ArticleTranslation
   outputLanguage: ArticleOutputLanguage
-  isUpToDate: boolean
   disabled?: boolean
   readOnly?: boolean
   onSave?: (summary: ArticleSummary) => void | Promise<void>
@@ -238,14 +237,12 @@ function SummaryDisplay({
   sourceLanguage,
   targetLanguage,
   outputLanguage,
-  isUpToDate,
 }: {
   summary: ArticleSummary
   translatedSummary?: ArticleTranslationSummary
   sourceLanguage: string
   targetLanguage: string
   outputLanguage: ArticleOutputLanguage
-  isUpToDate: boolean
 }) {
   const visibility = resolveArticleLanguageVisibility({
     outputLanguage,
@@ -265,11 +262,6 @@ function SummaryDisplay({
 
   return (
     <div className="p-5 md:p-6">
-      {!isUpToDate && visibility.showSource && (
-        <p className="mb-5 rounded-[8px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-xs leading-5 text-[#8b6a2b]">
-          本文が変更されています。最新の内容を反映するには、Step 1で要約を更新してください。
-        </p>
-      )}
       <SummaryTextSection
         title="概要"
         source={summary.overview}
@@ -453,7 +445,6 @@ export function ArticleSummaryResult({
   summary,
   translation,
   outputLanguage,
-  isUpToDate,
   disabled = false,
   readOnly = false,
   onSave,
@@ -521,7 +512,6 @@ export function ArticleSummaryResult({
           sourceLanguage={sourceLanguage}
           targetLanguage={targetLanguage}
           outputLanguage={outputLanguage}
-          isUpToDate={isUpToDate}
         />
       ) : visibility.showSource ? (
         <p className="px-5 py-8 text-center text-xs leading-5 text-[#71807b] md:px-6">

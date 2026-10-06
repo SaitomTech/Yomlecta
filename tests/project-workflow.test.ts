@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { articleExportInputKey } from '../src/features/export/exportInput'
 import { parseMediaProject } from '../src/schemas/project'
 import {
   createEmptyProject,
@@ -19,6 +20,7 @@ import { normalizeTrimRange } from '../src/lib/project/videoRange'
 import { getActiveArticleSourceContext } from '../src/lib/project/articleSource'
 import { createArticleFromRange } from '../src/lib/project/projectMedia'
 import {
+  WORKFLOW_STEPS,
   canNavigateToWorkflowStep,
   getFurthestWorkflowStep,
   isWorkflowStepReached,
@@ -146,6 +148,7 @@ function createArticleWorkspace() {
     activeArticleId: articleId,
     source: inputMedia,
     slides: [slide],
+    articleBlocks: article.articleBlocks,
     slideDetection: article.slideDetection,
     transcription: article.transcription,
     article: article.article,
@@ -179,7 +182,7 @@ test('export completion records reachability separately from the last visited st
   const revisited = markProjectOpened(exported, 'generate-notes')
 
   expect(exported.workflow.maxReachedStep).toBe('export')
-  expect(exported.workflow.lastVisitedStep).toBe('export')
+  expect(exported.workflow.lastVisitedStep).toBe('article-review')
   expect(exported.workflow.lastExportedAt).toBeTruthy()
   expect(revisited.workflow.maxReachedStep).toBe('export')
   expect(revisited.workflow.lastVisitedStep).toBe('generate-notes')
@@ -194,7 +197,7 @@ test('persisted workflow restores both the last visited and furthest reached ste
   expect(restored.workflow.maxReachedStep).toBe('export')
 })
 
-test('same OCR output is a no-op, while changed OCR invalidates generated notes', () => {
+test('same OCR output is a no-op, while changed OCR preserves generated notes', () => {
   const exported = markProjectExported(createArticleWorkspace())
   const savedOcr = exported.slides[0].ocr
   if (!savedOcr) throw new Error('テスト用OCRがありません。')
@@ -209,12 +212,12 @@ test('same OCR output is a no-op, while changed OCR invalidates generated notes'
   })
   expect(changed.workflow.maxReachedStep).toBe('generate-notes')
   expect(changed.workflow.lastVisitedStep).toBe('generate-notes')
-  expect(changed.slides[0].transcript?.articleBody).toBeUndefined()
+  expect(changed.slides[0].transcript?.articleBody).toBe('body')
   expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'article-review')).toBe(false)
   expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'export')).toBe(false)
 })
 
-test('changed transcription invalidates downstream notes and result', () => {
+test('changed transcription preserves generated notes', () => {
   const exported = markProjectExported(createArticleWorkspace())
   const transcription = exported.transcription
   if (!transcription) throw new Error('テスト用文字起こし結果がありません。')
@@ -226,6 +229,7 @@ test('changed transcription invalidates downstream notes and result', () => {
     ...transcription,
     inputFingerprint: 'transcription-fingerprint-v2',
   })
+  expect(changed.slides[0].transcript?.articleBody).toBe('body')
   expect(changed.workflow.maxReachedStep).toBe('generate-notes')
   expect(changed.workflow.lastVisitedStep).toBe('generate-notes')
   expect(canNavigateToWorkflowStep(changed.workflow.maxReachedStep, 'export')).toBe(false)
@@ -500,4 +504,60 @@ test('article translation becomes stale when its source body changes', () => {
     })),
   }
   expect(getCurrentArticleTranslation(changed, 'en', 'ja')).toBeUndefined()
+})
+
+test('body edits preserve independently generated sections and summary after reload', () => {
+  const project = createArticleWorkspace()
+  project.article = {
+    ...project.article,
+    title: 'article',
+    summary: {
+      overview: 'Saved overview',
+      mainMessage: 'Saved message',
+      keyPoints: ['Saved point'],
+      keywords: ['Saved keyword'],
+      model: 'article-model',
+      inputFingerprint: 'original-body',
+    },
+    sections: {
+      model: 'article-model',
+      inputFingerprint: 'original-body',
+      sections: [{ id: 'section-1', heading: 'Saved heading', slideIds: ['slide-1'] }],
+    },
+  }
+  const changed = updateProjectArticleDraft(project, {
+    title: 'article',
+    bodies: { 'slide-1': 'Edited body' },
+  })
+  const restored = parseMediaProject(projectSnapshot(syncActiveArticle(changed)))
+  expect(restored.article?.summary).toEqual(project.article.summary)
+  expect(restored.article?.sections).toEqual(project.article.sections)
+  expect(restored.slides[0].transcript?.articleBody).toBe('Edited body')
+  expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved heading')
+  expect(articleTranslationInputFingerprint(restored, 'ja', 'en')).toContain('Saved overview')
+})
+
+test('the workflow has four steps and legacy completed articles can still be edited', () => {
+  expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
+    'crop',
+    'detect-slides',
+    'generate-notes',
+    'article-review',
+  ])
+  expect(canNavigateToWorkflowStep('export', 'article-review')).toBe(true)
+  expect(canNavigateToWorkflowStep('export', 'export')).toBe(false)
+})
+
+test('download inputs change after article regeneration but not export bookkeeping', () => {
+  const project = createArticleWorkspace()
+  const before = articleExportInputKey(project)
+  expect(articleExportInputKey(markProjectExported(project))).toBe(before)
+  expect(articleExportInputKey(markProjectOpened(project, 'article-review'))).toBe(before)
+  const edited = updateProjectArticleDraft(project, {
+    title: 'article',
+    bodies: { 'slide-1': 'regenerated article body' },
+  })
+  expect(articleExportInputKey(edited)).not.toBe(before)
+  expect(articleExportInputKey(updateProjectArticleTitle(project, 'renamed'))).not.toBe(before)
+  expect(articleExportInputKey({ ...project, activeArticleId: 'another-article' })).not.toBe(before)
 })

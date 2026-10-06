@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import {
@@ -10,7 +10,6 @@ import {
   removeAbsolutePath,
   writeTextFile,
 } from '../../lib/tauri/filesystem'
-import { hasCurrentArticleSections, hasCurrentArticleSummary } from '../article/article'
 import {
   getActiveArticle,
   getActiveMediaSource,
@@ -41,12 +40,6 @@ export const EXPORT_OPTIONS = [
 
 export type ExportFormat = (typeof EXPORT_OPTIONS)[number]['format']
 
-export type ExportProgress = {
-  stage: 'copying-images' | 'writing-files'
-  completed: number
-  total: number
-}
-
 export type ExportFile = {
   format: ExportFormat
   filename: string
@@ -61,7 +54,6 @@ export type ExportAsset = {
 export type ExportResult = {
   files: ExportFile[]
   assets: ExportAsset[]
-  previewHtml: string
 }
 
 export type ExportSection = {
@@ -235,17 +227,8 @@ function buildExportDocument(
     ? primaryLanguage
     : sourceLanguage
   const secondaryLanguage = bilingual ? 'en' : undefined
-  const currentSummary =
-    project.article?.summary && hasCurrentArticleSummary(project, project.article.summary.model)
-      ? project.article.summary
-      : undefined
-  const currentSections =
-    project.article?.sections &&
-    project.article.sections.sections.length > 0 &&
-    (project.article.sections.model === 'manual' ||
-      hasCurrentArticleSections(project, project.article.sections.model))
-      ? project.article.sections.sections
-      : undefined
+  const currentSummary = project.article?.summary
+  const currentSections = project.article?.sections?.sections
   const translatedSectionById = new Map(
     (translation?.sections ?? []).map((section) => [section.id, section]),
   )
@@ -358,20 +341,13 @@ function pdfFilename(title: string) {
   return `${basename}.pdf`
 }
 
-export async function exportProject(
-  project: MediaProject,
-  onProgress?: (progress: ExportProgress) => void,
-): Promise<ExportResult> {
+export async function exportProject(project: MediaProject): Promise<ExportResult> {
   const destination = await getExportDirectory(project.id, project.activeArticleId)
   const document = buildExportDocument(
     project,
     (_sourceImagePath, index) => `./assets/${imageFilename(index)}`,
   )
   const imageSections = document.sections.filter((section) => section.sourceImagePath)
-  const total = imageSections.length + EXPORT_OPTIONS.length
-  let completed = 0
-  const report = (stage: ExportProgress['stage']) => onProgress?.({ stage, completed, total })
-
   await ensureDirectory(destination)
 
   const assetsDirectory = await join(destination, 'assets')
@@ -387,7 +363,6 @@ export async function exportProject(
     ),
   ])
 
-  report('copying-images')
   const nextAssetManifest: ExportAssetManifest = {}
   await Promise.all(
     imageSections.map(async (section, sectionIndex) => {
@@ -404,14 +379,11 @@ export async function exportProject(
       ) {
         await copyFile(section.sourceImagePath, destinationPath)
       }
-      completed += 1
-      report('copying-images')
     }),
   )
   await removeStaleExportAssets(assetsDirectory, previousAssetManifest, nextAssetManifest)
   await writeTextFile(assetManifestPath, JSON.stringify(nextAssetManifest))
 
-  report('writing-files')
   const files = await Promise.all(
     EXPORT_OPTIONS.map(async (file) => {
       const filename = file.format === 'pdf' ? pdfFilename(document.title) : file.filename
@@ -429,28 +401,16 @@ export async function exportProject(
         const renderer = EXPORT_RENDERERS[file.format]
         if (!renderer) throw new Error(`${file.format}形式の出力に対応していません。`)
         await writeTextFile(file.path, renderer(document))
-        completed += 1
-        report('writing-files')
       }),
   )
 
   const pdfSourceHtmlPath = await join(destination, 'article-pdf.html')
   await writeTextFile(pdfSourceHtmlPath, renderPdfHtml(document))
-  completed += 1
-  report('writing-files')
 
   const pdfFile = files.find((file) => file.format === 'pdf')
   if (pdfFile && (await fileExists(pdfFile.path))) await removeAbsolutePath(pdfFile.path)
 
-  const previewDocument = buildExportDocument(project, (sourceImagePath) =>
-    convertFileSrc(sourceImagePath),
-  )
-
-  return {
-    files,
-    assets,
-    previewHtml: renderHtml(previewDocument),
-  }
+  return { files, assets }
 }
 
 async function copyExportAssets(assets: ExportAsset[], destinationDirectory: string) {

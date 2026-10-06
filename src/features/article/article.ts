@@ -73,20 +73,6 @@ export function articleSummaryInputFingerprint(
   ])
 }
 
-export function hasCurrentArticleSummary(
-  project: MediaProject,
-  modelId = project.article?.summary?.model ?? DEFAULT_ARTICLE_MODEL_ID,
-) {
-  const summary = project.article?.summary
-  return Boolean(
-    summary?.overview.trim() &&
-    summary.mainMessage.trim() &&
-    summary.keyPoints.length > 0 &&
-    summary.keywords.length > 0 &&
-    summary.inputFingerprint === articleSummaryInputFingerprint(project, modelId),
-  )
-}
-
 export function articleSectionsInput(project: MediaProject) {
   return articleSlidesWithSpeech(project)
     .map((slide) => {
