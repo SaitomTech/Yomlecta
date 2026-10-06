@@ -7,7 +7,12 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { getUserErrorMessage } from '../../../lib/errors'
 import type { ArticleModelId } from '../../../lib/article/articleModel'
-import type { ArticleSections, MediaProject, TranscriptBoundaryPlan } from '../../../types/project'
+import type {
+  ArticleSections,
+  ArticleSummary,
+  MediaProject,
+  TranscriptBoundaryPlan,
+} from '../../../types/project'
 import {
   hasCurrentContent,
   type ContentProcessingProgress,
@@ -23,18 +28,11 @@ import {
 
 export type ContentProcessingStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
-export function useContentProcessing(
+function savedContentProgress(
   project: MediaProject,
-  onSlideCompleted: ContentProcessingSlideCompleted,
   modelId: ArticleModelId,
-  getCurrentProject: () => MediaProject | null,
-  onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>,
-  onSectionsCompleted: (sections: ArticleSections) => void | Promise<void>,
+  includeSummary: boolean,
 ) {
-  const projectRef = useRef(project)
-  useEffect(() => {
-    projectRef.current = project
-  }, [project])
   const contextSlides = assignedArticleSlides(project)
   const targetSlides = contextSlides.some((slide) => slide.transcript?.raw.trim())
     ? contextSlides
@@ -49,7 +47,30 @@ export function useContentProcessing(
     boundariesCurrent &&
     completedFromProject === targetSlides.length &&
     targetSlides.length > 0 &&
-    hasCurrentArticleSections(project, modelId)
+    hasCurrentArticleSections(project, modelId) &&
+    (!includeSummary || Boolean(project.article?.summary))
+  return { targetSlides, completedFromProject, isUpToDate }
+}
+
+export function useContentProcessing(
+  project: MediaProject,
+  onSlideCompleted: ContentProcessingSlideCompleted,
+  modelId: ArticleModelId,
+  getCurrentProject: () => MediaProject | null,
+  onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>,
+  onSectionsCompleted: (sections: ArticleSections) => void | Promise<void>,
+  onSummaryCompleted: (summary: ArticleSummary) => void | Promise<void>,
+  includeSummary: boolean,
+) {
+  const projectRef = useRef(project)
+  useEffect(() => {
+    projectRef.current = project
+  }, [project])
+  const { targetSlides, completedFromProject, isUpToDate } = savedContentProgress(
+    project,
+    modelId,
+    includeSummary,
+  )
   const [status, setStatus] = useState<ContentProcessingStatus>('idle')
   const [stage, setStage] = useState<ArticleContentProcessingStage>('preparing-model')
   const [progress, setProgress] = useState<ContentProcessingProgress>({
@@ -96,6 +117,8 @@ export function useContentProcessing(
         onBoundaryPlanCompleted,
         getCurrentProject,
         onSectionsCompleted,
+        onSummaryCompleted,
+        includeSummary,
         onBoundaryFallbacks: setBoundaryFallbacks,
         onSlideCompleted,
         onSlideSkipped: (slideId, slideIndex, reason) => {
@@ -116,7 +139,7 @@ export function useContentProcessing(
         setError(
           getUserErrorMessage(
             processingError,
-            '本文・セクション構成の生成を完了できませんでした。アプリを再起動して、再試行してください。',
+            '記事の生成を完了できませんでした。アプリを再起動して、再試行してください。',
           ),
         )
       }
@@ -148,6 +171,7 @@ export function useContentProcessing(
   return {
     status: visibleStatus,
     stage,
+    includeSummary,
     progress: visibleProgress,
     error,
     boundaryFallbacks,

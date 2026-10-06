@@ -52,7 +52,6 @@ type ArticleStructureEditorProps = {
   summary?: ArticleSummary
   translation?: ArticleTranslation
   outputLanguage: ArticleOutputLanguage
-  summaryIsUpToDate: boolean
   summaryDisabled?: boolean
   onSaveSummary: (summary: ArticleSummary) => void | Promise<void>
   onSaveOutputLanguage: (language: ArticleOutputLanguage) => void | Promise<void>
@@ -728,7 +727,6 @@ export function ArticleStructureEditor({
   onSaveSections,
   summary,
   onSaveOutputLanguage,
-  summaryIsUpToDate,
   summaryDisabled = false,
   onSaveSummary,
   disabled = false,
@@ -906,7 +904,6 @@ export function ArticleStructureEditor({
           summary={summary}
           translation={translation}
           outputLanguage={outputLanguage}
-          isUpToDate={summaryIsUpToDate}
           disabled={summaryDisabled}
           onSave={onSaveSummary}
         />

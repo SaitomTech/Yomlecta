@@ -235,6 +235,11 @@ function combinedProcessing() {
   const controller = new AbortController()
   const input = {
     project,
+    includeSummary: false,
+    onSummaryCompleted: async (summary: NonNullable<MediaProject['article']>['summary']) => {
+      project.article!.summary = summary
+      events.push('saved-summary')
+    },
     modelId: 'openai:gpt-6-luna' as const,
     signal: controller.signal,
     getCurrentProject: () => project,
@@ -257,6 +262,27 @@ function combinedProcessing() {
     },
   }
   const runners = {
+    generateSummary: async (
+      args: Parameters<
+        typeof import('../src/features/article/summaryGenerator').runArticleSummaryGeneration
+      >[0],
+    ) => {
+      events.push('summary')
+      expect(args.project).toBe(project)
+      expect(events).toContain('saved-sections')
+      expect(args.signal).toBe(controller.signal)
+      expect(args.modelId).toBe(input.modelId)
+      args.onPreparationProgress(0.5)
+      args.onReady()
+      return {
+        model: args.modelId,
+        inputFingerprint: 'test',
+        overview: 'Overview',
+        mainMessage: 'Message',
+        keyPoints: ['Point'],
+        keywords: ['Keyword'],
+      }
+    },
     processContent: (args: Parameters<typeof runContentProcessing>[0]) =>
       runContentProcessing(args, fakeGenerator(events)),
     generateSections: async (
@@ -336,4 +362,78 @@ test('セクション生成中の停止では構成を保存しない', async ()
     }),
   ).rejects.toThrow('処理を中止しました。')
   expect(run.events).not.toContain('saved-sections')
+})
+
+test('要約が有効なら本文・セクション構成の保存後に同じモデルで要約を生成する', async () => {
+  const run = combinedProcessing()
+  await runArticleContentProcessing({ ...run.input, includeSummary: true }, run.runners)
+  expect(run.events.slice(-5)).toEqual([
+    'saved-bodies',
+    'sections',
+    'saved-sections',
+    'summary',
+    'saved-summary',
+  ])
+  expect(run.stages.slice(-2)).toEqual(['preparing-summary', 'generating-summary'])
+  expect(run.currentProject().article?.summary?.overview).toBe('Overview')
+})
+
+test('要約が無効なら既存の要約を保持し、要約モデルを呼ばない', async () => {
+  const run = combinedProcessing()
+  const summary = {
+    model: 'manual',
+    inputFingerprint: 'old',
+    overview: 'Edited',
+    mainMessage: 'Message',
+    keyPoints: ['Point'],
+    keywords: ['Keyword'],
+  }
+  run.currentProject().article!.summary = summary
+  await runArticleContentProcessing(run.input, run.runners)
+  expect(run.events).not.toContain('summary')
+  expect(run.currentProject().article?.summary).toEqual(summary)
+})
+
+test('要約に失敗しても保存済み本文・構成を再利用して再試行できる', async () => {
+  const run = combinedProcessing()
+  expect(
+    runArticleContentProcessing(
+      { ...run.input, includeSummary: true },
+      {
+        ...run.runners,
+        generateSummary: async () => {
+          throw new Error('summary failed')
+        },
+      },
+    ),
+  ).rejects.toThrow('summary failed')
+  const generatedBodies = run.events.filter((event) => event.startsWith('generate:')).length
+  const generatedSections = run.events.filter((event) => event === 'sections').length
+  await runArticleContentProcessing(
+    { ...run.input, project: run.currentProject(), includeSummary: true },
+    run.runners,
+  )
+  expect(run.events.filter((event) => event.startsWith('generate:'))).toHaveLength(generatedBodies)
+  expect(run.events.filter((event) => event === 'sections')).toHaveLength(generatedSections)
+  expect(run.events.at(-1)).toBe('saved-summary')
+})
+
+test('要約生成中の停止では要約を保存せず、保存済み本文・構成を保持する', async () => {
+  const run = combinedProcessing()
+  expect(
+    runArticleContentProcessing(
+      { ...run.input, includeSummary: true },
+      {
+        ...run.runners,
+        generateSummary: async (input) => {
+          const summary = await run.runners.generateSummary(input)
+          run.controller.abort()
+          return summary
+        },
+      },
+    ),
+  ).rejects.toThrow('処理を中止しました。')
+  expect(run.events).not.toContain('saved-summary')
+  expect(run.currentProject().article?.sections?.sections).toHaveLength(1)
+  expect(run.currentProject().slides.every((slide) => slide.transcript?.articleBody)).toBe(true)
 })

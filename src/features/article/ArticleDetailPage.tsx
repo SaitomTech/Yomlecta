@@ -363,7 +363,6 @@ export function ArticleDetailPage({
                   summary={summary}
                   translation={translation}
                   outputLanguage={outputLanguage}
-                  isUpToDate
                   readOnly
                 />
               )}
