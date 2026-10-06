@@ -132,12 +132,11 @@ function ArticleRow({
           </span>
         </span>
       </span>
-      {selected ? (
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#dcece3] text-[#1d6b50]">
+      {selected && (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#dcece3] px-2 py-1 text-[10px] font-semibold text-[#1d6b50]">
           <Check size={14} strokeWidth={2.2} aria-hidden="true" />
+          選択中
         </span>
-      ) : (
-        <ChevronRight className="shrink-0 text-[#9aada3]" size={16} strokeWidth={1.7} />
       )}
     </button>
   )
