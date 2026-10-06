@@ -111,7 +111,7 @@ function ArticleRow({
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
           <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-1.5 py-0.5 text-[9px] font-semibold text-[#496580]">
-            記事
+            記事作成フロー
           </span>
           <span className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.02em] text-[#18211f]">
             {article.title}
@@ -179,7 +179,7 @@ function VideoArticleGroup({
         <button
           className="flex min-w-0 w-full items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/25 sm:gap-4"
           type="button"
-          aria-label={`${video.title}の記事を${collapsed ? '展開' : '折りたたむ'}`}
+          aria-label={`${video.title}の記事作成フローを${collapsed ? '展開' : '折りたたむ'}`}
           aria-expanded={!collapsed}
           aria-controls={`switcher-video-${video.id}`}
           onClick={onToggle}
@@ -209,7 +209,7 @@ function VideoArticleGroup({
           id={`switcher-video-${video.id}`}
           className="border-t border-[#d8e1dc]"
           role="group"
-          aria-label={`${video.title}の記事`}
+          aria-label={`${video.title}の記事作成フロー`}
         >
           {articles.map((article) => (
             <ArticleRow
@@ -296,16 +296,16 @@ export function ArticleSwitcherPanel({
         <header className="flex items-start justify-between gap-3 border-b border-[#d8e1dc] px-5 py-5 sm:px-6">
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#71807b]">
-              ARTICLE SWITCHER
+              WORKFLOW SWITCHER
             </p>
             <h2
               id="article-switcher-title"
               className="mt-1 text-[19px] font-bold tracking-[-0.04em]"
             >
-              記事を切り替える
+              記事作成フローを切り替える
             </h2>
             <p className="mt-1 text-xs text-[#71807b]">
-              記事を選ぶと、その記事の作業フローへ移動します。
+              記事作成フローを選ぶと、そのフローへ移動します。
             </p>
           </div>
           <button
@@ -313,7 +313,7 @@ export function ArticleSwitcherPanel({
             type="button"
             onClick={onClose}
             disabled={disabled}
-            aria-label="記事の切り替えを閉じる"
+            aria-label="フローの切り替えを閉じる"
           >
             <X size={18} />
           </button>
@@ -332,8 +332,8 @@ export function ArticleSwitcherPanel({
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="記事を検索"
-              aria-label="記事を検索"
+              placeholder="記事作成フローを検索"
+              aria-label="記事作成フローを検索"
             />
           </label>
           <span className="shrink-0 rounded-full bg-[#edf4ef] px-2.5 py-1.5 text-[10px] font-semibold text-[#1d6b50]">
@@ -345,11 +345,11 @@ export function ArticleSwitcherPanel({
           {groups.knownGroups.length === 0 && groups.ungrouped.length === 0 ? (
             <div className="flex flex-col items-center px-6 py-12 text-center">
               <Search className="text-[#9aada3]" size={28} strokeWidth={1.4} />
-              <p className="mt-3 text-sm font-semibold">記事が見つかりません</p>
+              <p className="mt-3 text-sm font-semibold">記事作成フローが見つかりません</p>
               <p className="mt-1 text-xs text-[#71807b]">検索条件を変えてお試しください。</p>
             </div>
           ) : (
-            <div className="space-y-3" role="listbox" aria-label="プロジェクト内の記事">
+            <div className="space-y-3" role="listbox" aria-label="プロジェクト内の記事作成フロー">
               {groups.knownGroups.map(({ video, articles }) => (
                 <VideoArticleGroup
                   key={video.id}
@@ -370,7 +370,7 @@ export function ArticleSwitcherPanel({
                       その他
                     </span>
                     <span className="text-xs font-semibold text-[#9d422d]">
-                      元動画を確認できない記事
+                      元動画を確認できない記事作成フロー
                     </span>
                   </div>
                   <div className="overflow-hidden border-t border-dashed border-[#f1d6cc] bg-white">
@@ -392,7 +392,7 @@ export function ArticleSwitcherPanel({
 
         <footer className="flex items-center justify-between gap-3 border-t border-[#d8e1dc] px-5 py-3.5 sm:px-6">
           <p className="text-[11px] leading-5 text-[#71807b]">
-            記事の内容は記事ごとに保存されます。
+            作業内容は記事作成フローごとに保存されます。
           </p>
           <button
             className="shrink-0 rounded-[8px] px-3 py-2 text-xs font-semibold text-[#71807b] transition hover:bg-[#e8f2ec] hover:text-[#1d6b50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d6b50]/30"
