@@ -23,16 +23,20 @@ export function SegmentVideoPlayer({
   const { startTime, endTime } = getSegmentPlaybackRange(slide, sourceOffsetMs)
   const segmentDuration = Math.max(0.1, endTime - startTime)
 
-  useEffect(
-    () => () => {
-      const video = videoRef.current
+  useEffect(() => {
+    const video = videoRef.current
+    // StrictMode replays setup after cleanup on the same DOM node.
+    // Restore the source removed by cleanup before the player is reused.
+    if (video && videoSrc && video.getAttribute('src') !== videoSrc) {
+      video.setAttribute('src', videoSrc)
+    }
+    return () => {
       if (!video) return
       video.pause()
       video.removeAttribute('src')
       video.load()
-    },
-    [],
-  )
+    }
+  }, [videoSrc])
 
   const resetToSegmentStart = () => {
     const video = videoRef.current

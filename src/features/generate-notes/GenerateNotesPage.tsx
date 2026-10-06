@@ -1,6 +1,6 @@
 import { getActiveMediaSource } from '../../lib/project/articleSelectors'
 import { Play, Square } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigationDisabled } from '../../app/navigationDisabled'
 import { ArticleContextRow } from '../../components/ArticleContextRow'
 import { WorkflowBar } from '../../components/WorkflowBar'
@@ -59,6 +59,10 @@ export function GenerateNotesPage({
   const source = getActiveMediaSource(project)
   const sourceContext = getActiveArticleSourceContext(project)
   const durationMs = sourceContext.range.endMs - sourceContext.range.startMs
+  const slides = useMemo(
+    () => articleBlockViews(project.article.visualSegments, project.article.blocks),
+    [project.article.visualSegments, project.article.blocks],
+  )
   const [language, setLanguage] = useState<TranscriptionLanguage>(
     project.article.transcription?.language === 'ja' ||
       project.article.transcription?.language === 'en'
@@ -213,7 +217,7 @@ export function GenerateNotesPage({
             </section>
 
             <AnalysisResultPreview
-              slides={articleBlockViews(project.article.visualSegments, project.article.blocks)}
+              slides={slides}
               videoPath={sourceContext.source.path}
               sourceOffsetMs={sourceContext.range.startMs}
               onEdit={onOpenArticleReview}

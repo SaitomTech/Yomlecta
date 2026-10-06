@@ -8,7 +8,7 @@ import {
   Video,
   X,
 } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { SlideThumbnail } from '../../../components/SlideThumbnail'
 import { SegmentVideoPlayer } from '../../../components/SegmentVideoPlayer'
 import { formatTimestamp } from '../../../lib/time'
@@ -121,9 +121,30 @@ function SegmentVideoPreview({
   videoSrc: string | null
   sourceOffsetMs: number
 }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isNearby, setIsNearby] = useState(false)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const observer = new IntersectionObserver(([entry]) => setIsNearby(entry.isIntersecting), {
+      rootMargin: '200px',
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <div className="mt-3">
-      <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} sourceOffsetMs={sourceOffsetMs} />
+    <div ref={containerRef} className="mt-3">
+      {isNearby ? (
+        <SegmentVideoPlayer slide={slide} videoSrc={videoSrc} sourceOffsetMs={sourceOffsetMs} />
+      ) : (
+        <div aria-hidden="true">
+          <div className="aspect-video rounded-[8px] border border-[#d8e1dc] bg-[#0b1712]" />
+          <div className="mt-2 h-[46px] rounded-[8px] border border-[#d8e1dc] bg-[#f4f7f4]" />
+        </div>
+      )}
     </div>
   )
 }
@@ -186,7 +207,7 @@ function initialEdits(slide: ArticleBlockView): SlideResultEdits {
   }
 }
 
-export function AnalysisResultPreview({
+export const AnalysisResultPreview = memo(function AnalysisResultPreview({
   slides,
   onEdit,
   onSaveSlideResultEdits,
@@ -260,7 +281,12 @@ export function AnalysisResultPreview({
               <article
                 className="overflow-hidden border bg-[#fbfcfa]"
                 key={slide.id}
-                style={{ borderColor: '#d8e1dc', borderRadius: 16 }}
+                style={{
+                  borderColor: '#d8e1dc',
+                  borderRadius: 16,
+                  contentVisibility: isEditing ? 'visible' : 'auto',
+                  containIntrinsicSize: 'auto 700px',
+                }}
               >
                 <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d8e1dc] px-4 py-3.5 md:px-5">
                   <div className="flex min-w-0 items-baseline gap-x-3 gap-y-1">
@@ -388,4 +414,4 @@ export function AnalysisResultPreview({
       )}
     </section>
   )
-}
+})
