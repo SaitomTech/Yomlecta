@@ -7,15 +7,19 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { getUserErrorMessage } from '../../../lib/errors'
 import type { ArticleModelId } from '../../../lib/article/articleModel'
-import type { MediaProject, TranscriptBoundaryPlan } from '../../../types/project'
+import type { ArticleSections, MediaProject, TranscriptBoundaryPlan } from '../../../types/project'
 import {
   hasCurrentContent,
-  runContentProcessing,
   type ContentProcessingProgress,
   type ContentProcessingSlideCompleted,
   type ContentProcessingSlideSkipped,
-  type ContentProcessingStage,
 } from '../contentProcessing'
+
+import { hasCurrentArticleSections } from '../../article/article'
+import {
+  runArticleContentProcessing,
+  type ArticleContentProcessingStage,
+} from '../articleContentProcessing'
 
 export type ContentProcessingStatus = 'idle' | 'running' | 'completed' | 'cancelled' | 'error'
 
@@ -23,8 +27,9 @@ export function useContentProcessing(
   project: MediaProject,
   onSlideCompleted: ContentProcessingSlideCompleted,
   modelId: ArticleModelId,
-  getCurrentProject: (() => MediaProject | null) | undefined,
+  getCurrentProject: () => MediaProject | null,
   onBoundaryPlanCompleted: (plan: TranscriptBoundaryPlan) => Promise<void>,
+  onSectionsCompleted: (sections: ArticleSections) => void | Promise<void>,
 ) {
   const projectRef = useRef(project)
   useEffect(() => {
@@ -41,9 +46,12 @@ export function useContentProcessing(
   const sourceSlides = boundarySourceSlides(project)
   const boundariesCurrent = hasCurrentBoundaryDecisions(plan, sourceSlides, modelId)
   const isUpToDate =
-    boundariesCurrent && completedFromProject === targetSlides.length && targetSlides.length > 0
+    boundariesCurrent &&
+    completedFromProject === targetSlides.length &&
+    targetSlides.length > 0 &&
+    hasCurrentArticleSections(project, modelId)
   const [status, setStatus] = useState<ContentProcessingStatus>('idle')
-  const [stage, setStage] = useState<ContentProcessingStage>('preparing-model')
+  const [stage, setStage] = useState<ArticleContentProcessingStage>('preparing-model')
   const [progress, setProgress] = useState<ContentProcessingProgress>({
     completed: 0,
     total: 0,
@@ -76,13 +84,18 @@ export function useContentProcessing(
     setSkippedSlides([])
     setBoundaryFallbacks(0)
     try {
-      await runContentProcessing({
+      await runArticleContentProcessing({
         project: getCurrentProject?.() ?? projectRef.current,
         modelId,
         signal: controller.signal,
-        onStage: setStage,
+        onStage: (nextStage) => {
+          setStage(nextStage)
+          if (nextStage === 'preparing-sections') lastRunForce.current = false
+        },
         onProgress: setProgress,
         onBoundaryPlanCompleted,
+        getCurrentProject,
+        onSectionsCompleted,
         onBoundaryFallbacks: setBoundaryFallbacks,
         onSlideCompleted,
         onSlideSkipped: (slideId, slideIndex, reason) => {
@@ -103,7 +116,7 @@ export function useContentProcessing(
         setError(
           getUserErrorMessage(
             processingError,
-            '記事本文の生成を完了できませんでした。アプリを再起動して、再試行してください。',
+            '本文・セクション構成の生成を完了できませんでした。アプリを再起動して、再試行してください。',
           ),
         )
       }

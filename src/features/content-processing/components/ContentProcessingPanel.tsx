@@ -12,7 +12,7 @@ import { ArticleModelDetails } from '../../../components/ArticleModelDetails'
 import { ApiCostEstimate } from '../../../components/ApiCostEstimate'
 import { ModelSelect } from '../../../components/ModelSelect'
 import { ProcessingStatusRow } from '../../../components/ProcessingStatusRow'
-import { estimateOpenAiArticleCost } from '../../../lib/openai/cost'
+import { estimateOpenAiArticleCost, estimateOpenAiSectionsCost } from '../../../lib/openai/cost'
 import type { MediaProject } from '../../../types/project'
 import {
   APPLE_FOUNDATION_MODELS,
@@ -23,6 +23,7 @@ import {
 import { TEXT_MODELS } from '../../../lib/llama/textModel'
 import type { ContentProcessingController } from '../hooks/useContentProcessing'
 import { hasCurrentContent } from '../contentProcessing'
+import { articleSectionsInput, hasCurrentArticleSections } from '../../article/article'
 
 type ContentProcessingPanelProps = {
   project: MediaProject
@@ -37,10 +38,15 @@ const stageLabels = {
   'preparing-model': '文章処理モデルを確認・準備中…',
   'adjusting-boundaries': '文字起こしの区切りを調整しています…',
   processing: 'Slideごとに本文を生成中…',
+  'preparing-sections': 'セクション構成の生成モデルを確認・準備中…',
+  'generating-sections': '本文からセクション構成を生成中…',
 } as const
 
 function progressRatio(processing: ContentProcessingController) {
   if (processing.status === 'completed') return 1
+  if (processing.stage === 'preparing-sections' || processing.stage === 'generating-sections') {
+    return processing.status === 'running' ? processing.progress.stageProgress : null
+  }
   if (processing.status === 'cancelled') {
     return processing.progress.total > 0
       ? processing.progress.completed / processing.progress.total
@@ -53,17 +59,11 @@ function progressRatio(processing: ContentProcessingController) {
     : 0
 }
 
-export function ContentProcessingPanel({
-  project,
-  processing,
-  model,
-  modelId,
-  onModelChange,
-  disabled = false,
-}: ContentProcessingPanelProps) {
-  const isRunning = processing.status === 'running'
-  const isCompleted = processing.status === 'completed'
-  const total = processing.progress.total
+function estimateArticleGenerationCost(
+  project: MediaProject,
+  modelId: ArticleModelId,
+  isCompleted: boolean,
+) {
   const contextSlides = assignedArticleSlides(project)
   const targetSlides = contextSlides.filter((slide) => slide.transcript?.raw.trim())
   const slidesToProcess = isCompleted
@@ -79,25 +79,56 @@ export function ContentProcessingPanel({
       ? []
       : [BOUNDARY_PROMPT.length + boundaryPrompt(sourceSlides, index).length]
   })
+  const bodyCostEstimate = estimateOpenAiArticleCost({
+    boundaryInputs,
+    slides: slidesToProcess.map((slide) => ({
+      transcriptCharacters: slide.transcript?.raw.length ?? 0,
+      ocrCharacters: slide.ocr?.rawText.length ?? 0,
+    })),
+  })
+  const sectionsCostEstimate = estimateOpenAiSectionsCost(
+    Math.max(
+      articleSectionsInput(project).length,
+      targetSlides.reduce((total, slide) => total + (slide.transcript?.raw.length ?? 0), 0),
+    ),
+  )
+  const needsSections =
+    isCompleted || slidesToProcess.length > 0 || !hasCurrentArticleSections(project, modelId)
+  return {
+    usd: bodyCostEstimate.usd + (needsSections ? sectionsCostEstimate.usd : 0),
+    inputTokens:
+      (bodyCostEstimate.inputTokens ?? 0) +
+      (needsSections ? (sectionsCostEstimate.inputTokens ?? 0) : 0),
+    outputTokens:
+      (bodyCostEstimate.outputTokens ?? 0) +
+      (needsSections ? (sectionsCostEstimate.outputTokens ?? 0) : 0),
+  }
+}
+
+export function ContentProcessingPanel({
+  project,
+  processing,
+  model,
+  modelId,
+  onModelChange,
+  disabled = false,
+}: ContentProcessingPanelProps) {
+  const isRunning = processing.status === 'running'
+  const isCompleted = processing.status === 'completed'
+  const total = processing.progress.total
   const costEstimate =
     model.provider === 'openai'
-      ? estimateOpenAiArticleCost({
-          boundaryInputs,
-          slides: slidesToProcess.map((slide) => ({
-            transcriptCharacters: slide.transcript?.raw.length ?? 0,
-            ocrCharacters: slide.ocr?.rawText.length ?? 0,
-          })),
-        })
+      ? estimateArticleGenerationCost(project, modelId, isCompleted)
       : undefined
   return (
     <section aria-labelledby="content-processing-heading">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h3 id="content-processing-heading" className="text-[21px] font-bold tracking-[-0.05em]">
-            OCR補正を使って本文を生成
+            本文とセクション構成を生成
           </h3>
           <p className="mt-1 text-xs text-[#71807b]">
-            スライドと音声の文字起こしをもとに、記事本文を生成します。
+            スライドと音声の文字起こしをもとに本文を生成し、その後にセクション構成を自動生成します。
           </p>
         </div>
         <button
@@ -111,7 +142,7 @@ export function ContentProcessingPanel({
             void processing.process(isCompleted)
           }}
           disabled={disabled || (!isRunning && total === 0)}
-          aria-label={isRunning ? '本文の生成を停止' : undefined}
+          aria-label={isRunning ? '本文・セクション構成の生成を停止' : undefined}
         >
           {isRunning ? <Square size={13} fill="currentColor" /> : <RefreshCw size={14} />}
           {isRunning ? '停止' : isCompleted ? '再生成' : '生成を開始'}
@@ -148,16 +179,18 @@ function processingStatusMessage(processing: ContentProcessingController) {
         .map((slide) => `Slide ${slide.slideIndex + 1}`)
         .join('、')
       const message = skipped
-        ? `記事本文の生成が完了しました。${skipped}はスキップしました。`
-        : '記事本文をすべて生成しました。'
+        ? `本文とセクション構成の生成が完了しました。${skipped}はスキップしました。`
+        : '本文とセクション構成を生成しました。'
       return processing.boundaryFallbacks > 0
         ? `${message} ${processing.boundaryFallbacks}か所は元の区切りを使用しました。`
         : message
     }
     case 'cancelled':
-      return '生成を停止しました。処理済みのSlideは保存されています。'
+      return '生成を停止しました。生成済みの本文は保存されています。'
     case 'error':
-      return '記事本文の生成を完了できませんでした。'
+      return processing.stage === 'preparing-sections' || processing.stage === 'generating-sections'
+        ? '本文は保存済みです。セクション構成の生成を完了できませんでした。'
+        : '記事本文の生成を完了できませんでした。'
     default:
       return processing.progress.total === 0
         ? '先に文字起こしを実行してください。'
@@ -176,10 +209,14 @@ export function ContentProcessingStatus({
   const progress = progressRatio(processing)
   const progressLabel =
     isRunning &&
-    processing.stage === 'preparing-model' &&
+    (processing.stage === 'preparing-model' || processing.stage === 'preparing-sections') &&
     processing.progress.stageProgress !== null
       ? `モデル ${Math.round(processing.progress.stageProgress * 100)}%`
-      : `${processing.progress.completed} / ${processing.progress.total} ${processing.stage === 'adjusting-boundaries' ? 'か所' : 'slides'}`
+      : processing.stage === 'preparing-sections' || processing.stage === 'generating-sections'
+        ? processing.status === 'completed'
+          ? 'セクション構成 完了'
+          : 'セクション構成'
+        : `${processing.progress.completed} / ${processing.progress.total} ${processing.stage === 'adjusting-boundaries' ? 'か所' : 'slides'}`
   return (
     <div>
       <ProcessingStatusRow
@@ -188,7 +225,9 @@ export function ContentProcessingStatus({
         message={processingStatusMessage(processing)}
         progress={progress}
         progressLabel={progressLabel}
-        progressAriaLabel={isRunning ? stageLabels[processing.stage] : '記事本文生成の進捗'}
+        progressAriaLabel={
+          isRunning ? stageLabels[processing.stage] : '本文・セクション構成生成の進捗'
+        }
         error={processing.error}
         onRetry={processing.retry}
         retryDisabled={disabled || isRunning || processing.progress.total === 0}
