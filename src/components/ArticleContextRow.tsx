@@ -41,11 +41,7 @@ export function ArticleContextRow({
         aria-label="現在の記事作成フロー"
       >
         <div className="min-w-0 flex-1 grid grid-cols-1 gap-y-1.5">
-          <div>
-            <span className="flex w-fit shrink-0 items-center rounded-full border border-[#cbd9e6] bg-[#edf2f8] px-1.5 py-0.5 text-[9px] font-semibold text-[#496580]">
-              記事作成フロー
-            </span>
-          </div>
+          <p className="text-[10px] font-medium tracking-[0.04em] text-[#71807b]">記事タイトル</p>
           <div className="min-w-0 flex-1 grid grid-cols-1 items-center">
             {titleEditor.isEditing ? (
               <input
@@ -83,12 +79,6 @@ export function ArticleContextRow({
                 {titleEditor.error}
               </p>
             )}
-            <p
-              className="mt-0 truncate text-xs text-[#71807b]"
-              title={`プロジェクト: ${project.project.title}`}
-            >
-              プロジェクト: {project.project.title}
-            </p>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 self-center">
