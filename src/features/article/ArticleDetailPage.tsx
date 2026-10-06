@@ -27,7 +27,6 @@ import {
   formatArticleDate,
   getArticleActionLabel,
   getArticleStatus,
-  getArticleStatusLabel,
 } from './articleList'
 import {
   getArticleOutputLanguage,
@@ -36,12 +35,6 @@ import {
 } from './outputLanguage'
 import { articleLanguageLabel, resolveArticleLanguageVisibility } from './articleLanguage'
 import { ArticleSummaryResult } from './components/ArticleSummaryResult'
-
-const statusClass = {
-  done: 'bg-[#e8f2ec] text-[#1d6b50]',
-  working: 'bg-[#e8f0f5] text-[#315f75]',
-  'not-started': 'bg-[#edf2f0] text-[#53615b]',
-} as const
 
 function renderParagraphs(value: string) {
   return value
@@ -231,7 +224,21 @@ export function ArticleDetailPage({
       </div>
       <section className="mx-auto w-[calc(100%-32px)] max-w-[1200px] pb-16">
         <header className="mb-8 border-b border-[#d8e1dc] pb-6 pt-6">
-          <p className="mb-1.5 text-xs font-semibold text-[#1d6b50]">生成された記事</p>
+          <div className="mb-3 flex items-start justify-between gap-4">
+            <p className="text-xs font-semibold text-[#1d6b50]">生成された記事</p>
+            <button
+              className="inline-flex shrink-0 items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c]"
+              type="button"
+              onClick={onEdit}
+              disabled={isExportBusy}
+            >
+              <PencilLine size={14} />
+              {getArticleActionLabel(status) === '記事を見る'
+                ? '記事を編集'
+                : getArticleActionLabel(status)}
+              <ArrowRight size={14} />
+            </button>
+          </div>
           {titleVisibility.showSource && (
             <>
               {outputLanguage === 'both' && <LanguageLabel language={sourceLanguage} />}
@@ -278,27 +285,12 @@ export function ArticleDetailPage({
               </button>
             </span>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
-            <span
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass[status]}`}
-            >
-              {getArticleStatusLabel(status)}
-            </span>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <button
-              className="inline-flex items-center gap-2 rounded-[9px] bg-[#1d6b50] px-4 py-3 text-xs font-semibold text-white shadow-[0_7px_16px_rgba(29,107,80,0.17)] transition hover:bg-[#174d3c]"
-              type="button"
-              onClick={onEdit}
-              disabled={isExportBusy}
-            >
-              <PencilLine size={14} />
-              {getArticleActionLabel(status) === '記事を見る'
-                ? '記事を編集'
-                : getArticleActionLabel(status)}
-              <ArrowRight size={14} />
-            </button>
-            {article && slides.length > 0 && <ArticleExportControls exporter={exporter} />}
-          </div>
+          {article && slides.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <ArticleExportControls exporter={exporter} />
+            </div>
+          )}
         </header>
 
         {!article ? (
