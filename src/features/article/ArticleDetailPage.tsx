@@ -185,6 +185,7 @@ export function ArticleDetailPage({
   const summary = project.article?.summary
   const sections = article?.article?.sections?.sections ?? []
   const slides = article ? articleBlockViews(article.slides, article.articleBlocks) : []
+  const sourceOffsetMs = article?.sourceRange.startMs ?? 0
   const outputLanguage = getArticleOutputLanguage(project)
   const translation = getCurrentTranslationForOutputLanguage(project, outputLanguage)
   const sourceLanguage = getArticleSourceLanguage(project, translation)
@@ -270,8 +271,6 @@ export function ArticleDetailPage({
             >
               <Film size={13} aria-hidden="true" /> {project.source.name}
             </button>
-            <span aria-hidden="true">·</span>
-            <span>{formatTimestamp(project.source.metadata.durationMs)}</span>
             <span aria-hidden="true">·</span>
             <span>
               プロジェクト:{' '}
@@ -429,14 +428,16 @@ export function ArticleDetailPage({
                                   </span>
                                 </button>
                                 <figcaption className="absolute bottom-[10px] left-[10px] m-0 rounded-[5px] bg-[rgba(24,33,31,0.78)] px-[7px] py-1 font-mono text-[11px] leading-[1.3] text-[#f3faf6]">
-                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                  {formatTimestamp(sourceOffsetMs + slide.startMs)} —{' '}
+                                  {formatTimestamp(sourceOffsetMs + slide.endMs)}
                                 </figcaption>
                               </figure>
                             )}
                             <div className="content min-w-0 text-[#35443e]">
                               {!slide.image.representativeFramePath && (
                                 <p className="mb-3 font-mono text-[11px] text-[#71807b]">
-                                  {formatTimestamp(slide.startMs)} — {formatTimestamp(slide.endMs)}
+                                  {formatTimestamp(sourceOffsetMs + slide.startMs)} —{' '}
+                                  {formatTimestamp(sourceOffsetMs + slide.endMs)}
                                 </p>
                               )}
                               <ArticleSlideBody
