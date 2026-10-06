@@ -118,11 +118,12 @@ export function HomePage({
             </div>
             {articles.length > 0 && (
               <button
-                className="inline-flex items-center rounded-[8px] px-2 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#e2eee8]"
+                className="inline-flex items-center gap-1.5 rounded-[8px] px-2 py-2 text-xs font-semibold text-[#1d6b50] transition hover:bg-[#e2eee8]"
                 type="button"
                 onClick={onOpenArticles}
               >
                 すべての記事を見る
+                <ArrowRight size={14} />
               </button>
             )}
           </div>
