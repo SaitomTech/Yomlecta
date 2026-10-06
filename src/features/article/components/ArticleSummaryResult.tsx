@@ -461,7 +461,7 @@ export function ArticleSummaryResult({
 
   return (
     <section
-      className="mt-6 overflow-hidden rounded-[15px] border border-[#b7cbc0] bg-[#fbfcfa]"
+      className={`${readOnly ? '' : 'mt-6 '}overflow-hidden rounded-[15px] border border-[#b7cbc0] bg-[#fbfcfa]`}
       aria-labelledby="article-summary-result-heading"
     >
       <header className="border-b border-[#d8e1dc] bg-[#eef6f0] px-5 py-5 md:px-6">

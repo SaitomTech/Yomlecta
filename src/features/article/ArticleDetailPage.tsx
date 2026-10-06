@@ -305,7 +305,10 @@ export function ArticleDetailPage({
                   <BookOpen size={14} className="text-[#2d8062]" /> 目次
                 </div>
                 {sections.length > 0 ? (
-                  <nav className="mt-3 space-y-1.5" aria-label="記事の目次">
+                  <nav
+                    className="mt-3 max-h-[50svh] space-y-1.5 overflow-y-auto overscroll-contain pr-1 lg:max-h-[calc(100svh-112px)]"
+                    aria-label="記事の目次"
+                  >
                     {sections.map((section) => (
                       <a
                         key={section.id}
@@ -372,7 +375,7 @@ export function ArticleDetailPage({
                   </button>
                 </div>
               ) : (
-                <div>
+                <div className={summary ? 'mt-8' : undefined}>
                   {slides.map((slide, index) => {
                     const section = sections.find((candidate) =>
                       candidate.slideIds.includes(slide.id),
