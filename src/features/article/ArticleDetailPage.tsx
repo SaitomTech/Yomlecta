@@ -263,15 +263,6 @@ export function ArticleDetailPage({
             </div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[#71807b]">
-            <button
-              className="inline-flex items-center gap-1 font-semibold text-[#1d6b50] hover:underline"
-              type="button"
-              onClick={() => setIsVideoOpen(true)}
-              aria-label="元動画を再生"
-            >
-              <Film size={13} aria-hidden="true" /> {project.source.name}
-            </button>
-            <span aria-hidden="true">·</span>
             <span>
               プロジェクト:{' '}
               <button
@@ -283,6 +274,15 @@ export function ArticleDetailPage({
                 {item.projectTitle}
               </button>
             </span>
+            <span aria-hidden="true">·</span>
+            <button
+              className="inline-flex items-center gap-1 font-semibold text-[#1d6b50] hover:underline"
+              type="button"
+              onClick={() => setIsVideoOpen(true)}
+              aria-label="元動画を再生"
+            >
+              <Film size={13} aria-hidden="true" /> {project.source.name.replace(/\.[^.]+$/, '')}
+            </button>
             <time dateTime={item.createdAt}>（{formatArticleDate(item.createdAt)}作成）</time>
           </div>
           {article && slides.length > 0 && (
